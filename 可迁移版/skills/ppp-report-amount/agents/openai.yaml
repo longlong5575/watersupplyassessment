@@ -1,0 +1,6 @@
+﻿interface:
+  display_name: "金额"
+  short_description: "计算PPP绩效考核服务费金额"
+  default_prompt: "Use $ppp-report-amount to calculate PPP assessment payment amounts from scoring and fee-base tables."
+policy:
+  allow_implicit_invocation: true

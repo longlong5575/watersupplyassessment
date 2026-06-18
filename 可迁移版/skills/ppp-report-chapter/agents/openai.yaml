@@ -1,0 +1,6 @@
+﻿interface:
+  display_name: "规范"
+  short_description: "生成PPP绩效考核正式章节规范"
+  default_prompt: "Use $ppp-report-chapter to generate a formal township chapter from PPP assessment attachments."
+policy:
+  allow_implicit_invocation: true
