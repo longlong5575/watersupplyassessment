@@ -66,3 +66,11 @@ description: "根据当前资料生成台山市第二轮农村生活污水处理
 - `运行脚本/排水/报告检查/sample_render_report.py`
 
 默认先做结构检查和抽样渲染，不做慢速全文渲染。
+
+## 批量运行
+
+在项目根目录执行：
+
+`python3 可迁移版/运行脚本/排水/报告生成/batch_generate_town_reports.py`
+
+脚本默认读取项目根目录的 `资料收集`，并将17份镇街报告和1份台山市总报告写入项目根目录的 `生成`。测试时可通过 `REPORT_DATA_DIR` 和 `REPORT_OUTPUT_DIR` 指定其他输入、输出目录。
