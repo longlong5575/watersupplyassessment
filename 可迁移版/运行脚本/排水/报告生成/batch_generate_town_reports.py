@@ -22,26 +22,24 @@ OUTPUTS = PACKAGE_ROOT / "outputs"
 FINAL_DIR = Path(os.environ.get("REPORT_OUTPUT_DIR", PROJECT_ROOT / "生成"))
 DATA_DIR = Path(os.environ.get("REPORT_DATA_DIR", PROJECT_ROOT / "资料收集"))
 AMOUNT_FALLBACK = PACKAGE_ROOT / "skills" / "report" / "assets" / "common_amount_basis.xlsx"
+PROJECT_NAME = os.environ.get("REPORT_PROJECT_NAME", "项目")
+PROJECT_AUTHORITY = os.environ.get("REPORT_AUTHORITY", "实施机构")
 
-TOWNS = [
-    "北陡镇",
-    "汶村镇",
-    "白沙镇",
-    "三合镇",
-    "深井镇",
-    "四九镇",
-    "大江镇",
-    "都斛镇",
-    "赤溪镇",
-    "冲蒌镇",
-    "端芬镇",
-    "川岛镇",
-    "广海镇",
-    "海宴镇",
-    "台城街道",
-    "水步镇",
-    "斗山镇",
-]
+
+def discover_towns(data_dir):
+    towns = []
+    if not data_dir.is_dir():
+        return towns
+    for child in sorted(data_dir.iterdir(), key=lambda item: item.name):
+        if not child.is_dir():
+            continue
+        town = child.name
+        if (child / f"{town}附件资料.docx").is_file():
+            towns.append(town)
+    return towns
+
+
+TOWNS = discover_towns(DATA_DIR)
 
 def clean_text(text):
     return "".join(str(text or "").split())
@@ -481,7 +479,7 @@ def replace_overview_paragraphs(doc, target, metrics):
                 p,
                 f"各镇村级污水处理设施陆续于2021 ~2023 年正式投入商业运营，并满足考核条件。"
                 f"2022年10~12 月，我司按照《PPP项目合同》及相关绩效考核要求开展了本项目第一次村级污水处理设施绩效考核工作。"
-                f"2023年11月20日，台山市水利局与江门路航环保科技有限公司签订《PPP项目合同补充协议》。"
+                f"项目实施机构与项目公司按合同约定签订《PPP项目合同补充协议》。"
                 f"我司根据《PPP项目合同补充协议》要求开展绩效考核工作，并给出绩效考核结果与服务费挂钩结论。"
                 f"本次为2023年下半年度考核，是本项目村级设施的第三次考核，本报告涉及{target}共抽检{count}个农村污水处理设施，"
                 f"考核结果作为该镇已转运营农村污水处理设施下一周期的付费依据。",
@@ -489,8 +487,8 @@ def replace_overview_paragraphs(doc, target, metrics):
         elif text.startswith("根据台山市水利局工作安排及合同相关约定，2023年12月~2024年1月") and "17个镇街220个农村污水处理设施" in text:
             set_para_text(
                 p,
-                f"根据台山市水利局工作安排及合同相关约定，2023年12月~2024年1月，由台山市水利局、"
-                f"广东省建筑设计研究院集团股份有限公司、镇级行政主管单位等各派代表组成考核小组，"
+                f"根据{PROJECT_AUTHORITY}工作安排及合同相关约定，2023年12月~2024年1月，由{PROJECT_AUTHORITY}、"
+                f"咨询单位、镇级行政主管单位等各派代表组成考核小组，"
                 f"对{target}{count}个农村污水处理设施进行了2023年下半年度现场考核，同步开展问卷调查，"
                 f"并让各考核组成员及被考核单位现场签字确认。结合水质检测结果，查阅项目公司和实施机构提供的考核资料，"
                 f"对农村污水处理设施运维情况进行考核评分。",
@@ -506,7 +504,7 @@ def replace_overview_paragraphs(doc, target, metrics):
         elif text.startswith("根据台山市水利局工作安排及合同相关约定，本次集中对台山市第二轮农村生活污水处理设施建设PPP项目") and "17个镇街220个农村污水处理设施" in text:
             set_para_text(
                 p,
-                f"根据台山市水利局工作安排及合同相关约定，本次集中对台山市第二轮农村生活污水处理设施建设PPP项目中"
+                f"根据{PROJECT_AUTHORITY}工作安排及合同相关约定，本次集中对{PROJECT_NAME}中"
                 f"{target}农村生活污水处理设施开展2023年下半年度绩效考核，考核对象包括{target}{count}个抽检农村污水处理设施。",
             )
         elif text.startswith("2023年12月~2024年1月，考核小组对台山市17个镇共220个农村污水处理设施进行了考核"):
@@ -526,7 +524,7 @@ def replace_overview_paragraphs(doc, target, metrics):
         elif availability and text.startswith("根据台山市第二轮农村污水处理设施建设PPP项目农村污水处理设施2023年下半年度绩效考核结果") and "可用性付费每月付费建议" in text:
             set_para_text(
                 p,
-                f"根据台山市第二轮农村污水处理设施建设PPP项目农村污水处理设施2023年下半年度绩效考核结果，"
+                f"根据{PROJECT_NAME}农村污水处理设施2023年下半年度绩效考核结果，"
                 f"2024年1~6月{target}转运营农村污水处理设施可用性付费每月付费建议为{availability}元（详见表3-4）。",
             )
         elif om and text.startswith("1.转运营的第一~七批子项目运营2024年1月~6月每月的农村污水处理设施运维服务费每月付费建议为"):
@@ -549,7 +547,6 @@ def replace_overview_paragraphs(doc, target, metrics):
 
 
 def scrub_cross_town_examples(doc, target):
-    other_towns = [town for town in TOWNS if town != target]
     replacements = [
         ("六是社会服务评价方面有待提升", f"六是社会服务评价方面有待提升。{target}农村污水设施点中，镇级主管部门及公众评价存在少量扣分，后续仍需结合村民反馈意见持续提升服务质量。"),
         ("注：因在计算过程中小数点四舍五入影响", "注：因在计算过程中小数点四舍五入影响，各镇农村污水处理服务费中可用性付费之和与总可用性付费存在差异，总可用性付费保持不变。"),
@@ -567,8 +564,6 @@ def scrub_cross_town_examples(doc, target):
     ]
     for p in doc.paragraphs:
         text = p.text.strip()
-        if not any(town in text for town in other_towns):
-            continue
         for prefix, new_text in replacements:
             if text.startswith(prefix) or prefix in text:
                 set_para_text(p, new_text)
@@ -955,7 +950,7 @@ def structural_check(paths):
         doc = Document(path)
         text = "\n".join(p.text for p in doc.paragraphs)
         town = os.path.basename(path).split("2023年")[0]
-        if town == "台山市":
+        if town not in TOWNS:
             ok = all(t in text for t in TOWNS)
         else:
             unrelated = [t for t in TOWNS if t != town and f"{t}农村污水处理设施考核情况" in text]
@@ -966,6 +961,8 @@ def structural_check(paths):
 
 def main():
     os.makedirs(FINAL_DIR, exist_ok=True)
+    if not TOWNS:
+        raise FileNotFoundError(f"未在资料目录识别到镇街附件资料：{DATA_DIR}")
     delete_old_baisha_chixi_outputs()
     common_material = validate_common_material()
     metrics = collect_metrics()
@@ -975,11 +972,12 @@ def main():
     for town in TOWNS:
         generated.append(copy_existing_or_generate(town, metrics))
 
-    generated.append(generate_report(
-        TOWNS,
-        metrics,
-        "台山市2023年下半年度村级设施考核报告（正文）.docx",
-    ))
+    if len(TOWNS) > 1:
+        generated.append(generate_report(
+            TOWNS,
+            metrics,
+            f"{PROJECT_NAME}2023年下半年度村级设施考核报告（正文）.docx",
+        ))
 
     checks = structural_check(generated)
     print(f"final_dir={FINAL_DIR}")
