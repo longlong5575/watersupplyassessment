@@ -1,2 +1,8 @@
 # Local reference materials
 /本地资料/
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+.vite/
+*.log
