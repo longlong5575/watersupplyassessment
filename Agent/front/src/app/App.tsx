@@ -72,6 +72,109 @@ const PROGRESS_STEPS = [
   { id: 7, label: "输出成品报告", desc: "打包 DOCX 文件" },
 ];
 
+// ─── DefaultMethodModal ───────────────────────────────────────────────────────
+
+function DefaultMethodModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div
+        className="relative bg-card border border-border rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">默认金额计算方法</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">系统内置计算规则 · 如需调整请在下方上传新方法</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-6 py-5 space-y-5 text-sm">
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">一、考核基准金额</h3>
+            <div className="bg-muted rounded px-4 py-3 space-y-1.5 text-xs text-foreground leading-relaxed">
+              <p>年度合同服务费按合同约定的固定单价计算，基准公式如下：</p>
+              <div className="font-mono bg-card border border-border rounded px-3 py-2 text-xs mt-2">
+                基准金额 = 合同单价 × 核定处理水量（吨）
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">二、绩效扣减规则</h3>
+            <table className="w-full text-xs border border-border rounded overflow-hidden">
+              <thead>
+                <tr className="bg-muted text-muted-foreground font-mono">
+                  <th className="text-left px-3 py-2 font-medium border-b border-border">考核项目</th>
+                  <th className="text-left px-3 py-2 font-medium border-b border-border">扣减标准</th>
+                  <th className="text-left px-3 py-2 font-medium border-b border-border">上限</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ["设施运行率不达标", "每降低 1%，扣减月服务费 2%", "当月扣减上限 20%"],
+                  ["出水水质超标", "每次扣减月服务费 5%", "每月最多计 3 次"],
+                  ["运维记录缺失", "每缺 1 份扣减月服务费 1%", "当月扣减上限 10%"],
+                  ["应急响应超时", "每次扣减月服务费 3%", "不设上限"],
+                  ["设备故障未及时报告", "每次扣减月服务费 2%", "当月扣减上限 10%"],
+                ].map(([item, rule, cap]) => (
+                  <tr key={item} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-3 py-2 text-foreground">{item}</td>
+                    <td className="px-3 py-2 text-muted-foreground font-mono">{rule}</td>
+                    <td className="px-3 py-2 text-muted-foreground font-mono">{cap}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">三、奖励条款</h3>
+            <div className="bg-muted rounded px-4 py-3 text-xs text-foreground leading-relaxed space-y-1.5">
+              <p>连续 6 个月考核达标（扣减率 &lt; 5%）可申请季度奖励金，奖励额度不超过季度服务费的 <strong>3%</strong>。</p>
+              <p>全年零超标记录额外奖励年服务费的 <strong>1%</strong>。</p>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">四、最终结算公式</h3>
+            <div className="font-mono bg-muted border border-border rounded px-4 py-3 text-xs leading-loose">
+              <p>实付金额 = 基准金额</p>
+              <p className="pl-4">− Σ 各项扣减金额</p>
+              <p className="pl-4">+ 奖励金额（如适用）</p>
+            </div>
+          </section>
+
+          <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5 text-xs text-muted-foreground">
+            <Info size={13} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
+            以上为系统默认规则。如本期合同有补充协议或特殊约定，请在上传页面提供新的金额计算方法，系统将优先采用。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DefaultMethodLink() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-75 transition-opacity font-normal"
+        style={{ fontSize: "inherit" }}
+      >
+        默认金额计算方法
+        <Eye size={11} className="ml-0.5 opacity-70" />
+      </button>
+      {open && <DefaultMethodModal onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 // ─── StatusBadge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: ReportStatus }) {
@@ -264,18 +367,104 @@ function HomePage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page 2: Upload ───────────────────────────────────────────────────────────
 
-function UploadPage({ onNav }: { onNav: (p: Page) => void }) {
+function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSelectedTowns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
+  onNav: (p: Page) => void;
+  packageFiles: File[];
+  setPackageFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  selectedTowns: string[];
+  setSelectedTowns: React.Dispatch<React.SetStateAction<string[]>>;
+  methodFiles: File[];
+  setMethodFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  methodText: string;
+  setMethodText: React.Dispatch<React.SetStateAction<string>>;
+  reportPeriod: string;
+  setReportPeriod: React.Dispatch<React.SetStateAction<string>>;
+}) {
   const [dragging, setDragging] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
   const [methodOpen, setMethodOpen] = useState(false);
-  const [methodText, setMethodText] = useState("");
+  const [customTownInput, setCustomTownInput] = useState("");
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const replaceFileRef = useRef<HTMLInputElement>(null);
+  const methodFileRef = useRef<HTMLInputElement>(null);
+  const townInputRef = useRef<HTMLInputElement>(null);
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragging(false);
-    setUploaded(true);
+  const uploaded = packageFiles.length > 0;
+
+  // Extract town/street names from filenames by matching xx镇 / xx街道 patterns
+  function detectTownsFromFiles(files: File[]): string[] {
+    const seen = new Set<string>();
+    const results: string[] = [];
+    for (const f of files) {
+      const matches = f.name.match(/[一-龥]+(?:镇|街道)/g) ?? [];
+      for (const m of matches) {
+        if (!seen.has(m)) { seen.add(m); results.push(m); }
+      }
+    }
+    return results;
   }
+
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    const arr = Array.from(files);
+    setPackageFiles(prev => {
+      const existing = new Set(prev.map(f => f.name));
+      const next = [...prev, ...arr.filter(f => !existing.has(f.name))];
+      // Re-detect towns from updated file list, preserve any manually added ones
+      const detected = detectTownsFromFiles(next);
+      setSelectedTowns(prev2 => {
+        const knownSet = new Set(TOWNS);
+        const manual = prev2.filter(t => !knownSet.has(t));
+        return [...new Set([...detected, ...manual])];
+      });
+      return next;
+    });
+  }
+
+  function removePackageFile(i: number) {
+    setPackageFiles(prev => {
+      const next = prev.filter((_, j) => j !== i);
+      const detected = detectTownsFromFiles(next);
+      setSelectedTowns(prev2 => {
+        const knownSet = new Set(TOWNS);
+        const manual = prev2.filter(t => !knownSet.has(t));
+        return [...new Set([...detected, ...manual])];
+      });
+      return next;
+    });
+  }
+
+  function toggleTown(town: string) {
+    setSelectedTowns(prev =>
+      prev.includes(town) ? prev.filter(t => t !== town) : [...prev, town]
+    );
+  }
+
+  function replaceFile(i: number, files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const newFile = files[0];
+    setPackageFiles(prev => {
+      const next = prev.map((f, j) => j === i ? newFile : f);
+      const detected = detectTownsFromFiles(next);
+      setSelectedTowns(prev2 => {
+        const knownDetected = new Set(detected);
+        const manual = prev2.filter(t => !TOWNS.includes(t) && !detectedFromFiles.includes(t));
+        return [...new Set([...detected, ...manual])];
+      });
+      return next;
+    });
+    setReplaceIndex(null);
+  }
+
+  function addCustomTown() {
+    const name = customTownInput.trim();
+    if (!name || selectedTowns.includes(name)) { setCustomTownInput(""); return; }
+    setSelectedTowns(prev => [...prev, name]);
+    setCustomTownInput("");
+  }
+
+  const detectedFromFiles = detectTownsFromFiles(packageFiles);
+  const allDisplayTowns = [...new Set([...detectedFromFiles, ...selectedTowns])];
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -287,31 +476,188 @@ function UploadPage({ onNav }: { onNav: (p: Page) => void }) {
           <div className="px-6 py-4 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">资料包 <span className="text-[var(--status-error)] text-xs ml-1">必填</span></h3>
           </div>
-          <div className="p-6">
+          <div className="p-6 space-y-3">
             <div
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
+              onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
               onClick={() => fileRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-lg flex flex-col items-center justify-center py-14 cursor-pointer transition-colors ${dragging ? "border-primary bg-blue-50" : uploaded ? "border-[var(--status-success)] bg-[var(--status-success-bg)]" : "border-border hover:border-primary/40 hover:bg-muted/30"}`}
+              className={`border-2 border-dashed rounded-lg flex flex-col items-center justify-center py-10 cursor-pointer transition-colors ${dragging ? "border-primary bg-blue-50" : "border-border hover:border-primary/40 hover:bg-muted/30"}`}
             >
-              <input ref={fileRef} type="file" className="hidden" multiple onChange={() => setUploaded(true)} />
-              {uploaded ? (
-                <>
-                  <CheckCircle2 size={40} className="text-[var(--status-success)] mb-3" />
-                  <p className="text-sm font-medium text-foreground">资料收集.zip</p>
-                  <p className="text-xs text-muted-foreground mt-1">已识别到 17 个镇街 · 点击可重新选择</p>
-                </>
-              ) : (
-                <>
-                  <UploadCloud size={40} className="text-muted-foreground mb-3" />
-                  <p className="text-sm font-medium text-foreground">拖入资料包文件夹，或点击选择文件</p>
-                  <p className="text-xs text-muted-foreground mt-1.5">支持一个或多个镇街资料包 · ZIP / 文件夹均可</p>
-                </>
+              <input ref={fileRef} type="file" className="hidden" multiple onChange={(e) => addFiles(e.target.files)} />
+              <UploadCloud size={32} className="text-muted-foreground mb-2" />
+              <p className="text-sm font-medium text-foreground">拖入资料包，或点击选择文件</p>
+              <p className="text-xs text-muted-foreground mt-1">支持多个资料包同时上传 · ZIP / 文件夹均可</p>
+              <p className="text-xs text-[var(--status-warning)] mt-2 flex items-center gap-1">
+                <Info size={11} />
+                请按每个镇街单独打包上传，系统将读取文件名识别镇街名称
+              </p>
+            </div>
+
+            {/* File list */}
+            {uploaded && (
+              <div className="space-y-1.5">
+                <input
+                  ref={replaceFileRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => replaceIndex !== null && replaceFile(replaceIndex, e.target.files)}
+                />
+                <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                  <span>已添加 {packageFiles.length} 个资料包</span>
+                  <button onClick={() => fileRef.current?.click()} className="text-primary hover:underline">继续添加</button>
+                </div>
+                {packageFiles.map((f, i) => {
+                  // Match by auto-detection OR any selected town name appearing in filename
+                  const autoTowns = detectTownsFromFiles([f]);
+                  const manualMatch = selectedTowns.filter(t => !autoTowns.includes(t) && f.name.includes(t));
+                  const matchedTowns = [...autoTowns, ...manualMatch];
+                  const matched = matchedTowns.length > 0;
+                  const wasManuallyResolved = autoTowns.length === 0 && manualMatch.length > 0;
+                  return (
+                    <div key={i} className={`rounded border px-3 py-2 transition-colors ${matched ? wasManuallyResolved ? "bg-[var(--status-success-bg)] border-green-200" : "bg-muted border-transparent" : "bg-[var(--status-error-bg)] border-red-200"}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FolderOpen size={13} className={`shrink-0 ${matched ? "text-primary" : "text-[var(--status-error)]"}`} />
+                          <span className="text-xs text-foreground font-mono truncate">{f.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">({(f.size / 1024).toFixed(0)} KB)</span>
+                        </div>
+                        <div className="flex items-center gap-2 ml-2 shrink-0">
+                          {matched ? (
+                            <span className={`text-xs font-mono flex items-center gap-1 ${wasManuallyResolved ? "text-[var(--status-success)]" : "text-[var(--status-success)]"}`}>
+                              <CheckCircle2 size={11} />
+                              {matchedTowns.join("、")}
+                              {wasManuallyResolved && <span className="opacity-60">（手动匹配）</span>}
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => { setReplaceIndex(i); replaceFileRef.current?.click(); }}
+                              className="text-xs text-[var(--status-error)] hover:underline flex items-center gap-1"
+                            >
+                              <UploadCloud size={11} /> 重新上传
+                            </button>
+                          )}
+                          <button onClick={() => removePackageFile(i)} className="text-muted-foreground hover:text-foreground">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </div>
+                      {!matched && (
+                        <p className="text-xs text-[var(--status-error)] mt-1.5 flex items-center gap-1">
+                          <AlertCircle size={11} className="shrink-0" />
+                          未能识别镇街——可在下方"确认涉及镇街"手动补充，或重新上传文件名含"xx镇"/"xx街道"的文件
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Report period */}
+        <div className="bg-card border border-border rounded-lg">
+          <div className="px-6 py-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">报告周期 <span className="text-[var(--status-error)] text-xs ml-1">必填</span></h3>
+          </div>
+          <div className="px-6 py-4">
+            <input
+              type="text"
+              value={reportPeriod}
+              onChange={(e) => setReportPeriod(e.target.value)}
+              placeholder="例如：2023年下半年度、2024年第一季度"
+              className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              style={{ background: "var(--input-background)" }}
+            />
+          </div>
+        </div>
+
+        {/* Town confirmation */}
+        {uploaded && (
+          <div className="bg-card border border-border rounded-lg">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">确认涉及镇街</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {detectedFromFiles.length > 0
+                    ? `从文件名识别到 ${detectedFromFiles.length} 个镇街，可手动调整`
+                    : "未能从文件名识别镇街，请手动添加"}
+                </p>
+              </div>
+              <span className="font-mono text-xs text-foreground">已选 {selectedTowns.length} 个</span>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              {/* Detected / selected tags */}
+              {allDisplayTowns.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {allDisplayTowns.map(town => {
+                    const checked = selectedTowns.includes(town);
+                    const autoDetected = detectedFromFiles.includes(town);
+                    const hasFile = packageFiles.some(f => f.name.includes(town));
+                    return (
+                      <div key={town} className="flex flex-col items-start gap-0.5">
+                        <div
+                          onClick={() => toggleTown(town)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer transition-colors text-xs select-none ${
+                            !checked
+                              ? "border-border text-muted-foreground line-through hover:border-primary/40"
+                              : hasFile
+                                ? "border-[var(--status-success)] bg-[var(--status-success-bg)] text-[var(--status-success)] font-medium"
+                                : "border-orange-300 bg-orange-50 text-orange-700 font-medium"
+                          }`}
+                        >
+                          {checked
+                            ? hasFile ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />
+                            : <X size={11} />}
+                          {town}
+                          {autoDetected && checked && (
+                            <span className="opacity-50 font-normal font-mono">自动</span>
+                          )}
+                        </div>
+                        {checked && !hasFile && (
+                          <span className="text-xs text-orange-600 pl-1 flex items-center gap-1">
+                            <AlertCircle size={10} className="shrink-0" />
+                            未找到匹配文件
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Manual input */}
+              <div className="flex gap-2">
+                <input
+                  ref={townInputRef}
+                  type="text"
+                  value={customTownInput}
+                  onChange={(e) => setCustomTownInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addCustomTown()}
+                  placeholder="手动添加镇街名称…"
+                  className="flex-1 border border-border rounded px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  style={{ background: "var(--input-background)" }}
+                />
+                <button
+                  onClick={addCustomTown}
+                  disabled={!customTownInput.trim()}
+                  className="px-3 py-1.5 rounded text-xs font-medium text-primary-foreground disabled:opacity-40 transition-opacity hover:opacity-90"
+                  style={{ background: "var(--primary)" }}
+                >
+                  添加
+                </button>
+              </div>
+
+              {selectedTowns.length === 0 && (
+                <div className="flex items-center gap-2 text-xs text-[var(--status-error)]">
+                  <AlertCircle size={13} className="shrink-0" />
+                  请至少确认一个镇街
+                </div>
               )}
             </div>
           </div>
-        </div>
+        )}
 
         {/* Optional: calculation method */}
         <div className="bg-card border border-border rounded-lg">
@@ -330,18 +676,47 @@ function UploadPage({ onNav }: { onNav: (p: Page) => void }) {
               <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
                 <Info size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  未填写时，系统将使用<strong className="text-foreground">默认金额计算方法</strong>继续生成报告，不影响主流程。
+                  未填写时，系统将使用<strong className="text-foreground font-semibold"> <DefaultMethodLink /> </strong>继续生成报告，不影响主流程。
                 </p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">上传合同或补充协议（可选）</label>
+                <input
+                  ref={methodFileRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept=".pdf,.doc,.docx,.xls,.xlsx"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length) setMethodFiles(prev => [...prev, ...files]);
+                  }}
+                />
                 <div
                   className="border border-dashed border-border rounded p-4 flex items-center gap-3 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors"
-                  onClick={() => {}}
+                  onClick={() => methodFileRef.current?.click()}
                 >
                   <UploadCloud size={16} className="text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">上传合同、补充协议或金额计算表</span>
                 </div>
+                {methodFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {methodFiles.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <FileText size={12} className="text-primary shrink-0" />
+                          <span className="text-xs text-foreground truncate max-w-xs">{f.name}</span>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setMethodFiles(prev => prev.filter((_, j) => j !== i)); }}
+                          className="text-muted-foreground hover:text-foreground ml-2"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">或填写说明（可选）</label>
@@ -368,8 +743,8 @@ function UploadPage({ onNav }: { onNav: (p: Page) => void }) {
           </button>
           <button
             onClick={() => onNav("confirm")}
-            disabled={!uploaded}
-            className={`inline-flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-opacity ${uploaded ? "text-primary-foreground hover:opacity-90" : "opacity-40 cursor-not-allowed text-primary-foreground"}`}
+            disabled={!uploaded || selectedTowns.length === 0 || !reportPeriod.trim()}
+            className={`inline-flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-opacity ${uploaded && selectedTowns.length > 0 && reportPeriod.trim() ? "text-primary-foreground hover:opacity-90" : "opacity-40 cursor-not-allowed text-primary-foreground"}`}
             style={{ background: "var(--primary)" }}
           >
             下一步：确认生成
@@ -388,17 +763,7 @@ const OUTPUT_OPTIONS = [
   { id: "summary", label: "生成汇总报告", desc: "额外生成一份涵盖全部镇街的综合考核报告" },
 ] as const;
 
-function OutputOptions() {
-  const [selected, setSelected] = useState<Set<string>>(new Set(["separate", "summary"]));
-
-  function toggle(id: string) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
+function OutputOptions({ selected, onToggle }: { selected: Set<string>; onToggle: (id: string) => void }) {
   const noneSelected = selected.size === 0;
 
   return (
@@ -410,7 +775,7 @@ function OutputOptions() {
         {OUTPUT_OPTIONS.map(opt => {
           const active = selected.has(opt.id);
           return (
-            <div key={opt.id} className="flex items-start gap-3 cursor-pointer group" onClick={() => toggle(opt.id)}>
+            <div key={opt.id} className="flex items-start gap-3 cursor-pointer group" onClick={() => onToggle(opt.id)}>
               <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${active ? "border-primary" : "border-border group-hover:border-primary/50"}`}>
                 {active && <div className="w-2 h-2 rounded-full" style={{ background: "var(--primary)" }} />}
               </div>
@@ -436,8 +801,19 @@ function OutputOptions() {
 
 // ─── Page 3: Confirm ──────────────────────────────────────────────────────────
 
-function ConfirmPage({ onNav }: { onNav: (p: Page) => void }) {
-  const detectedTowns = ["北陡镇", "白沙镇", "大江镇", "赤溪镇"];
+function ConfirmPage({ onNav, packageFiles, selectedTowns, methodFiles, methodText, outputSelected, onToggleOutput, reportPeriod }: {
+  onNav: (p: Page) => void;
+  packageFiles: File[];
+  selectedTowns: string[];
+  methodFiles: File[];
+  methodText: string;
+  outputSelected: Set<string>;
+  onToggleOutput: (id: string) => void;
+  reportPeriod: string;
+}) {
+  const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
+  const packageNames = packageFiles.map(f => f.name).join("、");
+
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -450,47 +826,80 @@ function ConfirmPage({ onNav }: { onNav: (p: Page) => void }) {
             <h3 className="text-sm font-semibold text-foreground">系统已识别以下信息</h3>
           </div>
           <div className="px-6 py-5 space-y-4">
-            <Row label="资料包名称" value="资料收集" mono />
-            <Row label="已识别镇街" value={`${detectedTowns.length} 个`} mono extra={
+            <Row label="资料包" value={`${packageFiles.length} 个文件`} mono extra={
+              <div className="flex flex-col gap-1 mt-1.5">
+                {packageFiles.map((f, i) => (
+                  <span key={i} className="text-xs text-muted-foreground font-mono truncate">{f.name}</span>
+                ))}
+              </div>
+            } />
+            <Row label="已识别镇街" value={`${selectedTowns.length} 个`} mono extra={
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {detectedTowns.map(t => (
+                {selectedTowns.map(t => (
                   <span key={t} className="inline-flex px-2 py-0.5 bg-secondary text-secondary-foreground rounded text-xs font-mono">{t}</span>
                 ))}
               </div>
             } />
-            <Row label="报告周期" value="2023年下半年度" mono />
+            <Row label="报告周期" value={reportPeriod} mono />
             <div className="h-px bg-border" />
-            <Row label="新的金额计算方法" value="未提供" valueClass="text-muted-foreground" />
-            <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
-              <AlertCircle size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
-              <p className="text-xs text-muted-foreground">
-                未提供新的金额计算方法，系统将<strong className="text-foreground">使用默认金额计算方法</strong>继续生成报告。
-              </p>
-            </div>
+            <Row
+              label="新的金额计算方法"
+              value={hasMethod ? "已提供" : "未提供"}
+              valueClass={hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}
+            />
+            {hasMethod ? (
+              <div className="space-y-1">
+                {methodFiles.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                    <FileText size={12} className="text-primary shrink-0" />
+                    {f.name}
+                  </div>
+                ))}
+                {methodText.trim() && (
+                  <div className="text-xs text-muted-foreground bg-muted rounded px-3 py-2 leading-relaxed">
+                    {methodText.trim()}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
+                <AlertCircle size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground">
+                  未提供新的金额计算方法，系统将使用 <DefaultMethodLink /> 继续生成报告。
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Output options */}
-        <OutputOptions />
+        <OutputOptions selected={outputSelected} onToggle={onToggleOutput} />
 
         {/* Expected output */}
-        <div className="bg-card border border-border rounded-lg">
-          <div className="px-6 py-4 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">预期输出</h3>
-          </div>
-          <div className="px-6 py-4 space-y-2">
-            {detectedTowns.map(town => (
-              <div key={town} className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
-                <FileText size={13} className="text-primary shrink-0" />
-                {town}2023年下半年度村级设施考核报告（正文）.docx
-              </div>
-            ))}
-            <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
-              <FileText size={13} className="text-[var(--accent)] shrink-0" />
-              2023年下半年度村级设施绩效考核综合报告（汇总）.docx
+        {outputSelected.size > 0 && (
+          <div className="bg-card border border-border rounded-lg">
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">预期输出</h3>
+              <span className="text-xs text-muted-foreground font-mono">
+                {(outputSelected.has("separate") ? selectedTowns.length : 0) + (outputSelected.has("summary") ? 1 : 0)} 份文件
+              </span>
+            </div>
+            <div className="px-6 py-4 space-y-2">
+              {outputSelected.has("separate") && selectedTowns.map(town => (
+                <div key={town} className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+                  <FileText size={13} className="text-primary shrink-0" />
+                  {town}{reportPeriod}村级设施考核报告（正文）.docx
+                </div>
+              ))}
+              {outputSelected.has("summary") && (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
+                  <FileText size={13} className="text-[var(--accent)] shrink-0" />
+                  {reportPeriod}村级设施绩效考核综合报告（汇总）.docx
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
@@ -525,11 +934,24 @@ function Row({ label, value, mono, valueClass, extra }: { label: string; value: 
 
 // ─── Page 4: Progress ─────────────────────────────────────────────────────────
 
-function ProgressPage({ onNav }: { onNav: (p: Page) => void }) {
+function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, outputSelected }: {
+  onNav: (p: Page) => void;
+  onStart: () => void;
+  methodFiles: File[];
+  methodText: string;
+  selectedTowns: string[];
+  outputSelected: Set<string>;
+}) {
+  const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
+  const calcMethodLabel = hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法";
+
   const [step, setStep] = useState(0);
-  const [logs, setLogs] = useState<string[]>([
+  useEffect(() => { onStart(); }, []);
+  const [logs, setLogs] = useState<string[]>(() => [
     "任务初始化完成",
-    "未提供新的金额计算方法，已使用默认金额计算方法。",
+    hasMethod
+      ? "已读取提供的金额计算方法。"
+      : "未提供新的金额计算方法，已使用默认金额计算方法。",
   ]);
 
   useEffect(() => {
@@ -539,12 +961,12 @@ function ProgressPage({ onNav }: { onNav: (p: Page) => void }) {
       setLogs(prev => {
         const msgs: Record<number, string> = {
           0: "正在解压资料包…",
-          1: "已识别 4 个镇街附件",
-          2: "考核数据抽取完成，共 48 项指标",
-          3: "金额核算完成，使用默认计算方法",
+          1: `已识别 ${selectedTowns.length} 个镇街附件`,
+          2: `考核数据抽取完成，共 ${selectedTowns.length * 12} 项指标`,
+          3: `金额核算完成，${calcMethodLabel}`,
           4: "正在生成正式报告…",
           5: "报告校验通过",
-          6: "成品报告已输出，共 5 份文件",
+          6: `成品报告已输出，共 ${(outputSelected.has("separate") ? selectedTowns.length : 0) + (outputSelected.has("summary") ? 1 : 0)} 份文件`,
         };
         return [...prev, msgs[step] ?? ""];
       });
@@ -583,7 +1005,9 @@ function ProgressPage({ onNav }: { onNav: (p: Page) => void }) {
                     </div>
                     <div className="flex-1">
                       <p className={`text-sm font-medium ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{s.label}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{s.desc}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {s.id === 4 ? (hasMethod ? "使用提供的金额计算方法" : "使用默认金额计算方法") : s.desc}
+                      </p>
                     </div>
                     <div className="text-xs font-mono">
                       {isDone && <span className="text-[var(--status-success)]">完成</span>}
@@ -628,9 +1052,9 @@ function ProgressPage({ onNav }: { onNav: (p: Page) => void }) {
                 <div>
                   <p className="text-xs text-muted-foreground mb-1.5">系统提示</p>
                   <div className="space-y-1.5">
-                    <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                      <Info size={12} className="mt-0.5 shrink-0 text-[var(--status-warning)]" />
-                      未提供新的金额计算方法，已使用默认金额计算方法。
+                    <div className={`flex items-start gap-2 text-xs ${hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}`}>
+                      <Info size={12} className={`mt-0.5 shrink-0 ${hasMethod ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"}`} />
+                      {hasMethod ? "已读取提供的金额计算方法。" : "未提供新的金额计算方法，已使用默认金额计算方法。"}
                     </div>
                     {step >= 4 && (
                       <div className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -680,13 +1104,48 @@ function ProgressPage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page 5: Result ───────────────────────────────────────────────────────────
 
-function ResultPage({ onNav }: { onNav: (p: Page) => void }) {
+const TOWN_REPORTS: Report[] = [
+  { id: "r1", name: "北陡镇2023年下半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年下半年度", status: "completed", size: "1.2 MB", createdAt: "2024-01-15 15:32" },
+  { id: "r2", name: "白沙镇2023年下半年度村级设施考核报告（正文）", town: "白沙镇", period: "2023年下半年度", status: "completed", size: "1.1 MB", createdAt: "2024-01-15 15:32" },
+  { id: "r3", name: "大江镇2023年下半年度村级设施考核报告（正文）", town: "大江镇", period: "2023年下半年度", status: "completed", size: "1.3 MB", createdAt: "2024-01-15 15:32" },
+  { id: "r4", name: "赤溪镇2023年下半年度村级设施考核报告（正文）", town: "赤溪镇", period: "2023年下半年度", status: "completed", size: "0.9 MB", createdAt: "2024-01-15 15:32" },
+];
+const SUMMARY_REPORT: Report = { id: "r5", name: "2023年下半年度村级设施绩效考核综合报告（汇总）", town: "全区汇总", period: "2023年下半年度", status: "completed", size: "4.8 MB", createdAt: "2024-01-15 15:33" };
+
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分钟`;
+}
+
+function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod }: {
+  onNav: (p: Page) => void;
+  packageFiles: File[];
+  methodFiles: File[];
+  methodText: string;
+  outputSelected: Set<string>;
+  selectedTowns: string[];
+  elapsedSeconds: number | null;
+  generatedAt: string | null;
+  reportPeriod: string;
+}) {
+  const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
+
+  const nowStr = generatedAt ?? new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-");
+  const townReports: Report[] = selectedTowns.map((town, i) => ({
+    id: `r${i + 1}`,
+    name: `${town}${reportPeriod}村级设施考核报告（正文）`,
+    town,
+    period: reportPeriod,
+    status: "completed" as ReportStatus,
+    size: `${((i * 137 % 8 + 8) / 10).toFixed(1)} MB`,
+    createdAt: nowStr,
+  }));
+
+  const summaryReport: Report = { id: "r-summary", name: `${reportPeriod}村级设施绩效考核综合报告（汇总）`, town: "全区汇总", period: reportPeriod, status: "completed", size: "4.8 MB", createdAt: nowStr };
   const reports: Report[] = [
-    { id: "r1", name: "北陡镇2023年下半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年下半年度", status: "completed", size: "1.2 MB", createdAt: "2024-01-15 15:32" },
-    { id: "r2", name: "白沙镇2023年下半年度村级设施考核报告（正文）", town: "白沙镇", period: "2023年下半年度", status: "completed", size: "1.1 MB", createdAt: "2024-01-15 15:32" },
-    { id: "r3", name: "大江镇2023年下半年度村级设施考核报告（正文）", town: "大江镇", period: "2023年下半年度", status: "completed", size: "1.3 MB", createdAt: "2024-01-15 15:32" },
-    { id: "r4", name: "赤溪镇2023年下半年度村级设施考核报告（正文）", town: "赤溪镇", period: "2023年下半年度", status: "completed", size: "0.9 MB", createdAt: "2024-01-15 15:32" },
-    { id: "r5", name: "2023年下半年度村级设施绩效考核综合报告（汇总）", town: "全区汇总", period: "2023年下半年度", status: "completed", size: "4.8 MB", createdAt: "2024-01-15 15:33" },
+    ...(outputSelected.has("separate") ? townReports : []),
+    ...(outputSelected.has("summary") ? [summaryReport] : []),
   ];
 
   return (
@@ -702,7 +1161,7 @@ function ResultPage({ onNav }: { onNav: (p: Page) => void }) {
               <CheckCircle size={24} className="text-[var(--status-success)] shrink-0" />
               <div>
                 <p className="text-sm font-semibold text-foreground">全部报告生成完毕</p>
-                <p className="text-xs text-muted-foreground mt-0.5">共生成 5 份报告 · 耗时约 2 分 14 秒</p>
+                <p className="text-xs text-muted-foreground mt-0.5">共生成 {reports.length} 份报告 · 耗时 {elapsedSeconds !== null ? formatElapsed(elapsedSeconds) : "—"}</p>
               </div>
               <button className="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold text-white hover:opacity-90 transition-opacity"
                 style={{ background: "var(--status-success)" }}>
@@ -786,7 +1245,9 @@ function ResultPage({ onNav }: { onNav: (p: Page) => void }) {
                   { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "资料包已处理" },
                   { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "金额核算完成" },
                   { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "报告校验通过" },
-                  { icon: Info, color: "text-[var(--status-warning)]", text: "使用默认金额计算方法" },
+                  hasMethod
+                    ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用提供的金额计算方法" }
+                    : { icon: Info, color: "text-[var(--status-warning)]", text: "使用默认金额计算方法" },
                 ].map(({ icon: Icon, color, text }) => (
                   <div key={text} className={`flex items-center gap-2 text-xs ${color}`}>
                     <Icon size={13} className="shrink-0" />
@@ -797,13 +1258,15 @@ function ResultPage({ onNav }: { onNav: (p: Page) => void }) {
             </div>
             <div className="bg-card border border-border rounded-lg px-4 py-4 space-y-2">
               <p className="text-xs text-muted-foreground font-mono">生成时间</p>
-              <p className="text-xs text-foreground font-mono">2024-01-15 15:33:48</p>
+              <p className="text-xs text-foreground font-mono">{nowStr}</p>
               <div className="h-px bg-border" />
               <p className="text-xs text-muted-foreground font-mono">报告周期</p>
-              <p className="text-xs text-foreground font-mono">2023年下半年度</p>
+              <p className="text-xs text-foreground font-mono">{reportPeriod}</p>
               <div className="h-px bg-border" />
               <p className="text-xs text-muted-foreground font-mono">资料包</p>
-              <p className="text-xs text-foreground font-mono">资料收集</p>
+              {packageFiles.map((f, i) => (
+                <p key={i} className="text-xs text-foreground font-mono truncate">{f.name}</p>
+              ))}
             </div>
           </div>
         </div>
@@ -890,14 +1353,84 @@ function HistoryPage({ onNav }: { onNav: (p: Page) => void }) {
 
 export default function App() {
   const [page, setPage] = useState<Page>("home");
+  const [packageFiles, setPackageFiles] = useState<File[]>([]);
+  const [selectedTowns, setSelectedTowns] = useState<string[]>([]);
+  const [methodFiles, setMethodFiles] = useState<File[]>([]);
+  const [methodText, setMethodText] = useState("");
+  const [outputSelected, setOutputSelected] = useState<Set<string>>(new Set(["separate", "summary"]));
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [reportPeriod, setReportPeriod] = useState("");
+  const progressStartRef = useRef<number | null>(null);
+
+  function toggleOutput(id: string) {
+    setOutputSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   function renderPage() {
     switch (page) {
       case "home": return <HomePage onNav={setPage} />;
-      case "upload": return <UploadPage onNav={setPage} />;
-      case "confirm": return <ConfirmPage onNav={setPage} />;
-      case "progress": return <ProgressPage onNav={setPage} />;
-      case "result": return <ResultPage onNav={setPage} />;
+      case "upload": return (
+        <UploadPage
+          onNav={setPage}
+          packageFiles={packageFiles}
+          setPackageFiles={setPackageFiles}
+          selectedTowns={selectedTowns}
+          setSelectedTowns={setSelectedTowns}
+          methodFiles={methodFiles}
+          setMethodFiles={setMethodFiles}
+          methodText={methodText}
+          setMethodText={setMethodText}
+          reportPeriod={reportPeriod}
+          setReportPeriod={setReportPeriod}
+        />
+      );
+      case "confirm": return (
+        <ConfirmPage
+          onNav={setPage}
+          packageFiles={packageFiles}
+          selectedTowns={selectedTowns}
+          methodFiles={methodFiles}
+          methodText={methodText}
+          outputSelected={outputSelected}
+          onToggleOutput={toggleOutput}
+          reportPeriod={reportPeriod}
+        />
+      );
+      case "progress": return (
+        <ProgressPage
+          onNav={(p) => {
+            if (p === "result" && progressStartRef.current !== null) {
+              setElapsedSeconds(Math.round((Date.now() - progressStartRef.current) / 1000));
+              const now = new Date();
+              setGeneratedAt(now.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\//g, "-"));
+            }
+            setPage(p);
+          }}
+          onStart={() => { progressStartRef.current = Date.now(); }}
+          methodFiles={methodFiles}
+          methodText={methodText}
+          selectedTowns={selectedTowns}
+          outputSelected={outputSelected}
+        />
+      );
+      case "result": return (
+        <ResultPage
+          onNav={setPage}
+          packageFiles={packageFiles}
+          methodFiles={methodFiles}
+          methodText={methodText}
+          outputSelected={outputSelected}
+          selectedTowns={selectedTowns}
+          elapsedSeconds={elapsedSeconds}
+          generatedAt={generatedAt}
+          reportPeriod={reportPeriod}
+        />
+      );
       case "history": return <HistoryPage onNav={setPage} />;
     }
   }
