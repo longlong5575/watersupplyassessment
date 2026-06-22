@@ -381,6 +381,59 @@ function UploadPage({ onNav }: { onNav: (p: Page) => void }) {
   );
 }
 
+// ─── OutputOptions ────────────────────────────────────────────────────────────
+
+const OUTPUT_OPTIONS = [
+  { id: "separate", label: "按镇分别生成", desc: "每个镇街单独输出一份 DOCX 报告" },
+  { id: "summary", label: "生成汇总报告", desc: "额外生成一份涵盖全部镇街的综合考核报告" },
+] as const;
+
+function OutputOptions() {
+  const [selected, setSelected] = useState<Set<string>>(new Set(["separate", "summary"]));
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const noneSelected = selected.size === 0;
+
+  return (
+    <div className="bg-card border border-border rounded-lg">
+      <div className="px-6 py-4 border-b border-border">
+        <h3 className="text-sm font-semibold text-foreground">推荐输出方式</h3>
+      </div>
+      <div className="px-6 py-5 space-y-3">
+        {OUTPUT_OPTIONS.map(opt => {
+          const active = selected.has(opt.id);
+          return (
+            <div key={opt.id} className="flex items-start gap-3 cursor-pointer group" onClick={() => toggle(opt.id)}>
+              <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${active ? "border-primary" : "border-border group-hover:border-primary/50"}`}>
+                {active && <div className="w-2 h-2 rounded-full" style={{ background: "var(--primary)" }} />}
+              </div>
+              <div>
+                <p className={`text-sm font-medium transition-colors ${active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground"}`}>
+                  {opt.label}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
+              </div>
+            </div>
+          );
+        })}
+        {noneSelected && (
+          <div className="flex items-center gap-2 text-xs text-[var(--status-error)]">
+            <AlertCircle size={13} className="shrink-0" />
+            请至少选择一项输出方式
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Page 3: Confirm ──────────────────────────────────────────────────────────
 
 function ConfirmPage({ onNav }: { onNav: (p: Page) => void }) {
@@ -418,27 +471,7 @@ function ConfirmPage({ onNav }: { onNav: (p: Page) => void }) {
         </div>
 
         {/* Output options */}
-        <div className="bg-card border border-border rounded-lg">
-          <div className="px-6 py-4 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">推荐输出方式</h3>
-          </div>
-          <div className="px-6 py-5 space-y-3">
-            {[
-              { id: "separate", label: "按镇分别生成", desc: "每个镇街单独输出一份 DOCX 报告", checked: true },
-              { id: "summary", label: "同时生成汇总报告", desc: "额外生成一份涵盖全部镇街的综合考核报告", checked: true },
-            ].map(opt => (
-              <label key={opt.id} className="flex items-start gap-3 cursor-pointer group">
-                <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${opt.checked ? "border-primary bg-primary" : "border-border"}`}>
-                  {opt.checked && <CheckCircle2 size={10} className="text-white" />}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{opt.label}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
+        <OutputOptions />
 
         {/* Expected output */}
         <div className="bg-card border border-border rounded-lg">
@@ -803,14 +836,6 @@ function HistoryPage({ onNav }: { onNav: (p: Page) => void }) {
               </button>
             ))}
           </div>
-          <button
-            onClick={() => onNav("upload")}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-            style={{ background: "var(--primary)" }}
-          >
-            <Plus size={15} />
-            生成新报告
-          </button>
         </div>
 
         {/* Table */}
