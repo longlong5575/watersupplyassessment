@@ -457,54 +457,23 @@ function P0City({ onNext }: { onNext: (c: string) => void }) {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ city, onCityChange, onNext, submittedData, onViewSubmitted }: {
-  city: string;
-  onCityChange: (city: string) => void;
+function P1Town({ onNext, submittedData, onViewSubmitted }: {
   onNext: (t: string) => void;
   submittedData: Record<string, VillageRecord[]>;
   onViewSubmitted: () => void;
 }) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
-  const [cityOpen, setCityOpen] = useState(false);
-  const cities = ["阳江市", "茂名市", "湛江市", "江门市", "清远市", "韶关市"];
   const towns = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"];
 
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
-        <div className="flex items-start justify-between gap-3 mb-1 mt-1 relative">
+        <div className="flex items-center gap-1.5 mb-1 mt-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <MapPin className="w-3.5 h-3.5 text-primary-foreground/55 shrink-0" />
             <span className="text-xs text-primary-foreground/55 tracking-wide truncate">农村污水PPP现场考核</span>
           </div>
-          <button
-            onClick={() => setCityOpen(v => !v)}
-            className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs text-primary-foreground"
-          >
-            {city}<ChevronDown className="w-3 h-3" />
-          </button>
-          {cityOpen && (
-            <div className="absolute right-0 top-7 z-30 w-44 overflow-hidden rounded-lg border border-white/10 bg-white shadow-lg">
-              <div className="p-2 border-b border-border">
-                <input
-                  value={city}
-                  onChange={e => onCityChange(e.target.value)}
-                  placeholder="输入城市名称"
-                  className="w-full rounded-md border border-border px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
-                />
-              </div>
-              {cities.map(c => (
-                <button
-                  key={c}
-                  onClick={() => { onCityChange(c); setCityOpen(false); }}
-                  className={`w-full px-3 py-2 text-left text-xs ${city === c ? "bg-primary/10 text-primary font-semibold" : "text-foreground"}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核镇街</h1>
       </div>
@@ -667,7 +636,9 @@ function P2Village({ town, onBack, onNext }: {
 
 // ==================== PAGE 2b: FACILITY TYPE ====================
 
-const ALL_FACILITY_TYPES: FacilityType[] = ["treatment", "network", "survey", "water_quality"];
+type PrimaryFacilityType = "treatment" | "network";
+
+const PRIMARY_FACILITY_TYPES: PrimaryFacilityType[] = ["treatment", "network"];
 
 const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; icon: string }> = {
   treatment: { label: "污水处理设施", sub: "含处理设备及附属构筑物", icon: "🏭" },
@@ -676,15 +647,60 @@ const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; ico
   water_quality: { label: "水质抽检情况", sub: "填写出水抽检指标及结论", icon: "💧" },
 };
 
-function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmitVillage }: {
+function P2bFacilityChoice({ town, village, onBack, onSelect }: {
+  town: string;
+  village: string;
+  onBack: () => void;
+  onSelect: (type: PrimaryFacilityType) => void;
+}) {
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <div className="text-xs text-primary-foreground/55 mb-1">{town} · {village}</div>
+        <h1 className="text-xl font-semibold text-primary-foreground">选择考核设施类型</h1>
+        <p className="text-xs text-primary-foreground/55 mt-1">两类设施二选一，满分均为 100 分</p>
+      </div>
+
+      <div className="flex-1 px-4 py-5 space-y-3">
+        {PRIMARY_FACILITY_TYPES.map(type => {
+          const info = FACILITY_TYPE_INFO[type];
+          return (
+            <button
+              key={type}
+              onClick={() => onSelect(type)}
+              className="w-full text-left rounded-xl border-2 border-border bg-white p-5 transition-colors active:bg-gray-50"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center text-2xl shrink-0">{info.icon}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-base font-semibold text-foreground">{info.label}</div>
+                  <p className="text-xs text-muted-foreground mt-1">{info.sub}</p>
+                  <p className="text-xs text-primary font-medium mt-2">按该类设施标准计 100 分</p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function P2bFacilityType({ town, village, primaryFacilityType, typeProgress, onBack, onEnter, onSubmitVillage }: {
   town: string; village: string;
+  primaryFacilityType: PrimaryFacilityType;
   typeProgress: Partial<Record<FacilityType, boolean>>;
   onBack: () => void;
   onEnter: (t: FacilityType) => void;
   onSubmitVillage: () => void;
 }) {
-  const doneCount = ALL_FACILITY_TYPES.filter(t => typeProgress[t]).length;
-  const allDone = doneCount === ALL_FACILITY_TYPES.length;
+  const availableTypes: FacilityType[] = [primaryFacilityType, "survey", "water_quality"];
+  const doneCount = availableTypes.filter(t => typeProgress[t]).length;
+  const allDone = doneCount === availableTypes.length;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -699,13 +715,13 @@ function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmi
         <div className="flex items-end justify-between">
           <h1 className="text-xl font-semibold text-primary-foreground">考核项目</h1>
           <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${allDone ? "bg-green-500/20 text-green-200" : "bg-white/15 text-primary-foreground/80"}`}>
-            {doneCount}/{ALL_FACILITY_TYPES.length} 已完成
+            {doneCount}/{availableTypes.length} 已完成
           </span>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-        {ALL_FACILITY_TYPES.map((t, i) => {
+        {availableTypes.map((t, i) => {
           const info = FACILITY_TYPE_INFO[t];
           const done = !!typeProgress[t];
           return (
@@ -745,7 +761,7 @@ function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmi
           }`}
         >
           <Send className="w-4 h-4" />
-          {allDone ? "提交本村考核" : `还差 ${ALL_FACILITY_TYPES.length - doneCount} 项未完成`}
+          {allDone ? "提交本村考核" : `还差 ${availableTypes.length - doneCount} 项未完成`}
         </button>
       </div>
     </div>
@@ -2341,14 +2357,15 @@ function PSubmittedData({ submittedData, onBack }: {
 
 // ==================== MAIN APP ====================
 
-type Page = "town" | "village" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
+type Page = "town" | "village" | "facility_choice" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
 
 export default function App() {
   const [page, setPage] = useState<Page>("town");
-  const [city, setCity] = useState("江门市");
+  const city = "江门市";
   const [town, setTown] = useState("");
   const [village, setVillage] = useState("");
   const [ftype, setFtype] = useState<FacilityType>("treatment");
+  const [primaryFacilityType, setPrimaryFacilityType] = useState<PrimaryFacilityType>("treatment");
   const [entries, setEntries] = useState<Record<string, ItemEntry>>({});
   const [detailId, setDetailId] = useState("");
   const [completedVillages, setCompletedVillages] = useState<VillageRecord[]>([]);
@@ -2382,14 +2399,14 @@ export default function App() {
     setPage("facilitytype");
   };
 
-  // Called from the hub after all four directories are completed.
+  // Called from the hub after the selected facility, survey, and water-quality records are completed.
   const handleVillageSubmit = () => {
     const combinedScores = Object.values(scoreByType);
     const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
     const combinedCurrent = combinedScores.reduce((s, v) => s + v.currentScore, 0);
     const combinedDeducted = combinedScores.reduce((s, v) => s + v.deductedScore, 0);
     const record: VillageRecord = {
-      village, facilityType: "treatment",
+      village, facilityType: primaryFacilityType,
       submittedAt: new Date().toISOString(),
       maxScore: combinedMax,
       deductedScore: combinedDeducted,
@@ -2403,7 +2420,7 @@ export default function App() {
 
   const handleNextVillage = () => {
     setVillage(""); setEntries({}); setDetailId("");
-    setFtype("treatment"); setSurveyEntries({}); setSurveyTarget(null);
+    setFtype("treatment"); setPrimaryFacilityType("treatment"); setSurveyEntries({}); setSurveyTarget(null);
     setWaterQuality(emptyWaterQualityEntry());
     setTypeProgress({}); setScoreByType({});
     setPage("village");
@@ -2421,8 +2438,6 @@ export default function App() {
       case "town":
         return (
           <P1Town
-            city={city}
-            onCityChange={setCity}
             onNext={t => { setTown(t); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry()); setTypeProgress({}); setScoreByType({}); setPage("village"); }}
             submittedData={submittedData}
             onViewSubmitted={() => setPage("submitted_data")}
@@ -2433,18 +2448,37 @@ export default function App() {
           <P2Village
             town={town}
             onBack={() => setPage("town")}
-            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry()); setPage("facilitytype"); }}
+            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry()); setPage("facility_choice"); }}
+          />
+        );
+      case "facility_choice":
+        return (
+          <P2bFacilityChoice
+            town={town}
+            village={village}
+            onBack={() => setPage("village")}
+            onSelect={type => {
+              setPrimaryFacilityType(type);
+              setFtype(type);
+              setEntries({});
+              setSurveyEntries({});
+              setWaterQuality(emptyWaterQualityEntry());
+              setTypeProgress({});
+              setScoreByType({});
+              setPage("facilitytype");
+            }}
           />
         );
       case "facilitytype":
         return (
           <P2bFacilityType
             town={town} village={village}
+            primaryFacilityType={primaryFacilityType}
             typeProgress={typeProgress}
-            onBack={() => setPage("village")}
+            onBack={() => setPage("facility_choice")}
             onEnter={t => {
               setFtype(t);
-              if (!typeProgress[t]) setEntries({});
+              if (t === primaryFacilityType && !typeProgress[t]) setEntries({});
               setPage(t === "survey" ? "survey_list" : t === "water_quality" ? "water_quality" : "criteria");
             }}
             onSubmitVillage={handleVillageSubmit}
@@ -2455,7 +2489,7 @@ export default function App() {
           <P3Criteria
             town={town} village={village} ftype={ftype}
             groups={groups} entries={entries} surveyEntries={surveyEntries}
-            onBack={() => setPage("village")}
+            onBack={() => setPage("facilitytype")}
             onSelect={id => { setDetailId(id); setPage("detail"); }}
             onSummary={() => setPage("summary")}
           />

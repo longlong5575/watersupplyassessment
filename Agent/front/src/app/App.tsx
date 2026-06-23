@@ -50,10 +50,11 @@ type TownSurveyStatus = "completed" | "inprogress" | "pending";
 interface TownSurvey {
   name: string;
   status: TownSurveyStatus;
+  facilityType?: "treatment" | "network";
   surveys: { label: string; done: number; total: number }[];
 }
 
-const SURVEY_LABELS = ["污水处理设施", "管网设施", "调查问卷"];
+const SURVEY_LABELS = ["污水处理设施", "管网设施", "调查问卷", "水质抽检情况"];
 
 type ReportStatus = "completed" | "processing" | "pending" | "error";
 
@@ -95,11 +96,14 @@ interface ScoreItem {
 }
 
 interface SurveyScoreGroup {
+  id: string;
+  section: string;
   label: string;
   items: ScoreItem[];
 }
 
 type AssessmentStandardItem = {
+  id: string;
   name: string;
   maxScore: number;
   description?: string;
@@ -119,20 +123,64 @@ function isQuestionnaireStandardItem(group: AssessmentStandardGroup, child: { na
   return (
     text.includes("问卷调查") ||
     child.name.includes("满意度") ||
-    item.name.includes("污水收集") ||
-    item.name.includes("整体效果") ||
+    item.name === "污水收集" ||
+    item.name === "整体效果" ||
     item.name.includes("满意度")
   );
 }
 
+function isWaterQualityStandardItem(_group: AssessmentStandardGroup, _child: { name: string }, item: AssessmentStandardItem): boolean {
+  return item.name === "污水处理质量";
+}
+
+const TREATMENT_MERGE_RULES: Record<string, { targetId: string; name?: string; maxScore: number }> = {
+  treatment_09: { targetId: "treatment_08", name: "稳定塘/生化工艺及其他处理工艺", maxScore: 15 },
+  treatment_12: { targetId: "treatment_11", name: "污水收集管渠", maxScore: 8 },
+  treatment_15: { targetId: "treatment_14", name: "机电设备、管路及附件", maxScore: 5 },
+};
+
+function joinUnique(parts: Array<string | undefined>, separator = "\n"): string {
+  return Array.from(new Set(parts.filter((part): part is string => Boolean(part?.trim())))).join(separator);
+}
+
+function mergeTreatmentItems(groups: readonly AssessmentStandardGroup[]): AssessmentStandardGroup[] {
+  return groups.map(group => ({
+    ...group,
+    children: group.children.map(child => {
+      const items: AssessmentStandardItem[] = [];
+      for (const item of child.items) {
+        const rule = TREATMENT_MERGE_RULES[item.id];
+        if (!rule) {
+          items.push({ ...item });
+          continue;
+        }
+        const target = items.find(existing => existing.id === rule.targetId);
+        if (!target) {
+          items.push({ ...item, id: rule.targetId, name: rule.name ?? item.name, maxScore: rule.maxScore });
+          continue;
+        }
+        target.name = rule.name ?? target.name;
+        target.maxScore = rule.maxScore;
+        target.description = joinUnique([target.description, item.description], "；");
+        target.evaluationStandard = joinUnique([target.evaluationStandard, item.evaluationStandard]);
+        target.scoringMethod = joinUnique([target.scoringMethod, item.scoringMethod], "、");
+        target.dataSource = joinUnique([target.dataSource, item.dataSource], "、");
+      }
+      return { ...child, items };
+    }),
+  }));
+}
+
 function buildScoreGroups(
-  label: string,
+  section: string,
   standards: readonly AssessmentStandardGroup[],
   includeItem: (group: AssessmentStandardGroup, child: { name: string }, item: AssessmentStandardItem) => boolean,
 ): SurveyScoreGroup[] {
   return standards
-    .map(group => ({
-      label: `${label}｜${group.name}`,
+    .map((group, groupIndex) => ({
+      id: `${section}-${groupIndex}-${group.name}`,
+      section,
+      label: group.name,
       items: group.children.flatMap(child => child.items.filter(item => includeItem(group, child, item)).map(item => ({
         name: item.name,
         fullScore: item.maxScore,
@@ -151,31 +199,36 @@ function buildScoreGroups(
 }
 
 const SCORE_TEMPLATES: SurveyScoreGroup[] = [
-  ...buildScoreGroups("污水处理设施", TREATMENT_STANDARDS as unknown as AssessmentStandardGroup[], (group, child, item) => !isQuestionnaireStandardItem(group, child, item)),
-  ...buildScoreGroups("纳厂或接入已建设施的管网设施", NETWORK_STANDARDS as unknown as AssessmentStandardGroup[], (group, child, item) => !isQuestionnaireStandardItem(group, child, item)),
-  ...buildScoreGroups("调查问卷", TREATMENT_STANDARDS as unknown as AssessmentStandardGroup[], isQuestionnaireStandardItem),
-  ...buildScoreGroups("调查问卷", NETWORK_STANDARDS as unknown as AssessmentStandardGroup[], isQuestionnaireStandardItem),
+  ...buildScoreGroups("污水处理设施", mergeTreatmentItems(TREATMENT_STANDARDS as unknown as AssessmentStandardGroup[]), () => true),
+  ...buildScoreGroups("管网设施", NETWORK_STANDARDS as unknown as AssessmentStandardGroup[], () => true),
 ];
 
+const DETAIL_SCORE_TEMPLATES: SurveyScoreGroup[] = SCORE_TEMPLATES;
+
+const DATA_COLLECTION_SECTION_NOTES: Record<string, { summary: string; details: string[] }> = {
+  "调查问卷": {
+    summary: "问卷数据回填至正式评分指标，不另行重复计分",
+    details: [
+      "污水收集效果评分：按村民、镇街政府代表和考核小组的加权结果回填“污水收集”指标。",
+      "整体效果评分：按村民、镇街政府代表和考核小组的加权结果回填“整体效果”指标。",
+      "满意度评分：分别回填实施机构满意度、镇街满意度和公众满意度指标。",
+    ],
+  },
+  "水质抽检情况": {
+    summary: "抽检数据用于核对“污水处理质量”正式评分指标，不另行重复计分",
+    details: ["填写出水水质抽检结果，并依据达标情况回填“污水处理质量”指标。"],
+  },
+};
+
 function countScoreItemsByLabel(label: string): number {
-  if (label === "污水处理设施") {
-    return SCORE_TEMPLATES
-      .filter(group => group.label.startsWith("污水处理设施"))
-      .reduce((sum, group) => sum + group.items.length, 0);
-  }
-  if (label === "管网设施") {
-    return SCORE_TEMPLATES
-      .filter(group => group.label.startsWith("纳厂或接入已建设施的管网设施"))
-      .reduce((sum, group) => sum + group.items.length, 0);
-  }
   return SCORE_TEMPLATES
-    .filter(group => group.label.startsWith("调查问卷"))
+    .filter(group => group.section === label)
     .reduce((sum, group) => sum + group.items.length, 0);
 }
 
 const DASHBOARD_SURVEY_TOTALS = SURVEY_LABELS.map(label => ({
   label,
-  total: countScoreItemsByLabel(label),
+  total: label === "水质抽检情况" ? 1 : label === "调查问卷" ? 3 : countScoreItemsByLabel(label),
 }));
 
 function makeDashboardSurveys(progress: number | number[]): TownSurvey["surveys"] {
@@ -184,6 +237,14 @@ function makeDashboardSurveys(progress: number | number[]): TownSurvey["surveys"
     const done = Math.min(total, Math.max(0, Math.round(total * ratio)));
     return { label, done, total };
   });
+}
+
+function isWaterQualitySurvey(label: string): boolean {
+  return label === "水质抽检情况";
+}
+
+function surveyDisplayValue(s: TownSurvey["surveys"][number]): string {
+  return isWaterQualitySurvey(s.label) ? (s.done > 0 ? "已完成" : "未完成") : `${s.done}/${s.total}`;
 }
 
 const DASHBOARD_TOWNS: TownSurvey[] = [
@@ -1534,7 +1595,7 @@ function TownPieCard({ town }: { town: TownSurvey }) {
             <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
               <div className="h-full rounded-full transition-all" style={{ width: `${s.total ? (s.done / s.total) * 100 : 0}%`, background: "var(--primary)" }} />
             </div>
-            <span className="text-xs font-mono text-muted-foreground w-10 text-right">{s.done}/{s.total}</span>
+            <span className="text-xs font-mono text-muted-foreground w-12 text-right">{surveyDisplayValue(s)}</span>
           </div>
         ))}
       </div>
@@ -1590,19 +1651,34 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
         {surveys.map((s, i) => (
           <div key={s.label} className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">{s.label}</span>
-            <div className="flex items-center gap-1">
-              <input type="number" min={0} value={s.done}
-                onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, done: Math.min(Number(e.target.value), x.total) } : x); onChange(next); }}
-                className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+            {isWaterQualitySurvey(s.label) ? (
+              <select
+                value={s.done > 0 ? "done" : "pending"}
+                onChange={e => {
+                  const next = surveys.map((x, j) => j === i ? { ...x, done: e.target.value === "done" ? 1 : 0, total: 1 } : x);
+                  onChange(next);
+                }}
+                className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
                 style={{ background: "var(--input-background)" }}
-              />
-              <span className="text-xs text-muted-foreground">/</span>
-              <input type="number" min={0} value={s.total}
-                onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, total: Number(e.target.value), done: Math.min(x.done, Number(e.target.value)) } : x); onChange(next); }}
-                className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
-                style={{ background: "var(--input-background)" }}
-              />
-            </div>
+              >
+                <option value="done">已完成</option>
+                <option value="pending">未完成</option>
+              </select>
+            ) : (
+              <div className="flex items-center gap-1">
+                <input type="number" min={0} value={s.done}
+                  onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, done: Math.min(Number(e.target.value), x.total) } : x); onChange(next); }}
+                  className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  style={{ background: "var(--input-background)" }}
+                />
+                <span className="text-xs text-muted-foreground">/</span>
+                <input type="number" min={0} value={s.total}
+                  onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, total: Number(e.target.value), done: Math.min(x.done, Number(e.target.value)) } : x); onChange(next); }}
+                  className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  style={{ background: "var(--input-background)" }}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1709,7 +1785,7 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                   <th className="text-left px-3 py-3 font-medium w-24">状态</th>
                   {SURVEY_LABELS.map(l => (
                     <th key={l} className="text-left px-3 py-3 font-medium whitespace-nowrap">
-                      {l} <span className="opacity-50">完成/总量</span>
+                      {l} <span className="opacity-50">{isWaterQualitySurvey(l) ? "是否完成" : "完成/总量"}</span>
                     </th>
                   ))}
                   <th className="text-left px-3 py-3 font-medium">操作</th>
@@ -1744,13 +1820,21 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                         )}
                       </td>
                       {isEditing ? (
-                        <td colSpan={3} className="px-3 py-2.5">
+                        <td colSpan={SURVEY_LABELS.length} className="px-3 py-2.5">
                           <SurveyInputs surveys={draft.surveys} onChange={s => setEditDraft(d => d ? { ...d, surveys: s } : d)} />
                         </td>
                       ) : (
                         t.surveys.map(s => (
                           <td key={s.label} className="px-3 py-2.5 text-xs font-mono text-muted-foreground">
-                            <span className={s.done === s.total && s.total > 0 ? "text-[var(--status-success)]" : ""}>{s.done}</span>/{s.total}
+                            {isWaterQualitySurvey(s.label) ? (
+                              <span className={s.done > 0 ? "text-[var(--status-success)]" : "text-muted-foreground"}>
+                                {surveyDisplayValue(s)}
+                              </span>
+                            ) : (
+                              <>
+                                <span className={s.done === s.total && s.total > 0 ? "text-[var(--status-success)]" : ""}>{s.done}</span>/{s.total}
+                              </>
+                            )}
                           </td>
                         ))
                       )}
@@ -1793,7 +1877,7 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                         <option value="pending">未开始</option>
                       </select>
                     </td>
-                    <td colSpan={3} className="px-3 py-2.5">
+                    <td colSpan={SURVEY_LABELS.length} className="px-3 py-2.5">
                       <SurveyInputs surveys={newDraft.surveys} onChange={s => setNewDraft(d => ({ ...d, surveys: s }))} />
                     </td>
                     <td className="px-3 py-2.5">
@@ -1821,12 +1905,15 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
   if (!town) { onNav("dashboard"); return null; }
 
   const [groups, setGroups] = useState<SurveyScoreGroup[]>(
-    SCORE_TEMPLATES.map(g => ({ ...g, items: g.items.map(i => ({ ...i })) }))
+    DETAIL_SCORE_TEMPLATES.map(g => ({ ...g, items: g.items.map(i => ({ ...i })) }))
   );
   const [editingKey, setEditingKey] = useState<string | null>(null); // "groupLabel|itemName"
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  const [openL1, setOpenL1] = useState<Set<string>>(new Set());
+  const [openRules, setOpenRules] = useState<Set<string>>(new Set());
 
-  function updateItem(gLabel: string, iName: string, field: keyof ScoreItem, raw: string) {
-    setGroups(prev => prev.map(g => g.label !== gLabel ? g : {
+  function updateItem(groupId: string, iName: string, field: keyof ScoreItem, raw: string) {
+    setGroups(prev => prev.map(g => g.id !== groupId ? g : {
       ...g,
       items: g.items.map(item => {
         if (item.name !== iName) return item;
@@ -1840,9 +1927,42 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
     }));
   }
 
-  const totalFull = groups.flatMap(g => g.items).reduce((s, i) => s + i.fullScore, 0);
-  const totalScore = groups.flatMap(g => g.items).reduce((s, i) => s + i.score, 0);
+  function toggleL1(id: string) {
+    setOpenL1(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleRules(id: string) {
+    setOpenRules(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const selectedFacilityLabel = town.facilityType === "network"
+    ? "管网设施"
+    : town.facilityType === "treatment"
+      ? "污水处理设施"
+      : null;
+  const visibleLabels = selectedFacilityLabel
+    ? [selectedFacilityLabel, "调查问卷", "水质抽检情况"]
+    : ["调查问卷", "水质抽检情况"];
+  const visibleGroups = groups.filter(group => visibleLabels.includes(group.section));
+  const totalFull = visibleGroups.flatMap(g => g.items).reduce((s, i) => s + i.fullScore, 0);
+  const totalScore = visibleGroups.flatMap(g => g.items).reduce((s, i) => s + i.score, 0);
   const totalDeduction = totalFull - totalScore;
+  const sections = visibleLabels.map(label => {
+    const sectionGroups = visibleGroups.filter(group => group.section === label);
+    const items = sectionGroups.flatMap(group => group.items);
+    const full = items.reduce((s, i) => s + i.fullScore, 0);
+    const score = items.reduce((s, i) => s + i.score, 0);
+    const dataCollection = DATA_COLLECTION_SECTION_NOTES[label];
+    return { label, groups: sectionGroups, full, score, deduction: full - score, dataCollection };
+  });
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1852,6 +1972,13 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
         subtitle="报告周期：2023年下半年度"
       />
       <div className="px-8 py-6 max-w-5xl space-y-5">
+
+        {!selectedFacilityLabel && (
+          <div className="rounded-lg border border-yellow-200 bg-[var(--status-warning-bg)] px-5 py-3">
+            <p className="text-sm font-medium text-foreground">尚未读取到移动端选择的设施类型</p>
+            <p className="text-xs text-muted-foreground mt-1">请接入移动端数据包，此处项目为“污水处理设施”或“管网设施”其中一项。</p>
+          </div>
+        )}
 
         {/* Summary bar */}
         <div className="grid grid-cols-3 gap-4">
@@ -1867,120 +1994,190 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
           ))}
         </div>
 
-        {/* Score tables per survey */}
-        {groups.map(group => {
-          const groupFull = group.items.reduce((s, i) => s + i.fullScore, 0);
-          const groupScore = group.items.reduce((s, i) => s + i.score, 0);
-          const groupDeduction = groupFull - groupScore;
+        {sections.map(section => {
+          const sectionOpen = openSection === section.label;
           return (
-            <div key={group.label} className="bg-card border border-border rounded-lg">
-              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">{group.label}</h3>
-                <div className="flex items-center gap-4 text-xs font-mono">
-                  <span className="text-muted-foreground">满分 {groupFull}</span>
-                  <span className="text-primary font-medium">得分 {groupScore}</span>
-                  {groupDeduction > 0
-                    ? <span className="text-[var(--status-error)] font-medium">扣分 −{groupDeduction}</span>
-                    : <span className="text-[var(--status-success)]">无扣分</span>
-                  }
+            <div key={section.label} className="bg-card border border-border rounded-lg overflow-hidden">
+              <button
+                onClick={() => setOpenSection(sectionOpen ? null : section.label)}
+                className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-muted/20 transition-colors"
+              >
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">{section.label}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {section.dataCollection?.summary ?? `${section.groups.length} 个一级指标，${section.groups.flatMap(g => g.items).length} 个扣分项目`}
+                  </p>
                 </div>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground font-mono">
-                    <th className="text-left px-5 py-3 font-medium">考核项目</th>
-                    <th className="text-right px-4 py-3 font-medium w-20">满分</th>
-                    <th className="text-right px-4 py-3 font-medium w-20">得分</th>
-                    <th className="text-right px-4 py-3 font-medium w-20">扣分</th>
-                    <th className="text-left px-4 py-3 font-medium">扣分原因</th>
-                    <th className="text-left px-4 py-3 font-medium w-20">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.items.map(item => {
-                    const key = `${group.label}|${item.name}`;
-                    const isEditing = editingKey === key;
+                <div className="flex items-center gap-4 text-xs font-mono">
+                  {section.dataCollection ? (
+                    <span className="text-muted-foreground">资料录入</span>
+                  ) : (
+                    <>
+                      <span className="text-muted-foreground">满分 {section.full}</span>
+                      <span className="text-primary font-medium">得分 {section.score}</span>
+                      <span className={section.deduction > 0 ? "text-[var(--status-error)] font-medium" : "text-[var(--status-success)]"}>
+                        {section.deduction > 0 ? `扣分 -${section.deduction}` : "无扣分"}
+                      </span>
+                    </>
+                  )}
+                  {sectionOpen ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
+                </div>
+              </button>
+
+              {sectionOpen && (
+                <div className="border-t border-border bg-muted/10 px-5 py-4 space-y-4">
+                  {section.dataCollection ? (
+                    <div className="rounded-lg border border-border bg-card px-5 py-4 space-y-2">
+                      {section.dataCollection.details.map(detail => (
+                        <p key={detail} className="text-xs text-muted-foreground leading-relaxed">{detail}</p>
+                      ))}
+                    </div>
+                  ) : section.groups.map(group => {
+                    const groupOpen = openL1.has(group.id);
+                    const groupFull = group.items.reduce((s, i) => s + i.fullScore, 0);
+                    const groupScore = group.items.reduce((s, i) => s + i.score, 0);
+                    const groupDeduction = groupFull - groupScore;
                     return (
-                      <tr key={item.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
-                        <td className="px-5 py-3 text-xs text-foreground align-top">
-                          <div className="font-medium">{item.name}</div>
-                          {(item.category || item.itemType) && (
-                            <div className="text-[11px] text-muted-foreground mt-1">
-                              {[item.category, item.itemType].filter(Boolean).join(" / ")}
-                            </div>
-                          )}
-                          {item.evaluationStandard && (
-                            <p className="text-[11px] text-muted-foreground leading-relaxed mt-2 whitespace-pre-line">
-                              {item.evaluationStandard}
-                            </p>
-                          )}
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground">
-                            {item.scoringMethod && <span>评分方法：{item.scoringMethod}</span>}
-                            {item.dataSource && <span>数据来源：{item.dataSource}</span>}
+                      <div key={group.id} className="bg-card border border-border rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => toggleL1(group.id)}
+                          className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-muted/20 transition-colors"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{group.label}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{group.items.length} 个扣分项目</div>
                           </div>
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {isEditing ? (
-                            <input type="number" min={0} value={item.fullScore}
-                              onChange={e => updateItem(group.label, item.name, "fullScore", e.target.value)}
-                              className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
-                              style={{ background: "var(--input-background)" }} />
-                          ) : (
-                            <span className="text-xs font-mono text-muted-foreground">{item.fullScore}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {isEditing ? (
-                            <input type="number" min={0} max={item.fullScore} value={item.score}
-                              onChange={e => updateItem(group.label, item.name, "score", e.target.value)}
-                              className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
-                              style={{ background: "var(--input-background)" }} />
-                          ) : (
-                            <span className={`text-xs font-mono ${item.score < item.fullScore ? "text-[var(--status-error)]" : "text-[var(--status-success)]"}`}>
-                              {item.score}
+                          <div className="flex items-center gap-4 text-xs font-mono">
+                            <span className="text-muted-foreground">满分 {groupFull}</span>
+                            <span className="text-primary">得分 {groupScore}</span>
+                            <span className={groupDeduction > 0 ? "text-[var(--status-error)]" : "text-[var(--status-success)]"}>
+                              {groupDeduction > 0 ? `−${groupDeduction}` : "无扣分"}
                             </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs font-mono text-right">
-                          {item.deduction > 0
-                            ? <span className="text-[var(--status-error)] font-medium">−{item.deduction}</span>
-                            : <span className="text-[var(--status-success)]">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {isEditing ? (
-                            <input type="text" value={item.reason}
-                              onChange={e => updateItem(group.label, item.name, "reason", e.target.value)}
-                              placeholder="填写扣分原因…"
-                              className="w-full border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
-                              style={{ background: "var(--input-background)" }} />
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              {item.reason || <span className="text-[var(--status-success)]">达标</span>}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {isEditing ? (
-                            <button onClick={() => setEditingKey(null)} className="text-xs text-[var(--status-success)] hover:underline font-medium">保存</button>
-                          ) : (
-                            <button onClick={() => setEditingKey(key)} className="text-xs text-primary hover:underline">编辑</button>
-                          )}
-                        </td>
-                      </tr>
+                            {groupOpen ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                          </div>
+                        </button>
+
+                        {groupOpen && (
+                          <div className="border-t border-border">
+                            {Array.from(new Set(group.items.map(item => item.itemType || "未分类"))).map(itemType => {
+                              const typeItems = group.items.filter(item => (item.itemType || "未分类") === itemType);
+                              return (
+                                <div key={itemType} className="border-b border-border last:border-b-0">
+                                  <div className="px-5 py-2 bg-muted/30 text-xs font-medium text-muted-foreground">{itemType}</div>
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="border-b border-border text-xs text-muted-foreground font-mono">
+                                        <th className="text-left px-5 py-3 font-medium">三级指标</th>
+                                        <th className="text-right px-4 py-3 font-medium w-20">满分</th>
+                                        <th className="text-right px-4 py-3 font-medium w-20">得分</th>
+                                        <th className="text-right px-4 py-3 font-medium w-20">扣分</th>
+                                        <th className="text-left px-4 py-3 font-medium">扣分原因</th>
+                                        <th className="text-left px-4 py-3 font-medium w-20">操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {typeItems.map(item => {
+                                        const key = `${group.id}|${item.name}`;
+                                        const isEditing = editingKey === key;
+                                        const rulesOpen = openRules.has(key);
+                                        return (
+                                          <tr key={item.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
+                                            <td className="px-5 py-3 text-xs text-foreground align-top">
+                                              <div className="font-medium">{item.name}</div>
+                                              {(item.evaluationStandard || item.scoringMethod || item.dataSource) && (
+                                                <div className="mt-2">
+                                                  <button
+                                                    onClick={() => toggleRules(key)}
+                                                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                                                  >
+                                                    {rulesOpen ? "收起评分细则" : "展开评分细则"}
+                                                    {rulesOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                                  </button>
+                                                  {rulesOpen && (
+                                                    <div className="mt-2 rounded border border-border bg-muted/20 px-3 py-2">
+                                                      {item.evaluationStandard && (
+                                                        <p className="text-[11px] text-muted-foreground leading-relaxed whitespace-pre-line">
+                                                          {item.evaluationStandard}
+                                                        </p>
+                                                      )}
+                                                      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground">
+                                                        {item.scoringMethod && <span>评分方法：{item.scoringMethod}</span>}
+                                                        {item.dataSource && <span>数据来源：{item.dataSource}</span>}
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right">
+                                              {isEditing ? (
+                                                <input type="number" min={0} value={item.fullScore}
+                                                  onChange={e => updateItem(group.id, item.name, "fullScore", e.target.value)}
+                                                  className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                                  style={{ background: "var(--input-background)" }} />
+                                              ) : (
+                                                <span className="text-xs font-mono text-muted-foreground">{item.fullScore}</span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right">
+                                              {isEditing ? (
+                                                <input type="number" min={0} max={item.fullScore} value={item.score}
+                                                  onChange={e => updateItem(group.id, item.name, "score", e.target.value)}
+                                                  className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                                  style={{ background: "var(--input-background)" }} />
+                                              ) : (
+                                                <span className={`text-xs font-mono ${item.score < item.fullScore ? "text-[var(--status-error)]" : "text-[var(--status-success)]"}`}>
+                                                  {item.score}
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-xs font-mono text-right">
+                                              {item.deduction > 0
+                                                ? <span className="text-[var(--status-error)] font-medium">−{item.deduction}</span>
+                                                : <span className="text-[var(--status-success)]">—</span>}
+                                            </td>
+                                            <td className="px-4 py-2.5">
+                                              {isEditing ? (
+                                                <input type="text" value={item.reason}
+                                                  onChange={e => updateItem(group.id, item.name, "reason", e.target.value)}
+                                                  placeholder="填写扣分原因…"
+                                                  className="w-full border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                                  style={{ background: "var(--input-background)" }} />
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                  {item.reason || <span className="text-[var(--status-success)]">达标</span>}
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-2.5">
+                                              {isEditing ? (
+                                                <button onClick={() => setEditingKey(null)} className="text-xs text-[var(--status-success)] hover:underline font-medium">保存</button>
+                                              ) : (
+                                                <button onClick={() => setEditingKey(key)} className="text-xs text-primary hover:underline">编辑</button>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              );
+                            })}
+                            <div className="px-5 py-2.5 bg-muted/30 flex items-center justify-end gap-5 text-xs font-mono font-medium">
+                              <span className="text-muted-foreground">小计满分 {groupFull}</span>
+                              <span className="text-primary">得分 {groupScore}</span>
+                              <span className={groupDeduction > 0 ? "text-[var(--status-error)]" : "text-[var(--status-success)]"}>
+                                {groupDeduction > 0 ? `扣分 −${groupDeduction}` : "无扣分"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-border bg-muted/30 text-xs font-mono font-medium">
-                    <td className="px-5 py-2.5 text-muted-foreground">小计</td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{groupFull}</td>
-                    <td className="px-4 py-2.5 text-right text-primary">{groupScore}</td>
-                    <td className="px-4 py-2.5 text-right text-[var(--status-error)]">{groupDeduction > 0 ? `−${groupDeduction}` : "—"}</td>
-                    <td className="px-4 py-2.5" />
-                    <td className="px-4 py-2.5" />
-                  </tr>
-                </tfoot>
-              </table>
+                </div>
+              )}
             </div>
           );
         })}
@@ -2102,7 +2299,11 @@ function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethod
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground font-mono">
                 <th className="text-left px-5 py-3 font-medium">镇街</th>
-                {SURVEY_LABELS.map(l => <th key={l} className="text-left px-3 py-3 font-medium">{l}</th>)}
+                {SURVEY_LABELS.map(l => (
+                  <th key={l} className="text-left px-3 py-3 font-medium">
+                    {l} <span className="opacity-50">{isWaterQualitySurvey(l) ? "是否完成" : "完成/总量"}</span>
+                  </th>
+                ))}
                 <th className="text-left px-3 py-3 font-medium">状态</th>
                 <th className="text-left px-3 py-3 font-medium">操作</th>
               </tr>
@@ -2113,7 +2314,13 @@ function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethod
                   <td className="px-5 py-3 text-xs font-medium text-foreground">{t.name}</td>
                   {t.surveys.map(s => (
                     <td key={s.label} className="px-3 py-3 text-xs font-mono text-muted-foreground">
-                      {s.done}/{s.total}
+                      {isWaterQualitySurvey(s.label) ? (
+                        <span className={s.done > 0 ? "text-[var(--status-success)]" : "text-muted-foreground"}>
+                          {surveyDisplayValue(s)}
+                        </span>
+                      ) : (
+                        surveyDisplayValue(s)
+                      )}
                     </td>
                   ))}
                   <td className="px-3 py-3">
@@ -2126,7 +2333,7 @@ function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethod
                         <button onClick={() => setRemoveConfirm(null)} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
                       </div>
                     ) : (
-                      <button onClick={() => setRemoveConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">本次不生成</button>
+                      <button onClick={() => setRemoveConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">点击取消本街镇的本次生成</button>
                     )}
                   </td>
                 </tr>
