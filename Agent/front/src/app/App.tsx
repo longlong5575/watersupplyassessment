@@ -25,17 +25,46 @@ import {
   Plus,
   FolderOpen,
   CheckCircle2,
+  Smartphone,
+  MapPin,
 } from "lucide-react";
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type Page =
   | "home"
+  | "dashboard"
+  | "towndetail"
+  | "dataupload"
   | "upload"
+  | "mobile"
   | "confirm"
   | "progress"
   | "result"
   | "history";
+
+type TownSurveyStatus = "completed" | "inprogress" | "pending";
+
+interface TownSurvey {
+  name: string;
+  status: TownSurveyStatus;
+  surveys: { label: string; done: number; total: number }[];
+}
+
+const SURVEY_LABELS = ["污水管理设施", "管网设施", "调查问卷"];
+
+const DASHBOARD_TOWNS: TownSurvey[] = [
+  { name: "北陡镇", status: "completed", surveys: [{ label: "污水管理设施", done: 12, total: 12 }, { label: "管网设施", done: 8, total: 8 }, { label: "调查问卷", done: 24, total: 24 }] },
+  { name: "白沙镇", status: "completed", surveys: [{ label: "污水管理设施", done: 9, total: 9 }, { label: "管网设施", done: 6, total: 6 }, { label: "调查问卷", done: 18, total: 18 }] },
+  { name: "大江镇", status: "completed", surveys: [{ label: "污水管理设施", done: 11, total: 11 }, { label: "管网设施", done: 7, total: 7 }, { label: "调查问卷", done: 22, total: 22 }] },
+  { name: "赤溪镇", status: "inprogress", surveys: [{ label: "污水管理设施", done: 7, total: 10 }, { label: "管网设施", done: 3, total: 6 }, { label: "调查问卷", done: 11, total: 20 }] },
+  { name: "广海镇", status: "inprogress", surveys: [{ label: "污水管理设施", done: 2, total: 8 }, { label: "管网设施", done: 1, total: 5 }, { label: "调查问卷", done: 5, total: 16 }] },
+  { name: "沙堆镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 9 }, { label: "管网设施", done: 0, total: 6 }, { label: "调查问卷", done: 0, total: 18 }] },
+  { name: "古井镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 10 }, { label: "管网设施", done: 0, total: 7 }, { label: "调查问卷", done: 0, total: 20 }] },
+  { name: "潮连镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 8 }, { label: "管网设施", done: 0, total: 5 }, { label: "调查问卷", done: 0, total: 16 }] },
+  { name: "双水镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 11 }, { label: "管网设施", done: 0, total: 8 }, { label: "调查问卷", done: 0, total: 22 }] },
+];
 
 type ReportStatus = "completed" | "processing" | "pending" | "error";
 
@@ -60,6 +89,54 @@ const HISTORY_REPORTS: Report[] = [
   { id: "4", name: "赤溪镇2023年下半年度村级设施考核报告（正文）", town: "赤溪镇", period: "2023年下半年度", status: "completed", size: "0.9 MB", createdAt: "2024-01-15 14:32" },
   { id: "5", name: "汇总报告：2023年下半年度绩效考核综合报告", town: "全区汇总", period: "2023年下半年度", status: "completed", size: "4.8 MB", createdAt: "2024-01-15 15:05" },
   { id: "6", name: "北陡镇2023年上半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年上半年度", status: "completed", size: "1.1 MB", createdAt: "2023-08-10 09:14" },
+];
+
+interface ScoreItem {
+  name: string;
+  fullScore: number;
+  score: number;
+  deduction: number;
+  reason: string;
+}
+
+interface SurveyScoreGroup {
+  label: string;
+  items: ScoreItem[];
+}
+
+const SCORE_TEMPLATES: SurveyScoreGroup[] = [
+  {
+    label: "污水管理设施",
+    items: [
+      { name: "设施运行率", fullScore: 20, score: 18, deduction: 2, reason: "本期运行率 94%，低于标准值 2%，扣 2 分" },
+      { name: "出水水质达标率", fullScore: 25, score: 25, deduction: 0, reason: "" },
+      { name: "污泥处置规范性", fullScore: 15, score: 12, deduction: 3, reason: "污泥转运记录缺失 3 次，每次扣 1 分" },
+      { name: "设备维护记录完整性", fullScore: 15, score: 15, deduction: 0, reason: "" },
+      { name: "安全生产管理", fullScore: 10, score: 8, deduction: 2, reason: "现场安全标识不规范，扣 2 分" },
+      { name: "信息上报及时性", fullScore: 15, score: 15, deduction: 0, reason: "" },
+    ],
+  },
+  {
+    label: "管网设施",
+    items: [
+      { name: "管网完好率", fullScore: 25, score: 23, deduction: 2, reason: "发现 2 处管网渗漏，每处扣 1 分" },
+      { name: "检查井完好率", fullScore: 20, score: 20, deduction: 0, reason: "" },
+      { name: "清淤疏通记录", fullScore: 15, score: 13, deduction: 2, reason: "本期清淤记录不完整，扣 2 分" },
+      { name: "排水口规范性", fullScore: 15, score: 15, deduction: 0, reason: "" },
+      { name: "管网巡查频次", fullScore: 15, score: 12, deduction: 3, reason: "巡查频次不足，漏查 3 次，每次扣 1 分" },
+      { name: "应急响应处理", fullScore: 10, score: 10, deduction: 0, reason: "" },
+    ],
+  },
+  {
+    label: "调查问卷",
+    items: [
+      { name: "村民满意度", fullScore: 30, score: 27, deduction: 3, reason: "满意度调查得分 90 分，折算后扣 3 分" },
+      { name: "投诉处理及时率", fullScore: 20, score: 20, deduction: 0, reason: "" },
+      { name: "服务响应速度", fullScore: 20, score: 18, deduction: 2, reason: "平均响应时间超标，扣 2 分" },
+      { name: "公示信息完整性", fullScore: 15, score: 15, deduction: 0, reason: "" },
+      { name: "问卷回收率", fullScore: 15, score: 13, deduction: 2, reason: "问卷回收率 86%，低于标准 90%，扣 2 分" },
+    ],
+  },
 ];
 
 const PROGRESS_STEPS = [
@@ -196,8 +273,9 @@ function StatusBadge({ status }: { status: ReportStatus }) {
 
 function Sidebar({ current, onNav }: { current: Page; onNav: (p: Page) => void }) {
   const items = [
-    { id: "home" as Page, icon: LayoutDashboard, label: "生成报告" },
-    { id: "history" as Page, icon: History, label: "历史报告" },
+    { id: "dashboard" as Page, icon: BarChart2, label: "数据看板", group: ["dashboard"] },
+    { id: "dataupload" as Page, icon: UploadCloud, label: "生成报告", group: ["dataupload", "home", "upload", "mobile", "confirm", "progress", "result"] },
+    { id: "history" as Page, icon: History, label: "历史报告", group: ["history"] },
   ];
   return (
     <aside className="w-56 shrink-0 flex flex-col" style={{ background: "var(--sidebar)", color: "var(--sidebar-foreground)" }}>
@@ -208,8 +286,8 @@ function Sidebar({ current, onNav }: { current: Page; onNav: (p: Page) => void }
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {items.map(({ id, icon: Icon, label }) => {
-          const active = current === id || (id === "home" && ["upload", "confirm", "progress", "result"].includes(current));
+        {items.map(({ id, icon: Icon, label, group }) => {
+          const active = group.includes(current);
           return (
             <button
               key={id}
@@ -262,8 +340,8 @@ function TopBar({ title, subtitle, breadcrumbs }: { title: string; subtitle?: st
 
 // ─── Page 1: Home ─────────────────────────────────────────────────────────────
 
-function HomePage({ onNav }: { onNav: (p: Page) => void }) {
-  const recent = HISTORY_REPORTS.slice(0, 4);
+function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Report[] }) {
+  const recent = reports.slice(0, 4);
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="生成绩效考核报告" breadcrumbs={["生成报告"]} />
@@ -278,12 +356,12 @@ function HomePage({ onNav }: { onNav: (p: Page) => void }) {
                 上传资料包，系统自动完成资料识别、金额核算、正文生成和格式校验，输出可直接使用的 DOCX 成品报告。
               </p>
               <button
-                onClick={() => onNav("upload")}
+                onClick={() => onNav("dataupload")}
                 className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
                 style={{ background: "var(--primary)" }}
               >
                 <UploadCloud size={16} />
-                上传资料包生成报告
+                上传数据生成报告
               </button>
             </div>
             <div className="hidden md:flex flex-col gap-2 shrink-0">
@@ -468,7 +546,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <TopBar title="上传资料包" breadcrumbs={["生成报告", "上传资料包"]} />
+      <TopBar title="资料包上传" breadcrumbs={["数据上传", "资料包上传"]} />
       <div className="px-8 py-6 max-w-3xl space-y-5">
 
         {/* Upload zone */}
@@ -736,10 +814,10 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
           <button
-            onClick={() => onNav("home")}
+            onClick={() => onNav("dataupload")}
             className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            取消
+            返回选择
           </button>
           <button
             onClick={() => onNav("confirm")}
@@ -801,8 +879,9 @@ function OutputOptions({ selected, onToggle }: { selected: Set<string>; onToggle
 
 // ─── Page 3: Confirm ──────────────────────────────────────────────────────────
 
-function ConfirmPage({ onNav, packageFiles, selectedTowns, methodFiles, methodText, outputSelected, onToggleOutput, reportPeriod }: {
+function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFiles, methodText, outputSelected, onToggleOutput, reportPeriod }: {
   onNav: (p: Page) => void;
+  dataSource: "upload" | "mobile";
   packageFiles: File[];
   selectedTowns: string[];
   methodFiles: File[];
@@ -817,7 +896,7 @@ function ConfirmPage({ onNav, packageFiles, selectedTowns, methodFiles, methodTe
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <TopBar title="确认生成" breadcrumbs={["生成报告", "上传资料包", "确认生成"]} />
+      <TopBar title="确认生成" breadcrumbs={dataSource === "mobile" ? ["生成报告", "使用数据看板数据", "确认生成"] : ["生成报告", "资料包上传", "确认生成"]} />
       <div className="px-8 py-6 max-w-3xl space-y-5">
 
         {/* Summary card */}
@@ -826,13 +905,18 @@ function ConfirmPage({ onNav, packageFiles, selectedTowns, methodFiles, methodTe
             <h3 className="text-sm font-semibold text-foreground">系统已识别以下信息</h3>
           </div>
           <div className="px-6 py-5 space-y-4">
-            <Row label="资料包" value={`${packageFiles.length} 个文件`} mono extra={
-              <div className="flex flex-col gap-1 mt-1.5">
-                {packageFiles.map((f, i) => (
-                  <span key={i} className="text-xs text-muted-foreground font-mono truncate">{f.name}</span>
-                ))}
-              </div>
-            } />
+            {dataSource === "upload" && (
+              <Row label="资料包" value={`${packageFiles.length} 个文件`} mono extra={
+                <div className="flex flex-col gap-1 mt-1.5">
+                  {packageFiles.map((f, i) => (
+                    <span key={i} className="text-xs text-muted-foreground font-mono truncate">{f.name}</span>
+                  ))}
+                </div>
+              } />
+            )}
+            {dataSource === "mobile" && (
+              <Row label="数据来源" value="数据看板（已完成镇街）" />
+            )}
             <Row label="已识别镇街" value={`${selectedTowns.length} 个`} mono extra={
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {selectedTowns.map(t => (
@@ -903,7 +987,7 @@ function ConfirmPage({ onNav, packageFiles, selectedTowns, methodFiles, methodTe
 
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
-          <button onClick={() => onNav("upload")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <button onClick={() => onNav(dataSource === "mobile" ? "mobile" : "upload")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
             返回修改
           </button>
           <button
@@ -934,9 +1018,10 @@ function Row({ label, value, mono, valueClass, extra }: { label: string; value: 
 
 // ─── Page 4: Progress ─────────────────────────────────────────────────────────
 
-function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, outputSelected }: {
+function ProgressPage({ onNav, onStart, dataSource, methodFiles, methodText, selectedTowns, outputSelected }: {
   onNav: (p: Page) => void;
   onStart: () => void;
+  dataSource: "upload" | "mobile";
   methodFiles: File[];
   methodText: string;
   selectedTowns: string[];
@@ -944,6 +1029,12 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
   const calcMethodLabel = hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法";
+  const isMobile = dataSource === "mobile";
+
+  const steps = PROGRESS_STEPS.map(s => s.id === 1
+    ? { ...s, label: isMobile ? "读取数据看板数据" : "读取资料包", desc: isMobile ? "载入看板已完成调研数据" : "解压并索引全部附件" }
+    : s
+  );
 
   const [step, setStep] = useState(0);
   useEffect(() => { onStart(); }, []);
@@ -955,12 +1046,12 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
   ]);
 
   useEffect(() => {
-    if (step >= PROGRESS_STEPS.length) return;
+    if (step >= steps.length) return;
     const timer = setTimeout(() => {
       setStep(s => s + 1);
       setLogs(prev => {
         const msgs: Record<number, string> = {
-          0: "正在解压资料包…",
+          0: isMobile ? "正在读取数据看板数据…" : "正在解压资料包…",
           1: `已识别 ${selectedTowns.length} 个镇街附件`,
           2: `考核数据抽取完成，共 ${selectedTowns.length * 12} 项指标`,
           3: `金额核算完成，${calcMethodLabel}`,
@@ -974,7 +1065,7 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
     return () => clearTimeout(timer);
   }, [step]);
 
-  const done = step >= PROGRESS_STEPS.length;
+  const done = step >= steps.length;
 
   useEffect(() => {
     if (done) {
@@ -995,7 +1086,7 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
               <h3 className="text-sm font-semibold text-foreground">处理步骤</h3>
             </div>
             <div className="px-6 py-5 space-y-1">
-              {PROGRESS_STEPS.map((s, i) => {
+              {steps.map((s, i) => {
                 const isActive = i === step;
                 const isDone = i < step;
                 return (
@@ -1021,12 +1112,12 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
             <div className="px-6 pb-5">
               <div className="flex justify-between text-xs text-muted-foreground font-mono mb-1.5">
                 <span>整体进度</span>
-                <span>{Math.round((step / PROGRESS_STEPS.length) * 100)}%</span>
+                <span>{Math.round((step / steps.length) * 100)}%</span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${(step / PROGRESS_STEPS.length) * 100}%`, background: "var(--primary)" }}
+                  style={{ width: `${(step / steps.length) * 100}%`, background: "var(--primary)" }}
                 />
               </div>
             </div>
@@ -1046,7 +1137,7 @@ function ProgressPage({ onNav, onStart, methodFiles, methodText, selectedTowns, 
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">当前动作</p>
-                  <p className="text-sm text-foreground">{done ? "任务完成" : PROGRESS_STEPS[step]?.label ?? "等待"}</p>
+                  <p className="text-sm text-foreground">{done ? "任务完成" : steps[step]?.label ?? "等待"}</p>
                 </div>
                 <div className="h-px bg-border" />
                 <div>
@@ -1224,7 +1315,7 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
                 返回首页
               </button>
               <button
-                onClick={() => onNav("upload")}
+                onClick={() => onNav("dataupload")}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
                 style={{ background: "var(--primary)" }}
               >
@@ -1277,9 +1368,9 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
 
 // ─── Page 6: History ─────────────────────────────────────────────────────────
 
-function HistoryPage({ onNav }: { onNav: (p: Page) => void }) {
+function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Report[] }) {
   const [filter, setFilter] = useState<"all" | "completed" | "processing">("all");
-  const filtered = HISTORY_REPORTS.filter(r => filter === "all" || r.status === filter);
+  const filtered = reports.filter(r => filter === "all" || r.status === filter);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1349,18 +1440,758 @@ function HistoryPage({ onNav }: { onNav: (p: Page) => void }) {
   );
 }
 
+// ─── Page: DataDashboard ─────────────────────────────────────────────────────
+
+const PIE_COLORS = ["#1a3a5c", "#e8edf3"];
+
+function TownPieCard({ town }: { town: TownSurvey }) {
+  const totalDone = town.surveys.reduce((s, x) => s + x.done, 0);
+  const totalAll = town.surveys.reduce((s, x) => s + x.total, 0);
+  const pieData = [
+    { name: "已完成", value: totalDone },
+    { name: "未完成", value: totalAll - totalDone },
+  ];
+  return (
+    <div className="bg-card border border-border rounded-lg p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <MapPin size={14} className="text-primary shrink-0" />
+        <span className="text-sm font-semibold text-foreground">{town.name}</span>
+        <span className="ml-auto text-xs font-mono text-muted-foreground">{totalDone}/{totalAll}</span>
+      </div>
+      <div className="h-32">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={pieData} cx="50%" cy="50%" innerRadius={28} outerRadius={48} dataKey="value" strokeWidth={0}>
+              {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} />)}
+            </Pie>
+            <Tooltip formatter={(v: number) => [`${v} 项`, ""]} contentStyle={{ fontSize: 11 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="space-y-1.5 mt-1">
+        {town.surveys.map(s => (
+          <div key={s.label} className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground w-24 shrink-0">{s.label}</span>
+            <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all" style={{ width: `${s.total ? (s.done / s.total) * 100 : 0}%`, background: "var(--primary)" }} />
+            </div>
+            <span className="text-xs font-mono text-muted-foreground w-10 text-right">{s.done}/{s.total}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_SURVEYS = () => SURVEY_LABELS.map(label => ({ label, done: 0, total: 0 }));
+
+function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
+  onNav: (p: Page) => void;
+  onViewTown: (t: TownSurvey) => void;
+  towns: TownSurvey[];
+  setTowns: React.Dispatch<React.SetStateAction<TownSurvey[]>>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<TownSurvey | null>(null);
+  const [addingNew, setAddingNew] = useState(false);
+  const [newDraft, setNewDraft] = useState<TownSurvey>({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() });
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const completed = towns.filter(t => t.status === "completed");
+  const inprogress = towns.filter(t => t.status === "inprogress");
+  const pending = towns.filter(t => t.status === "pending");
+
+  function startEdit(t: TownSurvey) {
+    setEditingId(t.name);
+    setEditDraft({ ...t, surveys: t.surveys.map(s => ({ ...s })) });
+  }
+
+  function saveEdit() {
+    if (!editDraft) return;
+    setTowns(prev => prev.map(t => t.name === editingId ? editDraft : t));
+    setEditingId(null);
+    setEditDraft(null);
+  }
+
+  function deleteRow(name: string) {
+    setTowns(prev => prev.filter(t => t.name !== name));
+    setDeleteConfirm(null);
+  }
+
+  function saveNew() {
+    if (!newDraft.name.trim()) return;
+    setTowns(prev => [...prev, { ...newDraft }]);
+    setAddingNew(false);
+    setNewDraft({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() });
+  }
+
+  function SurveyInputs({ surveys, onChange }: { surveys: TownSurvey["surveys"]; onChange: (s: TownSurvey["surveys"]) => void }) {
+    return (
+      <div className="flex gap-3">
+        {surveys.map((s, i) => (
+          <div key={s.label} className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">{s.label}</span>
+            <div className="flex items-center gap-1">
+              <input type="number" min={0} value={s.done}
+                onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, done: Math.min(Number(e.target.value), x.total) } : x); onChange(next); }}
+                className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                style={{ background: "var(--input-background)" }}
+              />
+              <span className="text-xs text-muted-foreground">/</span>
+              <input type="number" min={0} value={s.total}
+                onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, total: Number(e.target.value), done: Math.min(x.done, Number(e.target.value)) } : x); onChange(next); }}
+                className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
+                style={{ background: "var(--input-background)" }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar title="数据看板" subtitle="调研进度总览" breadcrumbs={["数据看板"]} />
+      <div className="px-8 py-6 space-y-6 max-w-5xl">
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: "已完成镇街", value: completed.length, color: "text-[var(--status-success)]", bg: "bg-[var(--status-success-bg)]" },
+            { label: "进行中镇街", value: inprogress.length, color: "text-blue-600", bg: "bg-blue-50" },
+            { label: "未开始镇街", value: pending.length, color: "text-muted-foreground", bg: "bg-muted" },
+          ].map(({ label, value, color, bg }) => (
+            <div key={label} className={`${bg} border border-border rounded-lg px-5 py-4`}>
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className={`text-2xl font-semibold font-mono mt-1 ${color}`}>{value} <span className="text-sm font-normal">个</span></p>
+            </div>
+          ))}
+        </div>
+
+        {/* In Progress — center, most prominent */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            <h3 className="text-sm font-semibold text-foreground">正在进行</h3>
+            <span className="text-xs text-muted-foreground font-mono">{inprogress.length} 个镇街</span>
+          </div>
+          {inprogress.length > 0 ? (
+            <div className="grid grid-cols-2 gap-4">
+              {inprogress.map(t => <TownPieCard key={t.name} town={t} />)}
+            </div>
+          ) : (
+            <div className="bg-card border border-border rounded-lg px-6 py-8 text-center text-sm text-muted-foreground">暂无进行中的镇街</div>
+          )}
+        </div>
+
+        {/* Completed */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-[var(--status-success)]" />
+            <h3 className="text-sm font-semibold text-foreground">已完成</h3>
+            <span className="text-xs text-muted-foreground font-mono">{completed.length} 个镇街</span>
+          </div>
+          {completed.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {completed.map(t => (
+                <div key={t.name} className="flex items-center gap-2 bg-[var(--status-success-bg)] border border-green-200 rounded-full px-3 py-1.5">
+                  <CheckCircle2 size={13} className="text-[var(--status-success)]" />
+                  <span className="text-xs font-medium text-foreground">{t.name}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">暂无已完成镇街</p>
+          )}
+        </div>
+
+        {/* Pending */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground opacity-40" />
+            <h3 className="text-sm font-semibold text-foreground">未开始</h3>
+            <span className="text-xs text-muted-foreground font-mono">{pending.length} 个镇街</span>
+          </div>
+          {pending.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {pending.map(t => (
+                <div key={t.name} className="flex items-center gap-2 bg-muted border border-border rounded-full px-3 py-1.5">
+                  <span className="w-2 h-2 rounded-full border border-muted-foreground opacity-40" />
+                  <span className="text-xs text-muted-foreground">{t.name}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">全部镇街已开始</p>
+          )}
+        </div>
+
+        {/* Data preview table */}
+        <div className="bg-card border border-border rounded-lg">
+          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">数据预览</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">可直接修改各镇街调研数据，支持增加与删除</p>
+            </div>
+            <button
+              onClick={() => setAddingNew(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              style={{ background: "var(--primary)" }}
+            >
+              <Plus size={13} /> 新增镇街
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground font-mono">
+                  <th className="text-left px-5 py-3 font-medium w-24">镇街名称</th>
+                  <th className="text-left px-3 py-3 font-medium w-24">状态</th>
+                  {SURVEY_LABELS.map(l => (
+                    <th key={l} className="text-left px-3 py-3 font-medium whitespace-nowrap">
+                      {l} <span className="opacity-50">完成/总量</span>
+                    </th>
+                  ))}
+                  <th className="text-left px-3 py-3 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {towns.map(t => {
+                  const isEditing = editingId === t.name;
+                  const draft = isEditing ? editDraft! : t;
+                  return (
+                    <tr key={t.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
+                      <td className="px-5 py-2.5">
+                        {isEditing ? (
+                          <input value={draft.name} onChange={e => setEditDraft(d => d ? { ...d, name: e.target.value } : d)}
+                            className="w-20 border border-border rounded px-1.5 py-0.5 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary/40"
+                            style={{ background: "var(--input-background)" }} />
+                        ) : (
+                          <span className="text-xs font-medium text-foreground">{t.name}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {isEditing ? (
+                          <select value={draft.status} onChange={e => setEditDraft(d => d ? { ...d, status: e.target.value as TownSurveyStatus } : d)}
+                            className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
+                            style={{ background: "var(--input-background)" }}>
+                            <option value="completed">已完成</option>
+                            <option value="inprogress">进行中</option>
+                            <option value="pending">未开始</option>
+                          </select>
+                        ) : (
+                          <StatusBadge status={t.status === "completed" ? "completed" : t.status === "inprogress" ? "processing" : "pending"} />
+                        )}
+                      </td>
+                      {isEditing ? (
+                        <td colSpan={3} className="px-3 py-2.5">
+                          <SurveyInputs surveys={draft.surveys} onChange={s => setEditDraft(d => d ? { ...d, surveys: s } : d)} />
+                        </td>
+                      ) : (
+                        t.surveys.map(s => (
+                          <td key={s.label} className="px-3 py-2.5 text-xs font-mono text-muted-foreground">
+                            <span className={s.done === s.total && s.total > 0 ? "text-[var(--status-success)]" : ""}>{s.done}</span>/{s.total}
+                          </td>
+                        ))
+                      )}
+                      <td className="px-3 py-2.5">
+                        {isEditing ? (
+                          <div className="flex gap-2">
+                            <button onClick={saveEdit} className="text-xs text-[var(--status-success)] hover:underline font-medium">保存</button>
+                            <button onClick={() => { setEditingId(null); setEditDraft(null); }} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
+                          </div>
+                        ) : deleteConfirm === t.name ? (
+                          <div className="flex gap-2 items-center">
+                            <span className="text-xs text-[var(--status-error)]">确认删除？</span>
+                            <button onClick={() => deleteRow(t.name)} className="text-xs text-[var(--status-error)] hover:underline font-medium">删除</button>
+                            <button onClick={() => setDeleteConfirm(null)} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
+                          </div>
+                        ) : (
+                          <div className="flex gap-3">
+                            <button onClick={() => onViewTown(t)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"><ChevronRight size={11} />详情</button>
+                            <button onClick={() => setDeleteConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">删除</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {addingNew && (
+                  <tr className="border-b border-border bg-[var(--status-success-bg)]">
+                    <td className="px-5 py-2.5">
+                      <input value={newDraft.name} onChange={e => setNewDraft(d => ({ ...d, name: e.target.value }))}
+                        placeholder="镇街名称"
+                        className="w-20 border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        style={{ background: "var(--input-background)" }} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <select value={newDraft.status} onChange={e => setNewDraft(d => ({ ...d, status: e.target.value as TownSurveyStatus }))}
+                        className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
+                        style={{ background: "var(--input-background)" }}>
+                        <option value="completed">已完成</option>
+                        <option value="inprogress">进行中</option>
+                        <option value="pending">未开始</option>
+                      </select>
+                    </td>
+                    <td colSpan={3} className="px-3 py-2.5">
+                      <SurveyInputs surveys={newDraft.surveys} onChange={s => setNewDraft(d => ({ ...d, surveys: s }))} />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex gap-2">
+                        <button onClick={saveNew} disabled={!newDraft.name.trim()} className="text-xs text-[var(--status-success)] hover:underline font-medium disabled:opacity-40">添加</button>
+                        <button onClick={() => { setAddingNew(false); setNewDraft({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() }); }} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+// ─── Page: TownDetail ────────────────────────────────────────────────────────
+
+function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: Page) => void }) {
+  if (!town) { onNav("dashboard"); return null; }
+
+  const [groups, setGroups] = useState<SurveyScoreGroup[]>(
+    SCORE_TEMPLATES.map(g => ({ ...g, items: g.items.map(i => ({ ...i })) }))
+  );
+  const [editingKey, setEditingKey] = useState<string | null>(null); // "groupLabel|itemName"
+
+  function updateItem(gLabel: string, iName: string, field: keyof ScoreItem, raw: string) {
+    setGroups(prev => prev.map(g => g.label !== gLabel ? g : {
+      ...g,
+      items: g.items.map(item => {
+        if (item.name !== iName) return item;
+        if (field === "reason") return { ...item, reason: raw };
+        const num = Math.max(0, Number(raw) || 0);
+        const score = field === "score" ? Math.min(num, item.fullScore) : item.score;
+        const fullScore = field === "fullScore" ? num : item.fullScore;
+        const deduction = (field === "fullScore" ? num : item.fullScore) - (field === "score" ? Math.min(num, item.fullScore) : item.score);
+        return { ...item, [field]: field === "score" ? Math.min(num, item.fullScore) : field === "fullScore" ? num : num, score, fullScore, deduction: Math.max(0, deduction) };
+      }),
+    }));
+  }
+
+  const totalFull = groups.flatMap(g => g.items).reduce((s, i) => s + i.fullScore, 0);
+  const totalScore = groups.flatMap(g => g.items).reduce((s, i) => s + i.score, 0);
+  const totalDeduction = totalFull - totalScore;
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar
+        title={`${town.name} — 调研评分详情`}
+        breadcrumbs={["数据看板", "评分详情"]}
+        subtitle="报告周期：2023年下半年度"
+      />
+      <div className="px-8 py-6 max-w-5xl space-y-5">
+
+        {/* Summary bar */}
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: "满分", value: totalFull, color: "text-foreground" },
+            { label: "实得分", value: totalScore, color: "text-primary" },
+            { label: "合计扣分", value: totalDeduction, color: totalDeduction > 0 ? "text-[var(--status-error)]" : "text-[var(--status-success)]" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="bg-card border border-border rounded-lg px-5 py-4">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className={`text-2xl font-semibold font-mono mt-1 ${color}`}>{value} <span className="text-sm font-normal">分</span></p>
+            </div>
+          ))}
+        </div>
+
+        {/* Score tables per survey */}
+        {groups.map(group => {
+          const groupFull = group.items.reduce((s, i) => s + i.fullScore, 0);
+          const groupScore = group.items.reduce((s, i) => s + i.score, 0);
+          const groupDeduction = groupFull - groupScore;
+          return (
+            <div key={group.label} className="bg-card border border-border rounded-lg">
+              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">{group.label}</h3>
+                <div className="flex items-center gap-4 text-xs font-mono">
+                  <span className="text-muted-foreground">满分 {groupFull}</span>
+                  <span className="text-primary font-medium">得分 {groupScore}</span>
+                  {groupDeduction > 0
+                    ? <span className="text-[var(--status-error)] font-medium">扣分 −{groupDeduction}</span>
+                    : <span className="text-[var(--status-success)]">无扣分</span>
+                  }
+                </div>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground font-mono">
+                    <th className="text-left px-5 py-3 font-medium">考核项目</th>
+                    <th className="text-right px-4 py-3 font-medium w-20">满分</th>
+                    <th className="text-right px-4 py-3 font-medium w-20">得分</th>
+                    <th className="text-right px-4 py-3 font-medium w-20">扣分</th>
+                    <th className="text-left px-4 py-3 font-medium">扣分原因</th>
+                    <th className="text-left px-4 py-3 font-medium w-20">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.items.map(item => {
+                    const key = `${group.label}|${item.name}`;
+                    const isEditing = editingKey === key;
+                    return (
+                      <tr key={item.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
+                        <td className="px-5 py-2.5 text-xs text-foreground">{item.name}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          {isEditing ? (
+                            <input type="number" min={0} value={item.fullScore}
+                              onChange={e => updateItem(group.label, item.name, "fullScore", e.target.value)}
+                              className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                              style={{ background: "var(--input-background)" }} />
+                          ) : (
+                            <span className="text-xs font-mono text-muted-foreground">{item.fullScore}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          {isEditing ? (
+                            <input type="number" min={0} max={item.fullScore} value={item.score}
+                              onChange={e => updateItem(group.label, item.name, "score", e.target.value)}
+                              className="w-14 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-right focus:outline-none focus:ring-1 focus:ring-primary/40"
+                              style={{ background: "var(--input-background)" }} />
+                          ) : (
+                            <span className={`text-xs font-mono ${item.score < item.fullScore ? "text-[var(--status-error)]" : "text-[var(--status-success)]"}`}>
+                              {item.score}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs font-mono text-right">
+                          {item.deduction > 0
+                            ? <span className="text-[var(--status-error)] font-medium">−{item.deduction}</span>
+                            : <span className="text-[var(--status-success)]">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {isEditing ? (
+                            <input type="text" value={item.reason}
+                              onChange={e => updateItem(group.label, item.name, "reason", e.target.value)}
+                              placeholder="填写扣分原因…"
+                              className="w-full border border-border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                              style={{ background: "var(--input-background)" }} />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {item.reason || <span className="text-[var(--status-success)]">达标</span>}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {isEditing ? (
+                            <button onClick={() => setEditingKey(null)} className="text-xs text-[var(--status-success)] hover:underline font-medium">保存</button>
+                          ) : (
+                            <button onClick={() => setEditingKey(key)} className="text-xs text-primary hover:underline">编辑</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border bg-muted/30 text-xs font-mono font-medium">
+                    <td className="px-5 py-2.5 text-muted-foreground">小计</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">{groupFull}</td>
+                    <td className="px-4 py-2.5 text-right text-primary">{groupScore}</td>
+                    <td className="px-4 py-2.5 text-right text-[var(--status-error)]">{groupDeduction > 0 ? `−${groupDeduction}` : "—"}</td>
+                    <td className="px-4 py-2.5" />
+                    <td className="px-4 py-2.5" />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        })}
+
+        <div className="flex items-center justify-between pt-1">
+          <button onClick={() => onNav("dashboard")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+            <ChevronRight size={14} className="rotate-180" /> 返回数据看板
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page: DataUploadSelect ───────────────────────────────────────────────────
+
+function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
+  const [selected, setSelected] = useState<"upload" | "mobile" | null>(null);
+
+  const options = [
+    {
+      id: "upload" as const,
+      icon: FolderOpen,
+      label: "资料包上传",
+      desc: "上传已整理的镇街资料包，系统自动识别镇街并生成考核报告",
+    },
+    {
+      id: "mobile" as const,
+      icon: BarChart2,
+      label: "使用数据看板数据",
+      desc: "直接使用数据看板中已采集的调研数据，自动读取各镇街调研结果生成报告",
+    },
+  ];
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar title="数据上传" breadcrumbs={["数据上传"]} />
+      <div className="px-8 py-10 max-w-2xl">
+        <p className="text-sm text-muted-foreground mb-6">请选择本次数据来源方式</p>
+        <div className="space-y-4">
+          {options.map(opt => {
+            const active = selected === opt.id;
+            return (
+              <div
+                key={opt.id}
+                onClick={() => setSelected(opt.id)}
+                className={`flex items-start gap-5 p-5 rounded-lg border-2 cursor-pointer transition-colors ${active ? "border-primary bg-blue-50" : "border-border bg-card hover:border-primary/40 hover:bg-muted/20"}`}
+              >
+                <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${active ? "border-primary" : "border-border"}`}>
+                  {active && <div className="w-2.5 h-2.5 rounded-full" style={{ background: "var(--primary)" }} />}
+                </div>
+                <div className="flex items-start gap-4 flex-1">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${active ? "bg-primary" : "bg-muted"}`}>
+                    <opt.icon size={20} className={active ? "text-white" : "text-muted-foreground"} />
+                  </div>
+                  <div>
+                    <p className={`text-sm font-semibold ${active ? "text-foreground" : "text-muted-foreground"}`}>{opt.label}</p>
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{opt.desc}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex justify-end mt-8">
+          <button
+            onClick={() => selected && onNav(selected)}
+            disabled={!selected}
+            className={`inline-flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-opacity ${selected ? "text-primary-foreground hover:opacity-90" : "opacity-40 cursor-not-allowed text-primary-foreground"}`}
+            style={{ background: "var(--primary)" }}
+          >
+            下一步
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page: MobileData ─────────────────────────────────────────────────────────
+
+function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
+  onNav: (p: Page) => void;
+  towns: TownSurvey[];
+  methodFiles: File[];
+  setMethodFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  methodText: string;
+  setMethodText: React.Dispatch<React.SetStateAction<string>>;
+  reportPeriod: string;
+  setReportPeriod: React.Dispatch<React.SetStateAction<string>>;
+}) {
+  const [methodOpen, setMethodOpen] = useState(false);
+  const [removedTowns, setRemovedTowns] = useState<Set<string>>(new Set());
+  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
+  const methodFileRef = useRef<HTMLInputElement>(null);
+
+  const visibleTowns = towns.filter(t => !removedTowns.has(t.name));
+  const completed = visibleTowns.filter(t => t.status === "completed");
+  const notCompleted = visibleTowns.filter(t => t.status !== "completed");
+  const allCompleted = notCompleted.length === 0 && completed.length > 0;
+  const canProceed = allCompleted && reportPeriod.trim().length > 0;
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar title="使用数据看板数据" breadcrumbs={["生成报告", "使用数据看板数据"]} />
+      <div className="px-8 py-6 max-w-3xl space-y-5">
+
+        {/* Data overview */}
+        <div className="bg-card border border-border rounded-lg">
+          <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">当前看板数据概览</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">以下为数据看板中各镇街采集数据{removedTowns.size > 0 && `，已排除 ${removedTowns.size} 个镇街`}</p>
+            </div>
+            {removedTowns.size > 0 && (
+              <button onClick={() => setRemovedTowns(new Set())} className="text-xs text-primary hover:underline">恢复全部</button>
+            )}
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs text-muted-foreground font-mono">
+                <th className="text-left px-5 py-3 font-medium">镇街</th>
+                {SURVEY_LABELS.map(l => <th key={l} className="text-left px-3 py-3 font-medium">{l}</th>)}
+                <th className="text-left px-3 py-3 font-medium">状态</th>
+                <th className="text-left px-3 py-3 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleTowns.map(t => (
+                <tr key={t.name} className={`border-b border-border last:border-0 hover:bg-muted/20 ${t.status === "pending" ? "opacity-50" : ""}`}>
+                  <td className="px-5 py-3 text-xs font-medium text-foreground">{t.name}</td>
+                  {t.surveys.map(s => (
+                    <td key={s.label} className="px-3 py-3 text-xs font-mono text-muted-foreground">
+                      {t.status === "pending" ? <span className="text-muted-foreground">—</span> : `${s.done}/${s.total}`}
+                    </td>
+                  ))}
+                  <td className="px-3 py-3">
+                    <StatusBadge status={t.status === "completed" ? "completed" : t.status === "inprogress" ? "processing" : "pending"} />
+                  </td>
+                  <td className="px-3 py-3">
+                    {removeConfirm === t.name ? (
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => { setRemovedTowns(prev => new Set([...prev, t.name])); setRemoveConfirm(null); }} className="text-xs text-[var(--status-error)] hover:underline font-medium">确认</button>
+                        <button onClick={() => setRemoveConfirm(null)} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setRemoveConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">删除</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Not-completed warning */}
+        {!allCompleted && (
+          <div className="flex items-start gap-2 bg-[var(--status-error-bg)] border border-red-200 rounded-lg px-4 py-3">
+            <AlertCircle size={15} className="text-[var(--status-error)] mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-foreground">调查暂未完成，暂时无法生成报告</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                目前有 {notCompleted.length} 个镇街尚未完成全部调研（{notCompleted.map(t => t.name).join("、")}），请前往数据看板补充数据后再生成。
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Report period */}
+        <div className="bg-card border border-border rounded-lg">
+          <div className="px-6 py-4 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">报告周期 <span className="text-[var(--status-error)] text-xs ml-1">必填</span></h3>
+          </div>
+          <div className="px-6 py-4">
+            <input
+              type="text"
+              value={reportPeriod}
+              onChange={e => setReportPeriod(e.target.value)}
+              placeholder="例如：2023年下半年度、2024年第一季度"
+              className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              style={{ background: "var(--input-background)" }}
+            />
+          </div>
+        </div>
+
+        {/* Method — same style as upload page */}
+        <div className="bg-card border border-border rounded-lg">
+          <button
+            onClick={() => setMethodOpen(!methodOpen)}
+            className="w-full flex items-center justify-between px-6 py-4 text-left"
+          >
+            <div>
+              <span className="text-sm font-semibold text-foreground">新的金额计算方法</span>
+              <span className="ml-2 text-xs text-muted-foreground">选填</span>
+            </div>
+            {methodOpen ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
+          </button>
+          {methodOpen && (
+            <div className="px-6 pb-6 border-t border-border pt-4 space-y-4">
+              <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
+                <Info size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  未填写时，系统将使用 <DefaultMethodLink /> 继续生成报告，不影响主流程。
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-2">上传合同或补充协议（可选）</label>
+                <input ref={methodFileRef} type="file" className="hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"
+                  onChange={e => { const files = Array.from(e.target.files ?? []); if (files.length) setMethodFiles(prev => [...prev, ...files]); }} />
+                <div
+                  className="border border-dashed border-border rounded p-4 flex items-center gap-3 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors"
+                  onClick={() => methodFileRef.current?.click()}
+                >
+                  <UploadCloud size={16} className="text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">上传合同、补充协议或金额计算表</span>
+                </div>
+                {methodFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {methodFiles.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <FileText size={12} className="text-primary shrink-0" />
+                          <span className="text-xs text-foreground truncate max-w-xs">{f.name}</span>
+                        </div>
+                        <button onClick={() => setMethodFiles(prev => prev.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-foreground ml-2">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-2">或填写说明（可选）</label>
+                <textarea rows={3} value={methodText} onChange={e => setMethodText(e.target.value)}
+                  className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                  style={{ background: "var(--input-background)" }}
+                  placeholder="例如：本期按合同单价下浮 5% 结算，超期罚款按每日 0.05% 扣减……" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-between pt-1">
+          <button onClick={() => onNav("dataupload")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">返回选择</button>
+          <div className="flex items-center gap-3">
+            {!allCompleted && (
+              <button onClick={() => onNav("dashboard")} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm border border-border rounded hover:bg-muted/40 transition-colors text-foreground">
+                <BarChart2 size={14} /> 前往数据看板
+              </button>
+            )}
+            <button
+              disabled={!canProceed}
+              onClick={() => onNav("confirm")}
+              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-opacity ${canProceed ? "text-primary-foreground hover:opacity-90" : "opacity-40 cursor-not-allowed text-primary-foreground"}`}
+              style={{ background: "var(--primary)" }}
+            >
+              下一步：确认生成 <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [page, setPage] = useState<Page>("home");
+  const [detailTown, setDetailTown] = useState<TownSurvey | null>(null);
+  const [towns, setTowns] = useState<TownSurvey[]>(DASHBOARD_TOWNS.map(t => ({ ...t, surveys: t.surveys.map(s => ({ ...s })) })));
+  const [dataSource, setDataSource] = useState<"upload" | "mobile">("upload");
   const [packageFiles, setPackageFiles] = useState<File[]>([]);
   const [selectedTowns, setSelectedTowns] = useState<string[]>([]);
   const [methodFiles, setMethodFiles] = useState<File[]>([]);
   const [methodText, setMethodText] = useState("");
   const [outputSelected, setOutputSelected] = useState<Set<string>>(new Set(["separate", "summary"]));
+  const [confirmedTowns, setConfirmedTowns] = useState<string[]>([]);
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [reportPeriod, setReportPeriod] = useState("");
+  const [historyReports, setHistoryReports] = useState<Report[]>(HISTORY_REPORTS);
   const progressStartRef = useRef<number | null>(null);
 
   function toggleOutput(id: string) {
@@ -1373,10 +2204,25 @@ export default function App() {
 
   function renderPage() {
     switch (page) {
-      case "home": return <HomePage onNav={setPage} />;
+      case "home": return <HomePage onNav={setPage} reports={historyReports} />;
+      case "dashboard": return <DataDashboardPage onNav={setPage} onViewTown={(t) => { setDetailTown(t); setPage("towndetail"); }} towns={towns} setTowns={setTowns} />;
+      case "towndetail": return <TownDetailPage town={detailTown} onNav={setPage} />;
+      case "dataupload": return <DataUploadSelectPage onNav={setPage} />;
+      case "mobile": return (
+        <MobileDataPage
+          onNav={(p) => { if (p === "confirm") setDataSource("mobile"); setPage(p); }}
+          towns={towns}
+          methodFiles={methodFiles}
+          setMethodFiles={setMethodFiles}
+          methodText={methodText}
+          setMethodText={setMethodText}
+          reportPeriod={reportPeriod}
+          setReportPeriod={setReportPeriod}
+        />
+      );
       case "upload": return (
         <UploadPage
-          onNav={setPage}
+          onNav={(p) => { if (p === "confirm") setDataSource("upload"); setPage(p); }}
           packageFiles={packageFiles}
           setPackageFiles={setPackageFiles}
           selectedTowns={selectedTowns}
@@ -1389,32 +2235,66 @@ export default function App() {
           setReportPeriod={setReportPeriod}
         />
       );
-      case "confirm": return (
-        <ConfirmPage
-          onNav={setPage}
-          packageFiles={packageFiles}
-          selectedTowns={selectedTowns}
-          methodFiles={methodFiles}
-          methodText={methodText}
-          outputSelected={outputSelected}
-          onToggleOutput={toggleOutput}
-          reportPeriod={reportPeriod}
-        />
-      );
+      case "confirm": {
+        const confirmTowns = dataSource === "mobile"
+          ? towns.filter(t => t.status === "completed").map(t => t.name)
+          : selectedTowns;
+        return (
+          <ConfirmPage
+            onNav={(p) => {
+              if (p === "progress") setConfirmedTowns(confirmTowns);
+              setPage(p);
+            }}
+            dataSource={dataSource}
+            packageFiles={packageFiles}
+            selectedTowns={confirmTowns}
+            methodFiles={methodFiles}
+            methodText={methodText}
+            outputSelected={outputSelected}
+            onToggleOutput={toggleOutput}
+            reportPeriod={reportPeriod}
+          />
+        );
+      }
       case "progress": return (
         <ProgressPage
           onNav={(p) => {
             if (p === "result" && progressStartRef.current !== null) {
-              setElapsedSeconds(Math.round((Date.now() - progressStartRef.current) / 1000));
+              const elapsed = Math.round((Date.now() - progressStartRef.current) / 1000);
+              setElapsedSeconds(elapsed);
               const now = new Date();
-              setGeneratedAt(now.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\//g, "-"));
+              const nowStr = now.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\//g, "-");
+              setGeneratedAt(nowStr);
+              // Add to history
+              const newReports: Report[] = [
+                ...(outputSelected.has("separate") ? confirmedTowns.map((town, i) => ({
+                  id: `gen-${Date.now()}-${i}`,
+                  name: `${town}${reportPeriod}村级设施考核报告（正文）`,
+                  town,
+                  period: reportPeriod,
+                  status: "completed" as ReportStatus,
+                  size: `${((i * 137 % 8 + 8) / 10).toFixed(1)} MB`,
+                  createdAt: nowStr,
+                })) : []),
+                ...(outputSelected.has("summary") ? [{
+                  id: `gen-${Date.now()}-summary`,
+                  name: `${reportPeriod}村级设施绩效考核综合报告（汇总）`,
+                  town: "全区汇总",
+                  period: reportPeriod,
+                  status: "completed" as ReportStatus,
+                  size: "4.8 MB",
+                  createdAt: nowStr,
+                }] : []),
+              ];
+              setHistoryReports(prev => [...newReports, ...prev]);
             }
             setPage(p);
           }}
           onStart={() => { progressStartRef.current = Date.now(); }}
+          dataSource={dataSource}
           methodFiles={methodFiles}
           methodText={methodText}
-          selectedTowns={selectedTowns}
+          selectedTowns={confirmedTowns}
           outputSelected={outputSelected}
         />
       );
@@ -1425,13 +2305,13 @@ export default function App() {
           methodFiles={methodFiles}
           methodText={methodText}
           outputSelected={outputSelected}
-          selectedTowns={selectedTowns}
+          selectedTowns={confirmedTowns}
           elapsedSeconds={elapsedSeconds}
           generatedAt={generatedAt}
           reportPeriod={reportPeriod}
         />
       );
-      case "history": return <HistoryPage onNav={setPage} />;
+      case "history": return <HistoryPage onNav={setPage} reports={historyReports} />;
     }
   }
 

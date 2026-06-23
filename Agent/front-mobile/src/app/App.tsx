@@ -8,7 +8,7 @@ import {
 
 // ==================== TYPES ====================
 
-type FacilityType = "treatment" | "network";
+type FacilityType = "treatment" | "network" | "survey";
 type DeductionType = "fixed" | "range" | "severity";
 type EntryStatus = "pending" | "no_deduction" | "has_deduction" | "incomplete";
 type SelectionType = "no_deduction" | "standard" | "custom";
@@ -72,6 +72,12 @@ interface ItemEntry {
   done: boolean;
 }
 
+interface TypeScore {
+  maxScore: number;
+  currentScore: number;
+  deductedScore: number;
+}
+
 interface VillageRecord {
   village: string;
   facilityType: FacilityType;
@@ -101,6 +107,15 @@ function triggerDownload(pkg: TownPackage) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function calcSurveyTypeScore(surveyEntries: Record<string, SurveyFormEntry>): TypeScore {
+  const totalForms = SURVEY_CATEGORIES.reduce((s, c) => s + CATEGORY_RESPONDENTS[c].length, 0);
+  const maxScore = totalForms * 5;
+  const currentScore = Object.values(surveyEntries)
+    .filter(e => e.completed)
+    .reduce((s, e) => s + (e.score || 0), 0);
+  return { maxScore, currentScore, deductedScore: maxScore - currentScore };
 }
 
 // ==================== SCORING DATA ====================
@@ -454,7 +469,11 @@ function P0City({ onNext }: { onNext: (c: string) => void }) {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ city, onBack, onNext }: { city: string; onBack: () => void; onNext: (t: string) => void }) {
+function P1Town({ onNext, submittedData, onViewSubmitted }: {
+  onNext: (t: string) => void;
+  submittedData: Record<string, VillageRecord[]>;
+  onViewSubmitted: () => void;
+}) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
   const towns = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"];
@@ -462,12 +481,9 @@ function P1Town({ city, onBack, onNext }: { city: string; onBack: () => void; on
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
-        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
-          <ChevronLeft className="w-4 h-4" />返回
-        </button>
-        <div className="flex items-center gap-1.5 mb-1">
+        <div className="flex items-center gap-1.5 mb-1 mt-1">
           <MapPin className="w-3.5 h-3.5 text-primary-foreground/55" />
-          <span className="text-xs text-primary-foreground/55 tracking-wide">{city}</span>
+          <span className="text-xs text-primary-foreground/55 tracking-wide">农村污水PPP现场考核</span>
         </div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核镇街</h1>
       </div>
@@ -520,12 +536,24 @@ function P1Town({ city, onBack, onNext }: { city: string; onBack: () => void; on
         </div>
       </div>
 
-      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0 space-y-2">
         <button
           onClick={() => { if (!val.trim()) { setErr("请先输入镇名"); return; } onNext(val.trim()); }}
           className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
         >
           下一步 <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onViewSubmitted}
+          className="w-full py-3 border border-border text-muted-foreground rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+        >
+          <BarChart3 className="w-4 h-4" />
+          查看已提交镇街数据
+          {Object.keys(submittedData).length > 0 && (
+            <span className="bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+              {Object.keys(submittedData).length}
+            </span>
+          )}
         </button>
       </div>
     </div>
@@ -534,8 +562,7 @@ function P1Town({ city, onBack, onNext }: { city: string; onBack: () => void; on
 
 // ==================== PAGE 2: VILLAGE ====================
 
-function P2Village({ city, town, onBack, onNext }: {
-  city: string;
+function P2Village({ town, onBack, onNext }: {
   town: string;
   onBack: () => void;
   onNext: (v: string) => void;
@@ -552,7 +579,7 @@ function P2Village({ city, town, onBack, onNext }: {
         </button>
         <div className="flex items-center gap-1.5 mb-1">
           <Building2 className="w-3.5 h-3.5 text-primary-foreground/55" />
-          <span className="text-xs text-primary-foreground/55">{city} · {town}</span>
+          <span className="text-xs text-primary-foreground/55">{town}</span>
         </div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核村点</h1>
       </div>
@@ -619,29 +646,231 @@ function P2Village({ city, town, onBack, onNext }: {
 
 // ==================== PAGE 2b: FACILITY TYPE ====================
 
-function P2bFacilityType({ city, town, village, onBack, onNext }: {
-  city: string; town: string; village: string;
-  onBack: () => void;
-  onNext: (t: FacilityType) => void;
-}) {
-  const [ftype, setFtype] = useState<FacilityType>("treatment");
+const ALL_FACILITY_TYPES: FacilityType[] = ["treatment", "network", "survey"];
 
-  const options = [
-    {
-      v: "treatment" as FacilityType,
-      label: "污水处理设施",
-      sub: "含处理设备及附属构筑物",
-      detail: "适用于建有独立污水处理设施的村点，包括一体化设备、人工湿地、氧化塘等",
-      icon: "🏭",
-    },
-    {
-      v: "network" as FacilityType,
-      label: "纳厂/管网设施",
-      sub: "接入已建处理设施",
-      detail: "适用于污水通过管网收集后接入集中处理厂或已建处理设施的村点",
-      icon: "🔧",
-    },
-  ];
+const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; icon: string }> = {
+  treatment: { label: "污水处理设施", sub: "含处理设备及附属构筑物", icon: "🏭" },
+  network:   { label: "纳厂/管网设施", sub: "接入已建处理设施",       icon: "🔧" },
+  survey:    { label: "调查问卷",      sub: "多方满意度问卷调查",      icon: "📋" },
+};
+
+function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmitVillage }: {
+  town: string; village: string;
+  typeProgress: Partial<Record<FacilityType, boolean>>;
+  onBack: () => void;
+  onEnter: (t: FacilityType) => void;
+  onSubmitVillage: () => void;
+}) {
+  const doneCount = ALL_FACILITY_TYPES.filter(t => typeProgress[t]).length;
+  const allDone = doneCount === ALL_FACILITY_TYPES.length;
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <div className="flex items-center gap-1.5 mb-1">
+          <Building2 className="w-3.5 h-3.5 text-primary-foreground/55" />
+          <span className="text-xs text-primary-foreground/55">{town} · {village}</span>
+        </div>
+        <div className="flex items-end justify-between">
+          <h1 className="text-xl font-semibold text-primary-foreground">考核项目</h1>
+          <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${allDone ? "bg-green-500/20 text-green-200" : "bg-white/15 text-primary-foreground/80"}`}>
+            {doneCount}/3 已完成
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
+        {ALL_FACILITY_TYPES.map((t, i) => {
+          const info = FACILITY_TYPE_INFO[t];
+          const done = !!typeProgress[t];
+          return (
+            <button
+              key={t}
+              onClick={() => onEnter(t)}
+              className="w-full text-left rounded-xl border-2 p-4 bg-white transition-colors active:bg-gray-50 border-border"
+            >
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${done ? "bg-green-100" : "bg-muted"}`}>
+                  {done ? <CheckCircle className="w-5 h-5 text-green-600" /> : info.icon}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-semibold text-foreground">{info.label}</span>
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${done ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                      {done ? "已完成" : "待完成"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{info.sub}</p>
+                </div>
+                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+        <button
+          onClick={onSubmitVillage}
+          disabled={!allDone}
+          className={`w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${
+            allDone
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          <Send className="w-4 h-4" />
+          {allDone ? "提交本村考核" : `还差 ${3 - doneCount} 项未完成`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ==================== SURVEY DATA ====================
+
+type SurveyCategory = "sewage_collection" | "overall_effect" | "satisfaction";
+type SurveyRespondent = "villager1" | "villager2" | "gov_rep" | "assessment_team" | "implementation_org";
+
+interface SurveyFormEntry {
+  score: number; // 0 = unanswered, 1–5
+  comment: string;
+  completed: boolean;
+}
+
+const SURVEY_CATEGORIES: SurveyCategory[] = ["sewage_collection", "overall_effect", "satisfaction"];
+
+const CATEGORY_LABEL: Record<SurveyCategory, string> = {
+  sewage_collection: "污水收集效果评分",
+  overall_effect: "整体效果评分",
+  satisfaction: "满意度评分",
+};
+
+const CATEGORY_RESPONDENTS: Record<SurveyCategory, SurveyRespondent[]> = {
+  sewage_collection: ["villager1", "villager2", "gov_rep", "assessment_team"],
+  overall_effect: ["villager1", "villager2", "gov_rep", "assessment_team"],
+  satisfaction: ["villager1", "villager2", "gov_rep", "implementation_org"],
+};
+
+const RESPONDENT_LABEL: Record<SurveyRespondent, string> = {
+  villager1: "村民 1",
+  villager2: "村民 2",
+  gov_rep: "镇街政府代表",
+  assessment_team: "考核小组",
+  implementation_org: "实施机构",
+};
+
+
+const RATING_LABELS = ["", "很差", "较差", "一般", "较好", "很好"];
+const RATING_COLORS = ["", "bg-red-500", "bg-orange-400", "bg-amber-400", "bg-blue-500", "bg-green-500"];
+
+function surveyKey(cat: SurveyCategory, res: SurveyRespondent) { return `${cat}_${res}`; }
+
+function emptySurveyForm(): SurveyFormEntry {
+  return { score: 0, comment: "", completed: false };
+}
+
+// ==================== PAGE S1: SURVEY LIST ====================
+
+function PSurveyList({ town, village, surveyEntries, onBack, onOpen, onSummary }: {
+  town: string; village: string;
+  surveyEntries: Record<string, SurveyFormEntry>;
+  onBack: () => void;
+  onOpen: (cat: SurveyCategory, res: SurveyRespondent) => void;
+  onSummary: () => void;
+}) {
+  const totalForms = SURVEY_CATEGORIES.reduce((s, c) => s + CATEGORY_RESPONDENTS[c].length, 0);
+  const completedForms = Object.values(surveyEntries).filter(e => e.completed).length;
+
+  const scoreLabel = (entry: SurveyFormEntry) => entry.score > 0 ? entry.score : null;
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-4 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <div className="text-xs text-primary-foreground/55 mb-0.5">{town} · {village}</div>
+        <h1 className="text-lg font-semibold text-primary-foreground mb-3">调查问卷</h1>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white/10 rounded-lg p-2 text-center">
+            <div className="text-base font-bold text-primary-foreground">{completedForms}/{totalForms}</div>
+            <div className="text-[10px] text-primary-foreground/55">已完成</div>
+          </div>
+          <div className="bg-white/10 rounded-lg p-2 text-center">
+            <div className="text-base font-bold text-primary-foreground">{totalForms - completedForms}</div>
+            <div className="text-[10px] text-primary-foreground/55">待填写</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto pb-2">
+        {SURVEY_CATEGORIES.map(cat => (
+          <div key={cat} className="mt-4 mx-4">
+            <div className="px-4 py-2.5 rounded-t-lg bg-[#1a3a52] flex items-center justify-between">
+              <span className="text-sm font-semibold text-white">{CATEGORY_LABEL[cat]}</span>
+              <span className="text-xs text-white/60">
+                {CATEGORY_RESPONDENTS[cat].filter(r => surveyEntries[surveyKey(cat, r)]?.completed).length}/{CATEGORY_RESPONDENTS[cat].length} 份
+              </span>
+            </div>
+            <div className="bg-white border border-t-0 border-border rounded-b-lg overflow-hidden">
+              {CATEGORY_RESPONDENTS[cat].map((res, i) => {
+                const entry = surveyEntries[surveyKey(cat, res)];
+                const done = entry?.completed;
+                const score = entry ? scoreLabel(entry) : null;
+                return (
+                  <button
+                    key={res}
+                    onClick={() => onOpen(cat, res)}
+                    className={`w-full px-4 py-3.5 flex items-center justify-between text-left active:bg-gray-50 ${i < CATEGORY_RESPONDENTS[cat].length - 1 ? "border-b border-border" : ""}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${done ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
+                        {done ? <Check className="w-4 h-4" /> : (i + 1)}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-foreground">{RESPONDENT_LABEL[res]}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {done ? "已完成" : "待填写"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {score && <span className="text-sm font-bold text-primary">{score}分</span>}
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        <div className="h-4" />
+      </div>
+
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+        <button onClick={onSummary} className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2">
+          <BarChart3 className="w-4 h-4" />查看汇总
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ==================== PAGE S2: SURVEY FORM ====================
+
+function PSurveyForm({ category, respondent, entry, onBack, onSave }: {
+  category: SurveyCategory;
+  respondent: SurveyRespondent;
+  entry: SurveyFormEntry;
+  onBack: () => void;
+  onSave: (e: SurveyFormEntry) => void;
+}) {
+  const [form, setForm] = useState<SurveyFormEntry>({ ...entry });
+  const save = (done: boolean) => { onSave({ ...form, completed: done }); onBack(); };
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -649,59 +878,65 @@ function P2bFacilityType({ city, town, village, onBack, onNext }: {
         <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
           <ChevronLeft className="w-4 h-4" />返回
         </button>
-        <div className="flex items-center gap-1.5 mb-1">
-          <Building2 className="w-3.5 h-3.5 text-primary-foreground/55" />
-          <span className="text-xs text-primary-foreground/55">{city} · {town} · {village}</span>
-        </div>
-        <h1 className="text-xl font-semibold text-primary-foreground">选择考核标准类型</h1>
-        <p className="text-xs text-primary-foreground/55 mt-1">根据该村点设施实际情况选择对应标准</p>
+        <div className="text-[10px] text-primary-foreground/55 mb-1">{CATEGORY_LABEL[category]}</div>
+        <h1 className="text-base font-semibold text-primary-foreground">{RESPONDENT_LABEL[respondent]}</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-3">
-        {options.map(opt => (
-          <button
-            key={opt.v}
-            onClick={() => setFtype(opt.v)}
-            className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${
-              ftype === opt.v
-                ? "border-primary bg-primary/5"
-                : "border-border bg-white"
-            }`}
-          >
-            <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 ${ftype === opt.v ? "bg-primary/10" : "bg-muted"}`}>
-                {opt.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className={`text-sm font-semibold ${ftype === opt.v ? "text-primary" : "text-foreground"}`}>{opt.label}</span>
-                  {ftype === opt.v && (
-                    <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center shrink-0">
-                      <Check className="w-3 h-3 text-primary-foreground" />
-                    </div>
-                  )}
-                </div>
-                <p className={`text-xs font-medium mb-1.5 ${ftype === opt.v ? "text-primary/70" : "text-muted-foreground"}`}>{opt.sub}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{opt.detail}</p>
-              </div>
+      <div className="flex-1 flex flex-col px-4 py-8 space-y-8">
+        {/* Score picker */}
+        <div className="bg-white rounded-2xl border border-border p-6">
+          <p className="text-sm font-medium text-foreground mb-6 text-center">请选择评分</p>
+          <div className="flex gap-3 justify-center">
+            {[1, 2, 3, 4, 5].map(v => (
+              <button
+                key={v}
+                onClick={() => setForm(prev => ({ ...prev, score: v }))}
+                className={`w-14 h-14 rounded-2xl text-2xl font-bold border-2 transition-all ${
+                  form.score === v
+                    ? `${RATING_COLORS[v]} text-white border-transparent scale-110 shadow-md`
+                    : "bg-muted border-border text-muted-foreground"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-between mt-3 px-1">
+            <span className="text-xs text-muted-foreground">很差</span>
+            <span className="text-xs text-muted-foreground">很好</span>
+          </div>
+          {form.score > 0 && (
+            <div className={`mt-5 text-center text-sm font-semibold text-white py-2 rounded-xl ${RATING_COLORS[form.score]}`}>
+              {RATING_LABELS[form.score]}
             </div>
-          </button>
-        ))}
+          )}
+        </div>
 
-        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 flex gap-2 mt-2">
-          <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-          <p className="text-xs text-blue-700 leading-relaxed">
-            考核标准类型决定后续评分指标体系，选错将影响考核结果，请根据现场实际设施类型确认后选择。
-          </p>
+        {/* Comment */}
+        <div className="bg-white rounded-2xl border border-border p-4">
+          <label className="text-xs font-medium text-muted-foreground block mb-2">补充意见（选填）</label>
+          <textarea
+            value={form.comment}
+            onChange={e => setForm(prev => ({ ...prev, comment: e.target.value }))}
+            className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none resize-none"
+            rows={3}
+            placeholder="可填写具体意见或建议"
+          />
         </div>
       </div>
 
-      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
+        <button onClick={() => save(false)} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
+          <Save className="w-4 h-4" />保存草稿
+        </button>
         <button
-          onClick={() => onNext(ftype)}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+          onClick={() => save(true)}
+          disabled={form.score === 0}
+          className={`py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-1.5 ${
+            form.score > 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+          }`}
         >
-          进入评分标准 <ChevronRight className="w-4 h-4" />
+          <CheckCircle className="w-4 h-4" />完成本份
         </button>
       </div>
     </div>
@@ -710,8 +945,8 @@ function P2bFacilityType({ city, town, village, onBack, onNext }: {
 
 // ==================== PAGE 3: CRITERIA LIST ====================
 
-function P3Criteria({ city, town, village, ftype, groups, entries, onBack, onSelect, onSummary }: {
-  city: string; town: string; village: string; ftype: FacilityType;
+function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, onSummary }: {
+  town: string; village: string; ftype: FacilityType;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
   onBack: () => void;
@@ -734,7 +969,7 @@ function P3Criteria({ city, town, village, ftype, groups, entries, onBack, onSel
         </button>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-xs text-primary-foreground/55 mb-0.5">{city} · {town} · {village}</div>
+            <div className="text-xs text-primary-foreground/55 mb-0.5">{town} · {village}</div>
             <h1 className="text-lg font-semibold text-primary-foreground">评分标准</h1>
           </div>
           <div className="text-right">
@@ -1244,44 +1479,55 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
 
 // ==================== PAGE 5: SUMMARY ====================
 
-function P5Summary({ city, town, village, ftype, groups, entries, onBack, onSubmit }: {
-  city: string; town: string; village: string; ftype: FacilityType;
+function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBack, onSubmit, onEditItem, onEditSurvey }: {
+  town: string; village: string; ftype: FacilityType;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
+  surveyEntries: Record<string, SurveyFormEntry>;
   onBack: () => void;
   onSubmit: () => void;
+  onEditItem: (itemId: string) => void;
+  onEditSurvey: (cat: SurveyCategory, res: SurveyRespondent) => void;
 }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [showPhotoWarn, setShowPhotoWarn] = useState(false);
 
+  const isSurvey = ftype === "survey";
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
   const current = total - deducted;
   const doneCount = allItems.filter(i => entries[i.id]?.done).length;
+  const pendingCount = allItems.filter(i => !entries[i.id]?.done).length;
   const hasDeductCount = allItems.filter(i => calcEntryDeduction(entries, groups, i.id) > 0).length;
   const totalPhotos = allItems.reduce((s, i) => {
     const e = entries[i.id];
     return s + (e ? e.options.reduce((ps, o) => ps + o.photos.length, 0) : 0);
   }, 0);
-  const pendingCount = allItems.filter(i => !entries[i.id]?.done).length;
+
+  // Survey helpers
+  const surveyCompleted = isSurvey
+    ? SURVEY_CATEGORIES.every(cat => CATEGORY_RESPONDENTS[cat].every(res => surveyEntries[surveyKey(cat, res)]?.completed))
+    : true;
+  const catAvg = (cat: SurveyCategory) => {
+    const scores = CATEGORY_RESPONDENTS[cat].map(r => surveyEntries[surveyKey(cat, r)]?.score ?? 0).filter(s => s > 0);
+    return scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : null;
+  };
 
   const validate = () => {
+    if (isSurvey) { onSubmit(); return; }
     const errs: string[] = [];
     allItems.forEach(item => {
       const e = entries[item.id];
       if (!e) return;
       e.options.forEach(oe => {
-        if (oe.selection === "custom" && !oe.customNote.trim()) {
+        if (oe.selection === "custom" && !oe.customNote.trim())
           errs.push(`"${item.name}"：选择了其他原因但未填写扣分依据`);
-        }
-        if (oe.adjustedScore !== null && !oe.adjustNote.trim()) {
+        if (oe.adjustedScore !== null && !oe.adjustNote.trim())
           errs.push(`"${item.name}"：有人工调整扣分但未填写调整说明`);
-        }
       });
     });
     if (errs.length > 0) { setErrors(errs); return; }
-
     const hasDeductNoPhoto = allItems.some(item => {
       const e = entries[item.id];
       if (!e) return false;
@@ -1291,15 +1537,14 @@ function P5Summary({ city, town, village, ftype, groups, entries, onBack, onSubm
         return opt ? calcOptionScore(oe, opt) > 0 && oe.photos.length === 0 : false;
       });
     });
-
     if (hasDeductNoPhoto) { setShowPhotoWarn(true); return; }
     onSubmit();
   };
 
-  const l1AccentColors = [
-    { text: "text-blue-800", bg: "bg-blue-50 border-blue-200" },
-    { text: "text-emerald-800", bg: "bg-emerald-50 border-emerald-200" },
-    { text: "text-violet-800", bg: "bg-violet-50 border-violet-200" },
+  const l1Colors = [
+    { text: "text-blue-800", bg: "bg-blue-50 border-blue-200", hdr: "bg-[#1a3a52]" },
+    { text: "text-emerald-800", bg: "bg-emerald-50 border-emerald-200", hdr: "bg-[#1a4a38]" },
+    { text: "text-violet-800", bg: "bg-violet-50 border-violet-200", hdr: "bg-[#3a1a52]" },
   ];
 
   return (
@@ -1309,118 +1554,190 @@ function P5Summary({ city, town, village, ftype, groups, entries, onBack, onSubm
           <ChevronLeft className="w-4 h-4" />返回
         </button>
         <h1 className="text-lg font-semibold text-primary-foreground mb-1">本村考核汇总</h1>
-        <div className="text-xs text-primary-foreground/55">{city} · {town} · {village}</div>
+        <div className="text-xs text-primary-foreground/55">{town} · {village}</div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-2">
-        {/* Main score */}
-        <div className="bg-white rounded-xl border border-border p-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-foreground">总体评分</span>
-            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              {ftype === "treatment" ? "污水处理设施" : "纳厂/管网设施"}
-            </span>
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-foreground">{total}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">总分</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-red-600">-{deducted}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">已扣分</div>
-            </div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-green-600">{current}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">当前得分</div>
-            </div>
-          </div>
-          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${total > 0 ? (current / total) * 100 : 0}%` }} />
-          </div>
-          <div className="text-right text-xs text-muted-foreground mt-1">{total > 0 ? Math.round((current / total) * 100) : 0}%</div>
-        </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {[
-            { label: "已检查指标", val: `${doneCount}/${allItems.length}`, color: "text-blue-600" },
-            { label: "有扣分指标", val: String(hasDeductCount), color: hasDeductCount > 0 ? "text-red-600" : "text-green-600" },
-            { label: "已上传照片", val: String(totalPhotos), color: "text-blue-600" },
-            { label: "待补充项目", val: String(pendingCount), color: pendingCount > 0 ? "text-amber-600" : "text-green-600" },
-          ].map((s, i) => (
-            <div key={i} className="bg-white rounded-xl border border-border p-3.5">
-              <div className={`text-2xl font-bold ${s.color}`}>{s.val}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+        {/* ---- SURVEY MODE ---- */}
+        {isSurvey && (
+          <>
+            {/* Overall survey progress */}
+            <div className="bg-white rounded-xl border border-border p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-foreground">调查问卷汇总</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${surveyCompleted ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+                  {surveyCompleted ? "全部完成" : "未全部完成"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {SURVEY_CATEGORIES.map(cat => {
+                  const avg = catAvg(cat);
+                  const done = CATEGORY_RESPONDENTS[cat].filter(r => surveyEntries[surveyKey(cat, r)]?.completed).length;
+                  return (
+                    <div key={cat} className="bg-muted rounded-lg p-2.5">
+                      <div className={`text-lg font-bold ${avg ? "text-primary" : "text-muted-foreground"}`}>{avg ?? "—"}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{CATEGORY_LABEL[cat]}</div>
+                      <div className="text-[10px] text-muted-foreground">{done}/{CATEGORY_RESPONDENTS[cat].length}份</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          ))}
-        </div>
 
-        {/* L1 breakdown */}
-        <div>
-          <h3 className="text-sm font-semibold text-foreground mb-2.5">分组汇总</h3>
-          <div className="space-y-2.5">
-            {groups.map((l1, li) => {
-              const l1Items = l1.children.flatMap(l2 => l2.items);
-              const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
-              const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
-              const l1Done = l1Items.filter(i => entries[i.id]?.done).length;
-              const l1HasDed = l1Items.filter(i => calcEntryDeduction(entries, groups, i.id) > 0).length;
-              const l1Pending = l1Items.filter(i => !entries[i.id]?.done).length;
-              const ac = l1AccentColors[li] ?? l1AccentColors[0];
-
+            {/* Per-category detail with edit buttons */}
+            {SURVEY_CATEGORIES.map((cat, ci) => {
+              const ac = l1Colors[ci] ?? l1Colors[0];
+              const respondents = CATEGORY_RESPONDENTS[cat];
               return (
-                <div key={l1.id} className={`rounded-xl border p-4 ${ac.bg}`}>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <span className={`text-sm font-semibold ${ac.text}`}>{l1.icon} {l1.name}</span>
-                    <span className={`text-sm font-bold ${ac.text}`}>{l1Total - l1Ded}/{l1Total}</span>
+                <div key={cat} className="overflow-hidden rounded-xl border border-border">
+                  <div className={`px-4 py-2.5 flex items-center justify-between ${ac.hdr}`}>
+                    <span className="text-sm font-semibold text-white">{CATEGORY_LABEL[cat]}</span>
+                    <span className="text-xs text-white/60">{respondents.filter(r => surveyEntries[surveyKey(cat, r)]?.completed).length}/{respondents.length}</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-1 text-center">
-                    {[
-                      { label: "已完成", val: `${l1Done}/${l1Items.length}`, c: "text-blue-700" },
-                      { label: "有扣分", val: String(l1HasDed), c: l1HasDed > 0 ? "text-red-600" : "text-green-600" },
-                      { label: "待补充", val: String(l1Pending), c: l1Pending > 0 ? "text-amber-600" : "text-green-600" },
-                      { label: "本组扣", val: `-${l1Ded}`, c: l1Ded > 0 ? "text-red-600" : "text-muted-foreground" },
-                    ].map((s, i) => (
-                      <div key={i}>
-                        <div className={`text-sm font-bold ${s.c}`}>{s.val}</div>
-                        <div className="text-[10px] text-muted-foreground">{s.label}</div>
-                      </div>
-                    ))}
+                  <div className="bg-white divide-y divide-border">
+                    {respondents.map(res => {
+                      const e = surveyEntries[surveyKey(cat, res)];
+                      const done = e?.completed;
+                      return (
+                        <div key={res} className="px-4 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${done ? "bg-green-100" : "bg-muted"}`}>
+                              {done ? <Check className="w-3.5 h-3.5 text-green-600" /> : <span className="text-[10px] text-muted-foreground">—</span>}
+                            </div>
+                            <span className="text-sm text-foreground">{RESPONDENT_LABEL[res]}</span>
+                          </div>
+                          <div className="flex items-center gap-2.5">
+                            {e?.score ? (
+                              <span className={`text-sm font-bold text-white px-2 py-0.5 rounded-lg ${RATING_COLORS[e.score]}`}>{e.score}分</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">未填</span>
+                            )}
+                            <button
+                              onClick={() => onEditSurvey(cat, res)}
+                              className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg"
+                            >
+                              {done ? "修改" : "填写"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
-          </div>
-        </div>
+          </>
+        )}
 
-        {/* Errors */}
+        {/* ---- SCORING MODE ---- */}
+        {!isSurvey && (
+          <>
+            <div className="bg-white rounded-xl border border-border p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-semibold text-foreground">总体评分</span>
+                <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                  {ftype === "treatment" ? "污水处理设施" : "纳厂/管网设施"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-foreground">{total}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">总分</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-red-600">-{deducted}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">已扣分</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-green-600">{current}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">当前得分</div>
+                </div>
+              </div>
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full bg-green-500 rounded-full" style={{ width: `${total > 0 ? (current / total) * 100 : 0}%` }} />
+              </div>
+              <div className="text-right text-xs text-muted-foreground mt-1">{total > 0 ? Math.round((current / total) * 100) : 0}%</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {[
+                { label: "已检查指标", val: `${doneCount}/${allItems.length}`, color: "text-blue-600" },
+                { label: "有扣分指标", val: String(hasDeductCount), color: hasDeductCount > 0 ? "text-red-600" : "text-green-600" },
+                { label: "已上传照片", val: String(totalPhotos), color: "text-blue-600" },
+                { label: "待补充项目", val: String(pendingCount), color: pendingCount > 0 ? "text-amber-600" : "text-green-600" },
+              ].map((s, i) => (
+                <div key={i} className="bg-white rounded-xl border border-border p-3.5">
+                  <div className={`text-2xl font-bold ${s.color}`}>{s.val}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* L1 breakdown with per-item edit buttons */}
+            <div className="space-y-3">
+              {groups.map((l1, li) => {
+                const ac = l1Colors[li] ?? l1Colors[0];
+                const l1Items = l1.children.flatMap(l2 => l2.items);
+                const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
+                const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+                return (
+                  <div key={l1.id} className="overflow-hidden rounded-xl border border-border">
+                    <div className={`px-4 py-2.5 flex items-center justify-between ${ac.hdr}`}>
+                      <span className="text-sm font-semibold text-white">{l1.icon} {l1.name}</span>
+                      <span className="text-xs text-white/65">{l1Total - l1Ded}/{l1Total}分</span>
+                    </div>
+                    <div className="bg-white divide-y divide-border">
+                      {l1.children.flatMap(l2 => l2.items).map(item => {
+                        const ded = calcEntryDeduction(entries, groups, item.id);
+                        const done = entries[item.id]?.done;
+                        const score = item.maxScore - ded;
+                        return (
+                          <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                {!done && <span className="text-[10px] text-amber-600">待录入</span>}
+                                {done && ded > 0 && <span className="text-[10px] text-red-600">扣{ded}分</span>}
+                                {done && ded === 0 && <span className="text-[10px] text-green-600">无扣分</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-sm font-bold text-foreground">{score}<span className="text-xs font-normal text-muted-foreground">/{item.maxScore}</span></span>
+                              <button
+                                onClick={() => onEditItem(item.id)}
+                                className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg shrink-0"
+                              >
+                                {done ? "修改" : "填写"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         {errors.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <AlertCircle className="w-4 h-4 text-red-600" />
               <span className="text-sm font-semibold text-red-700">提交前请修正以下问题</span>
             </div>
-            {errors.map((e, i) => (
-              <p key={i} className="text-xs text-red-600 ml-6">• {e}</p>
-            ))}
+            {errors.map((e, i) => <p key={i} className="text-xs text-red-600 ml-6">• {e}</p>)}
           </div>
         )}
         <div className="h-2" />
       </div>
 
-      <div className="px-4 pb-10 pt-3 border-t border-border bg-white space-y-2 shrink-0">
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
         <button onClick={validate} className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2">
-          <Send className="w-4 h-4" />提交本村考核
+          <CheckCircle className="w-4 h-4" />完成此项，返回考核项目
         </button>
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={onBack} className="py-3 border border-border text-foreground rounded-xl text-sm font-medium flex items-center justify-center gap-1">
-            <ChevronLeft className="w-4 h-4" />返回修改
-          </button>
-          <button className="py-3 border border-primary text-primary rounded-xl text-sm font-medium flex items-center justify-center gap-1.5">
-            <Save className="w-4 h-4" />保存草稿
-          </button>
-        </div>
       </div>
 
       {showPhotoWarn && (
@@ -1448,16 +1765,26 @@ function P5Summary({ city, town, village, ftype, groups, entries, onBack, onSubm
 
 // ==================== SUCCESS ====================
 
-function PSuccess({ city, town, village, score, total, completedVillages, onNextVillage, onTownComplete }: {
-  city: string; town: string; village: string;
-  score: number; total: number;
+function PSuccess({ town, village, scoreByType, completedVillages, onNextVillage, onTownComplete, onBack }: {
+  town: string; village: string;
+  scoreByType: Partial<Record<FacilityType, TypeScore>>;
   completedVillages: VillageRecord[];
   onNextVillage: () => void;
   onTownComplete: () => void;
+  onBack: () => void;
 }) {
-  const pct = total > 0 ? Math.round((score / total) * 100) : 0;
+  const scores = Object.values(scoreByType);
+  const combinedMax = scores.reduce((s, v) => s + v.maxScore, 0);
+  const combinedCurrent = scores.reduce((s, v) => s + v.currentScore, 0);
+  const pct = combinedMax > 0 ? Math.round(combinedCurrent / combinedMax * 100) : 0;
   const grade = pct >= 90 ? "优秀" : pct >= 75 ? "良好" : pct >= 60 ? "合格" : "待改进";
   const gradeColor = pct >= 90 ? "text-green-600" : pct >= 75 ? "text-blue-600" : pct >= 60 ? "text-amber-600" : "text-red-600";
+
+  const typeRows: { type: FacilityType; label: string; icon: string }[] = [
+    { type: "treatment", label: "污水处理设施", icon: "🏭" },
+    { type: "network",   label: "纳厂/管网设施", icon: "🔧" },
+    { type: "survey",    label: "调查问卷",      icon: "📋" },
+  ];
 
   return (
     <div className="flex flex-col h-full bg-background overflow-y-auto">
@@ -1466,15 +1793,15 @@ function PSuccess({ city, town, village, score, total, completedVillages, onNext
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
         <h2 className="text-xl font-bold text-foreground mb-1">提交成功</h2>
-        <p className="text-xs text-muted-foreground mb-5">{city} · {town} · {village}</p>
+        <p className="text-xs text-muted-foreground mb-5">{town} · {village}</p>
 
-        {/* Score card */}
-        <div className="bg-white rounded-2xl border border-border p-4 w-full mb-4">
+        {/* Combined score */}
+        <div className="bg-white rounded-2xl border border-border p-4 w-full mb-3">
+          <div className="text-xs text-muted-foreground mb-1">三项综合得分</div>
           <div className="text-3xl font-bold text-foreground">
-            {score}<span className="text-base font-normal text-muted-foreground">/{total}</span>
+            {combinedCurrent}<span className="text-base font-normal text-muted-foreground">/{combinedMax}</span>
           </div>
-          <div className="text-xs text-muted-foreground mt-0.5 mb-2.5">综合得分</div>
-          <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden mb-2">
+          <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden my-2.5">
             <div className="h-full bg-green-500 rounded-full" style={{ width: `${pct}%` }} />
           </div>
           <div className="flex items-center justify-between">
@@ -1483,50 +1810,72 @@ function PSuccess({ city, town, village, score, total, completedVillages, onNext
           </div>
         </div>
 
-        {/* Town progress */}
-        <div className="bg-white rounded-2xl border border-border p-4 w-full mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-semibold text-foreground">全镇考核进度</span>
-            <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
-              已完成 {completedVillages.length} 村
-            </span>
-          </div>
-          <div className="space-y-2">
-            {completedVillages.map((r, i) => {
-              const p = r.maxScore > 0 ? Math.round((r.currentScore / r.maxScore) * 100) : 0;
+        {/* Per-type breakdown */}
+        <div className="bg-white rounded-2xl border border-border p-4 w-full mb-3 text-left">
+          <div className="text-xs font-medium text-muted-foreground mb-3">各项得分明细</div>
+          <div className="space-y-3">
+            {typeRows.map(({ type, label, icon }) => {
+              const s = scoreByType[type];
+              if (!s) return null;
+              const p = s.maxScore > 0 ? Math.round(s.currentScore / s.maxScore * 100) : 0;
               return (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                    <Check className="w-3.5 h-3.5 text-green-600" />
+                <div key={type}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-foreground">{icon} {label}</span>
+                    <span className="text-xs font-semibold text-foreground">{s.currentScore}/{s.maxScore}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-xs font-medium text-foreground truncate">{r.village}</span>
-                      <span className="text-xs text-muted-foreground shrink-0 ml-2">{r.currentScore}/{r.maxScore}</span>
-                    </div>
-                    <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-400 rounded-full" style={{ width: `${p}%` }} />
-                    </div>
+                  <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${p}%` }} />
                   </div>
                 </div>
               );
             })}
           </div>
         </div>
+
+        {/* Town progress */}
+        {completedVillages.length > 0 && (
+          <div className="bg-white rounded-2xl border border-border p-4 w-full mb-3">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-semibold text-foreground">全镇考核进度</span>
+              <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                已完成 {completedVillages.length} 村
+              </span>
+            </div>
+            <div className="space-y-2">
+              {completedVillages.map((r, i) => {
+                const p = r.maxScore > 0 ? Math.round(r.currentScore / r.maxScore * 100) : 0;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-xs font-medium text-foreground truncate">{r.village}</span>
+                        <span className="text-xs text-muted-foreground shrink-0 ml-2">{r.currentScore}/{r.maxScore}</span>
+                      </div>
+                      <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-green-400 rounded-full" style={{ width: `${p}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="px-5 pb-10 space-y-2.5 shrink-0">
-        <button
-          onClick={onTownComplete}
-          className="w-full py-3.5 bg-[#1a4a38] text-white rounded-xl font-semibold flex items-center justify-center gap-2"
-        >
+        <button onClick={onTownComplete} className="w-full py-3.5 bg-[#1a4a38] text-white rounded-xl font-semibold flex items-center justify-center gap-2">
           <Package className="w-4 h-4" />已完成全镇考核
         </button>
-        <button
-          onClick={onNextVillage}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
-        >
+        <button onClick={onNextVillage} className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2">
           继续录入下一村点 <ChevronRight className="w-4 h-4" />
+        </button>
+        <button onClick={onBack} className="w-full py-3 border border-border text-muted-foreground rounded-xl text-sm font-medium flex items-center justify-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" />返回修改
         </button>
       </div>
     </div>
@@ -1535,8 +1884,8 @@ function PSuccess({ city, town, village, score, total, completedVillages, onNext
 
 // ==================== TOWN COMPLETE ====================
 
-function PTownComplete({ city, town, completedVillages, onBack, onSubmit }: {
-  city: string; town: string;
+function PTownComplete({ town, completedVillages, onBack, onSubmit }: {
+  town: string;
   completedVillages: VillageRecord[];
   onBack: () => void;
   onSubmit: () => void;
@@ -1553,7 +1902,7 @@ function PTownComplete({ city, town, completedVillages, onBack, onSubmit }: {
         <button onClick={onBack} className="flex items-center gap-1 text-white/55 mb-3 text-sm">
           <ChevronLeft className="w-4 h-4" />返回
         </button>
-        <div className="text-xs text-white/55 mb-1">{city} · {town}</div>
+        <div className="text-xs text-white/55 mb-1">{town}</div>
         <h1 className="text-xl font-semibold text-white mb-0.5">全镇考核完成</h1>
         <p className="text-xs text-white/55">共 {completedVillages.length} 个村点 · 平均得分率 {avgPct}%</p>
       </div>
@@ -1622,20 +1971,121 @@ function PTownComplete({ city, town, completedVillages, onBack, onSubmit }: {
   );
 }
 
+// ==================== SUBMITTED DATA VIEW ====================
+
+function PSubmittedData({ submittedData, onBack }: {
+  submittedData: Record<string, VillageRecord[]>;
+  onBack: () => void;
+}) {
+  const [expandedTown, setExpandedTown] = useState<string | null>(null);
+  const towns = Object.keys(submittedData);
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <h1 className="text-xl font-semibold text-primary-foreground mb-0.5">已提交镇街数据</h1>
+        <p className="text-xs text-primary-foreground/55">共 {towns.length} 个镇街</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {towns.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <BarChart3 className="w-12 h-12 text-muted-foreground/40 mb-3" />
+            <p className="text-sm text-muted-foreground">暂无已提交数据</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">完成全镇考核并提交后将在此显示</p>
+          </div>
+        )}
+
+        {towns.map(townName => {
+          const villages = submittedData[townName];
+          const totalMax = villages.reduce((s, v) => s + v.maxScore, 0);
+          const totalCurrent = villages.reduce((s, v) => s + v.currentScore, 0);
+          const pct = totalMax > 0 ? Math.round(totalCurrent / totalMax * 100) : 0;
+          const isOpen = expandedTown === townName;
+
+          return (
+            <div key={townName} className="bg-white rounded-xl border border-border overflow-hidden">
+              <button
+                onClick={() => setExpandedTown(isOpen ? null : townName)}
+                className="w-full px-4 py-4 flex items-center justify-between text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <MapPin className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">{townName}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{villages.length} 个村点</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-foreground">{totalCurrent}<span className="text-xs font-normal text-muted-foreground">/{totalMax}</span></div>
+                    <div className="text-xs text-muted-foreground">{pct}%</div>
+                  </div>
+                  {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="border-t border-border">
+                  {/* Score bar */}
+                  <div className="px-4 pt-3 pb-2">
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-green-500 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  {/* Village list */}
+                  {villages.map((v, i) => {
+                    const vPct = v.maxScore > 0 ? Math.round(v.currentScore / v.maxScore * 100) : 0;
+                    return (
+                      <div key={i} className={`px-4 py-3 flex items-center justify-between ${i < villages.length - 1 ? "border-b border-border" : ""}`}>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                            <Check className="w-3.5 h-3.5 text-green-600" />
+                          </div>
+                          <span className="text-sm text-foreground">{v.village}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="w-16 h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-green-500 rounded-full" style={{ width: `${vPct}%` }} />
+                          </div>
+                          <span className="text-xs font-semibold text-foreground w-14 text-right">{v.currentScore}/{v.maxScore}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ==================== MAIN APP ====================
 
-type Page = "city" | "town" | "village" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete";
+type Page = "town" | "village" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "submitted_data";
 
 export default function App() {
-  const [page, setPage] = useState<Page>("city");
-  const [city, setCity] = useState("");
+  const [page, setPage] = useState<Page>("town");
   const [town, setTown] = useState("");
   const [village, setVillage] = useState("");
   const [ftype, setFtype] = useState<FacilityType>("treatment");
   const [entries, setEntries] = useState<Record<string, ItemEntry>>({});
   const [detailId, setDetailId] = useState("");
   const [completedVillages, setCompletedVillages] = useState<VillageRecord[]>([]);
+  const [submittedData, setSubmittedData] = useState<Record<string, VillageRecord[]>>({});
   const [showToast, setShowToast] = useState(false);
+  const [surveyEntries, setSurveyEntries] = useState<Record<string, SurveyFormEntry>>({});
+  const [surveyTarget, setSurveyTarget] = useState<{ cat: SurveyCategory; res: SurveyRespondent } | null>(null);
+  const [typeProgress, setTypeProgress] = useState<Partial<Record<FacilityType, boolean>>>({});
+  const [scoreByType, setScoreByType] = useState<Partial<Record<FacilityType, TypeScore>>>({});
 
   const groups = ftype === "treatment" ? TREATMENT : NETWORK;
   const allItems = getAllItems(groups);
@@ -1645,51 +2095,62 @@ export default function App() {
 
   const saveEntry = (e: ItemEntry) => setEntries(prev => ({ ...prev, [e.itemId]: e }));
 
+  // Called from P5Summary — saves this type's score, marks done, returns to hub
   const handleSubmit = () => {
+    const typeScore: TypeScore = ftype === "survey"
+      ? calcSurveyTypeScore(surveyEntries)
+      : { maxScore: total, currentScore: finalScore, deductedScore: deducted };
+    setScoreByType(prev => ({ ...prev, [ftype]: typeScore }));
+    setTypeProgress(prev => ({ ...prev, [ftype]: true }));
+    setPage("facilitytype");
+  };
+
+  // Called from the hub "提交本村考核" after all 3 types done
+  const handleVillageSubmit = () => {
+    const combinedScores = Object.values(scoreByType);
+    const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
+    const combinedCurrent = combinedScores.reduce((s, v) => s + v.currentScore, 0);
+    const combinedDeducted = combinedScores.reduce((s, v) => s + v.deductedScore, 0);
     const record: VillageRecord = {
-      village,
-      facilityType: ftype,
+      village, facilityType: "treatment",
       submittedAt: new Date().toISOString(),
-      maxScore: total,
-      deductedScore: deducted,
-      currentScore: finalScore,
+      maxScore: combinedMax,
+      deductedScore: combinedDeducted,
+      currentScore: combinedCurrent,
       entries,
     };
-    setCompletedVillages(prev => {
-      const filtered = prev.filter(r => r.village !== village);
-      return [...filtered, record];
-    });
+    setCompletedVillages(prev => [...prev.filter(r => r.village !== village), record]);
     setPage("success");
   };
 
   const handleNextVillage = () => {
     setVillage(""); setEntries({}); setDetailId("");
-    setFtype("treatment"); setPage("village");
+    setFtype("treatment"); setSurveyEntries({}); setSurveyTarget(null);
+    setTypeProgress({}); setScoreByType({});
+    setPage("village");
   };
 
   const buildPackage = (): TownPackage => ({
     schemaVersion: "1.0",
     exportedAt: new Date().toISOString(),
-    city, town,
+    city: "", town,
     villages: completedVillages,
   });
 
   const renderFieldPage = () => {
     switch (page) {
-      case "city":
-        return <P0City onNext={c => { setCity(c); setPage("town"); }} />;
       case "town":
         return (
           <P1Town
-            city={city}
-            onBack={() => setPage("city")}
-            onNext={t => { setTown(t); setCompletedVillages([]); setPage("village"); }}
+            onNext={t => { setTown(t); setCompletedVillages([]); setTypeProgress({}); setScoreByType({}); setPage("village"); }}
+            submittedData={submittedData}
+            onViewSubmitted={() => setPage("submitted_data")}
           />
         );
       case "village":
         return (
           <P2Village
-            city={city} town={town}
+            town={town}
             onBack={() => setPage("town")}
             onNext={v => { setVillage(v); setPage("facilitytype"); }}
           />
@@ -1697,15 +2158,21 @@ export default function App() {
       case "facilitytype":
         return (
           <P2bFacilityType
-            city={city} town={town} village={village}
+            town={town} village={village}
+            typeProgress={typeProgress}
             onBack={() => setPage("village")}
-            onNext={t => { setFtype(t); setEntries({}); setPage("criteria"); }}
+            onEnter={t => {
+              setFtype(t);
+              if (!typeProgress[t]) setEntries({});
+              setPage(t === "survey" ? "survey_list" : "criteria");
+            }}
+            onSubmitVillage={handleVillageSubmit}
           />
         );
       case "criteria":
         return (
           <P3Criteria
-            city={city} town={town} village={village} ftype={ftype}
+            town={town} village={village} ftype={ftype}
             groups={groups} entries={entries}
             onBack={() => setPage("village")}
             onSelect={id => { setDetailId(id); setPage("detail"); }}
@@ -1724,36 +2191,72 @@ export default function App() {
       case "summary":
         return (
           <P5Summary
-            city={city} town={town} village={village} ftype={ftype}
+            town={town} village={village} ftype={ftype}
             groups={groups} entries={entries}
-            onBack={() => setPage("criteria")}
+            surveyEntries={surveyEntries}
+            onBack={() => setPage(ftype === "survey" ? "survey_list" : "criteria")}
             onSubmit={handleSubmit}
+            onEditItem={id => { setDetailId(id); setPage("detail"); }}
+            onEditSurvey={(cat, res) => { setSurveyTarget({ cat, res }); setPage("survey_form"); }}
           />
         );
       case "success":
         return (
           <PSuccess
-            city={city} town={town} village={village}
-            score={finalScore} total={total}
+            town={town} village={village}
+            scoreByType={scoreByType}
             completedVillages={completedVillages}
             onNextVillage={handleNextVillage}
             onTownComplete={() => setPage("towncomplete")}
+            onBack={() => setPage("facilitytype")}
           />
         );
       case "towncomplete":
         return (
           <PTownComplete
-            city={city} town={town}
+            town={town}
             completedVillages={completedVillages}
             onBack={() => setPage("success")}
             onSubmit={() => {
-              setPage("city");
-              setCity(""); setTown(""); setVillage("");
+              setSubmittedData(prev => ({ ...prev, [town]: completedVillages }));
+              setTown(""); setVillage("");
               setFtype("treatment"); setEntries({});
               setDetailId(""); setCompletedVillages([]);
+              setTypeProgress({}); setScoreByType({});
               setShowToast(true);
               setTimeout(() => setShowToast(false), 3000);
+              setPage("town");
             }}
+          />
+        );
+      case "survey_list":
+        return (
+          <PSurveyList
+            town={town} village={village}
+            surveyEntries={surveyEntries}
+            onBack={() => setPage("facilitytype")}
+            onOpen={(cat, res) => { setSurveyTarget({ cat, res }); setPage("survey_form"); }}
+            onSummary={() => setPage("summary")}
+          />
+        );
+      case "survey_form":
+        return surveyTarget ? (
+          <PSurveyForm
+            category={surveyTarget.cat}
+            respondent={surveyTarget.res}
+            entry={surveyEntries[surveyKey(surveyTarget.cat, surveyTarget.res)] ?? emptySurveyForm()}
+            onBack={() => setPage("survey_list")}
+            onSave={e => {
+              setSurveyEntries(prev => ({ ...prev, [surveyKey(surveyTarget.cat, surveyTarget.res)]: e }));
+              setPage("survey_list");
+            }}
+          />
+        ) : null;
+      case "submitted_data":
+        return (
+          <PSubmittedData
+            submittedData={submittedData}
+            onBack={() => setPage("town")}
           />
         );
       default:
