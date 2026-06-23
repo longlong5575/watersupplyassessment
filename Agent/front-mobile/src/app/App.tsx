@@ -133,17 +133,53 @@ function triggerDownload(pkg: TownPackage) {
 }
 
 function calcSurveyTypeScore(surveyEntries: Record<string, SurveyFormEntry>): TypeScore {
-  const totalForms = SURVEY_CATEGORIES.reduce((s, c) => s + CATEGORY_RESPONDENTS[c].length, 0);
-  const maxScore = totalForms * 5;
-  const currentScore = Object.values(surveyEntries)
-    .filter(e => e.completed)
-    .reduce((s, e) => s + (e.score || 0), 0);
-  return { maxScore, currentScore, deductedScore: maxScore - currentScore };
+  // 问卷是正式三级指标的数据来源，不作为独立评分大项重复计分。
+  return { maxScore: 0, currentScore: 0, deductedScore: 0 };
 }
 
 // ==================== SCORING DATA ====================
 
-const TREATMENT: L1Group[] = TREATMENT_STANDARDS as unknown as L1Group[];
+const TREATMENT_MERGE_RULES: Record<string, { targetId: string; name?: string; maxScore: number }> = {
+  treatment_09: { targetId: "treatment_08", name: "稳定塘/生化工艺及其他处理工艺", maxScore: 15 },
+  treatment_12: { targetId: "treatment_11", name: "污水收集管渠", maxScore: 8 },
+  treatment_15: { targetId: "treatment_14", name: "机电设备、管路及附件", maxScore: 5 },
+};
+
+function joinUnique(parts: Array<string | undefined>, separator = "\n") {
+  return Array.from(new Set(parts.filter((part): part is string => Boolean(part?.trim())))).join(separator);
+}
+
+function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId: string; name?: string; maxScore: number }>): L1Group[] {
+  return groups.map(l1 => ({
+    ...l1,
+    children: l1.children.map(l2 => {
+      const items: L3Item[] = [];
+      for (const item of l2.items) {
+        const rule = rules[item.id];
+        if (!rule) {
+          items.push({ ...item, options: item.options.map(opt => ({ ...opt })) });
+          continue;
+        }
+        const target = items.find(existing => existing.id === rule.targetId);
+        if (!target) {
+          items.push({ ...item, id: rule.targetId, name: rule.name ?? item.name, maxScore: rule.maxScore, options: item.options.map(opt => ({ ...opt })) });
+          continue;
+        }
+        target.name = rule.name ?? target.name;
+        target.maxScore = rule.maxScore;
+        target.description = joinUnique([target.description, item.description], "；");
+        target.evaluationStandard = joinUnique([target.evaluationStandard, item.evaluationStandard]);
+        target.standardText = joinUnique([target.standardText, item.standardText]);
+        target.scoringMethod = joinUnique([target.scoringMethod, item.scoringMethod], "、");
+        target.dataSource = joinUnique([target.dataSource, item.dataSource], "、");
+        target.options = [...target.options, ...item.options.map(opt => ({ ...opt }))];
+      }
+      return { ...l2, items };
+    }),
+  }));
+}
+
+const TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
 const NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
 
 // ==================== HELPERS ====================
@@ -193,41 +229,89 @@ function calcItemRaw(entry: ItemEntry, item: L3Item): number {
   }, 0);
 }
 
-function calcEntryDeduction(entries: Record<string, ItemEntry>, groups: L1Group[], itemId: string): number {
+type SurveyDerivedKind = "sewage_collection" | "overall_effect" | "satisfaction_org" | "satisfaction_town" | "satisfaction_public";
+
+interface SurveyDerivedScore {
+  kind: SurveyDerivedKind;
+  currentScore: number;
+  deductedScore: number;
+  completed: boolean;
+}
+
+function getSurveyDerivedKind(item: L3Item, l2?: L2Group): SurveyDerivedKind | null {
+  const text = `${l2?.name ?? ""} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
+  if (text.includes("问卷调查") && item.name === "污水收集") return "sewage_collection";
+  if (text.includes("问卷调查") && item.name === "整体效果") return "overall_effect";
+  if (l2?.name.includes("满意度") && item.name === "实施机构满意度") return "satisfaction_org";
+  if (l2?.name.includes("满意度") && item.name === "镇街满意度") return "satisfaction_town";
+  if (l2?.name.includes("满意度") && item.name === "公众满意度") return "satisfaction_public";
+  return null;
+}
+
+function completedScore(surveyEntries: Record<string, SurveyFormEntry>, cat: SurveyCategory, res: SurveyRespondent): number | null {
+  const entry = surveyEntries[surveyKey(cat, res)];
+  return entry?.completed && entry.score > 0 ? entry.score : null;
+}
+
+function average(values: Array<number | null>): number | null {
+  const scores = values.filter((v): v is number => v !== null);
+  if (scores.length !== values.length || scores.length === 0) return null;
+  return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+}
+
+function scaleSurveyScore(score5: number | null, maxScore: number): { currentScore: number; completed: boolean } {
+  if (score5 === null) return { currentScore: 0, completed: false };
+  return { currentScore: Number(((score5 / 5) * maxScore).toFixed(1)), completed: true };
+}
+
+function calcSurveyDerivedScore(item: L3Item, l2: L2Group | undefined, surveyEntries: Record<string, SurveyFormEntry>): SurveyDerivedScore | null {
+  const kind = getSurveyDerivedKind(item, l2);
+  if (!kind) return null;
+
+  let scaled: { currentScore: number; completed: boolean };
+  if (kind === "sewage_collection" || kind === "overall_effect") {
+    const cat: SurveyCategory = kind === "sewage_collection" ? "sewage_collection" : "overall_effect";
+    const a = average([completedScore(surveyEntries, cat, "villager1"), completedScore(surveyEntries, cat, "villager2")]);
+    const b = completedScore(surveyEntries, cat, "gov_rep");
+    const c = completedScore(surveyEntries, cat, "assessment_team");
+    const weighted = a !== null && b !== null && c !== null ? 0.3 * a + 0.3 * b + 0.4 * c : null;
+    scaled = scaleSurveyScore(weighted, item.maxScore);
+  } else if (kind === "satisfaction_org") {
+    scaled = scaleSurveyScore(completedScore(surveyEntries, "satisfaction", "implementation_org"), item.maxScore);
+  } else if (kind === "satisfaction_town") {
+    scaled = scaleSurveyScore(completedScore(surveyEntries, "satisfaction", "gov_rep"), item.maxScore);
+  } else {
+    scaled = scaleSurveyScore(average([
+      completedScore(surveyEntries, "satisfaction", "villager1"),
+      completedScore(surveyEntries, "satisfaction", "villager2"),
+    ]), item.maxScore);
+  }
+
+  return {
+    kind,
+    currentScore: scaled.currentScore,
+    deductedScore: Number((item.maxScore - scaled.currentScore).toFixed(1)),
+    completed: scaled.completed,
+  };
+}
+
+function calcEntryDeduction(
+  entries: Record<string, ItemEntry>,
+  groups: L1Group[],
+  itemId: string,
+  surveyEntries?: Record<string, SurveyFormEntry>
+): number {
   const entry = entries[itemId];
   const item = findItem(groups, itemId);
-  if (!entry || !item) return 0;
+  if (!item) return 0;
+  const derived = surveyEntries ? calcSurveyDerivedScore(item, findL2(groups, itemId), surveyEntries) : null;
+  if (derived) return derived.deductedScore;
+  if (!entry) return 0;
   return Math.min(calcItemRaw(entry, item), item.maxScore);
 }
 
 function totalMaxScore(groups: L1Group[]): number {
   return getAllItems(groups).reduce((s, i) => s + i.maxScore, 0);
-}
-
-function withoutQuestionnaireItems(groups: L1Group[]): L1Group[] {
-  return groups
-    .map(l1 => ({
-      ...l1,
-      children: l1.children
-        .map(l2 => ({
-          ...l2,
-          items: l2.items.filter(item => {
-            const text = `${l1.name} ${l2.name} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
-            return !(
-              text.includes("问卷调查") ||
-              l2.name.includes("满意度") ||
-              item.name.includes("污水收集") ||
-              item.name.includes("整体效果") ||
-              item.name.includes("满意度") ||
-              item.name.includes("公众满意度") ||
-              item.name.includes("实施机构满意度") ||
-              item.name.includes("镇街满意度")
-            );
-          }),
-        }))
-        .filter(l2 => l2.items.length > 0),
-    }))
-    .filter(l1 => l1.children.length > 0);
 }
 
 function makeOptionEntry(optionId: string): OptionEntry {
@@ -1010,19 +1094,23 @@ function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
 
 // ==================== PAGE 3: CRITERIA LIST ====================
 
-function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, onSummary }: {
+function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, onBack, onSelect, onSummary }: {
   town: string; village: string; ftype: FacilityType;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
+  surveyEntries: Record<string, SurveyFormEntry>;
   onBack: () => void;
   onSelect: (id: string) => void;
   onSummary: () => void;
 }) {
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
   const current = total - deducted;
-  const doneCount = allItems.filter(i => entries[i.id]?.done).length;
+  const doneCount = allItems.filter(i => {
+    const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
+    return derived ? derived.completed : entries[i.id]?.done;
+  }).length;
 
   const l1BgColors = ["bg-[#1a3a52]", "bg-[#1a4a38]", "bg-[#3a1a52]"];
 
@@ -1067,7 +1155,7 @@ function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, o
         {groups.map((l1, li) => {
           const l1Items = l1.children.flatMap(l2 => l2.items);
           const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
-          const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+          const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
 
           return (
             <div key={l1.id} className="mt-4 mx-4">
@@ -1082,8 +1170,9 @@ function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, o
                     <span className="text-xs font-medium text-muted-foreground">{l2.name}</span>
                   </div>
                   {l2.items.map((item, ii) => {
-                    const ded = calcEntryDeduction(entries, groups, item.id);
-                    const status = getStatus(entries[item.id]);
+                    const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
+                    const ded = derived?.deductedScore ?? calcEntryDeduction(entries, groups, item.id, surveyEntries);
+                    const status = derived ? null : getStatus(entries[item.id]);
                     return (
                       <button
                         key={item.id}
@@ -1093,7 +1182,13 @@ function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, o
                         <div className="flex-1 min-w-0 pr-2">
                           <div className="text-sm font-medium text-foreground mb-1">{item.name}</div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <StatusTag status={status} />
+                            {derived ? (
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${derived.completed ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
+                                {derived.completed ? "问卷已回填" : "待问卷回填"}
+                              </span>
+                            ) : (
+                              <StatusTag status={status} />
+                            )}
                             {ded > 0 && <span className="text-xs text-red-600 font-medium">-{ded}分</span>}
                           </div>
                         </div>
@@ -1129,16 +1224,18 @@ function P3Criteria({ town, village, ftype, groups, entries, onBack, onSelect, o
 
 // ==================== PAGE 4: DEDUCTION DETAIL ====================
 
-function P4Detail({ itemId, groups, entries, onBack, onSave }: {
+function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
   itemId: string;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
+  surveyEntries: Record<string, SurveyFormEntry>;
   onBack: () => void;
   onSave: (e: ItemEntry) => void;
 }) {
   const item = findItem(groups, itemId)!;
   const l1 = findL1(groups, itemId);
   const l2 = findL2(groups, itemId);
+  const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
 
   const [entry, setEntry] = useState<ItemEntry>(() => {
     const ex = entries[itemId];
@@ -1153,12 +1250,12 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
   const fileRef = useRef<HTMLInputElement>(null);
   const [photoIdx, setPhotoIdx] = useState(0);
 
-  const rawTotal = entry.options.reduce((sum, oe, i) => {
+  const rawTotal = derived ? derived.deductedScore : entry.options.reduce((sum, oe, i) => {
     const opt = item.options[i];
     return sum + (opt ? calcOptionScore(oe, opt) : 0);
   }, 0);
   const capped = Math.min(rawTotal, item.maxScore);
-  const current = item.maxScore - capped;
+  const current = derived ? derived.currentScore : item.maxScore - capped;
   const overLimit = rawTotal > item.maxScore;
 
   const updateOpt = (i: number, patch: Partial<OptionEntry>) => {
@@ -1226,7 +1323,7 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
           <p className="text-xs text-blue-700 leading-relaxed">{item.description}</p>
         </div>
 
-        {(item.evaluationStandard || item.scoringMethod || item.dataSource || item.calculationMethod) && (
+        {(item.evaluationStandard || item.scoringMethod || item.dataSource) && (
           <div className="bg-white border border-border rounded-xl overflow-hidden">
             <div className="px-3 py-2 border-b border-border text-xs font-semibold text-foreground">考核依据</div>
             <div className="divide-y divide-border">
@@ -1248,18 +1345,28 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
                   <p className="text-xs text-foreground leading-relaxed">{item.dataSource}</p>
                 </div>
               )}
-              {item.calculationMethod && (
-                <div className="px-3 py-2.5">
-                  <div className="text-[11px] text-muted-foreground mb-1">计算方法</div>
-                  <p className="text-xs text-foreground leading-relaxed">{item.calculationMethod}</p>
-                </div>
-              )}
+            </div>
+          </div>
+        )}
+
+        {derived && (
+          <div className={`rounded-xl border p-4 ${derived.completed ? "bg-blue-50 border-blue-200" : "bg-amber-50 border-amber-200"}`}>
+            <div className="flex items-start gap-2">
+              <Info className={`w-4 h-4 shrink-0 mt-0.5 ${derived.completed ? "text-blue-600" : "text-amber-600"}`} />
+              <div>
+                <p className={`text-sm font-semibold ${derived.completed ? "text-blue-800" : "text-amber-800"}`}>
+                  {derived.completed ? "已由调查问卷自动回填" : "等待调查问卷回填"}
+                </p>
+                <p className={`text-xs leading-relaxed mt-1 ${derived.completed ? "text-blue-700" : "text-amber-700"}`}>
+                  本项结果来源于调查问卷填写结果，不在此处开放手动扣分。请到“调查问卷”模块录入或修改相关评分。
+                </p>
+              </div>
             </div>
           </div>
         )}
 
         {/* Deduction options */}
-        {item.options.map((opt, oi) => {
+        {!derived && item.options.map((opt, oi) => {
           const oe = entry.options[oi];
           if (!oe) return null;
           const score = calcOptionScore(oe, opt);
@@ -1504,29 +1611,38 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
           );
         })}
 
-        {/* General note */}
-        <div className="bg-white rounded-xl border border-border p-4">
-          <label className="text-xs font-medium text-muted-foreground block mb-2">本项综合备注</label>
-          <textarea
-            value={entry.generalNote}
-            onChange={e => setEntry(prev => ({ ...prev, generalNote: e.target.value }))}
-            className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none resize-none"
-            rows={3}
-            placeholder="输入综合备注（选填）"
-          />
-        </div>
+        {!derived && (
+          <div className="bg-white rounded-xl border border-border p-4">
+            <label className="text-xs font-medium text-muted-foreground block mb-2">本项综合备注</label>
+            <textarea
+              value={entry.generalNote}
+              onChange={e => setEntry(prev => ({ ...prev, generalNote: e.target.value }))}
+              className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none resize-none"
+              rows={3}
+              placeholder="输入综合备注（选填）"
+            />
+          </div>
+        )}
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
 
-      <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
-        <button onClick={() => save(false)} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
-          <Save className="w-4 h-4" />保存草稿
-        </button>
-        <button onClick={() => save(true)} className="py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
-          <CheckCircle className="w-4 h-4" />完成本项
-        </button>
-      </div>
+      {derived ? (
+        <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+          <button onClick={onBack} className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
+            <ChevronLeft className="w-4 h-4" />返回评分标准
+          </button>
+        </div>
+      ) : (
+        <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
+          <button onClick={() => save(false)} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
+            <Save className="w-4 h-4" />保存草稿
+          </button>
+          <button onClick={() => save(true)} className="py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
+            <CheckCircle className="w-4 h-4" />完成本项
+          </button>
+        </div>
+      )}
 
       {/* Adjust modal */}
       {showAdjust && (
@@ -1592,11 +1708,17 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
   const isSurvey = ftype === "survey";
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
   const current = total - deducted;
-  const doneCount = allItems.filter(i => entries[i.id]?.done).length;
-  const pendingCount = allItems.filter(i => !entries[i.id]?.done).length;
-  const hasDeductCount = allItems.filter(i => calcEntryDeduction(entries, groups, i.id) > 0).length;
+  const doneCount = allItems.filter(i => {
+    const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
+    return derived ? derived.completed : entries[i.id]?.done;
+  }).length;
+  const pendingCount = allItems.filter(i => {
+    const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
+    return derived ? !derived.completed : !entries[i.id]?.done;
+  }).length;
+  const hasDeductCount = allItems.filter(i => calcEntryDeduction(entries, groups, i.id, surveyEntries) > 0).length;
   const totalPhotos = allItems.reduce((s, i) => {
     const e = entries[i.id];
     return s + (e ? e.options.reduce((ps, o) => ps + o.photos.length, 0) : 0);
@@ -1615,6 +1737,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
     if (isSurvey) { onSubmit(); return; }
     const errs: string[] = [];
     allItems.forEach(item => {
+      if (calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries)) return;
       const e = entries[item.id];
       if (!e) return;
       e.options.forEach(oe => {
@@ -1626,6 +1749,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
     });
     if (errs.length > 0) { setErrors(errs); return; }
     const hasDeductNoPhoto = allItems.some(item => {
+      if (calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries)) return false;
       const e = entries[item.id];
       if (!e) return false;
       return e.options.some(oe => {
@@ -1777,7 +1901,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                 const ac = l1Colors[li] ?? l1Colors[0];
                 const l1Items = l1.children.flatMap(l2 => l2.items);
                 const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
-                const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+                const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
                 return (
                   <div key={l1.id} className="overflow-hidden rounded-xl border border-border">
                     <div className={`px-4 py-2.5 flex items-center justify-between ${ac.hdr}`}>
@@ -1785,18 +1909,21 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                       <span className="text-xs text-white/65">{l1Total - l1Ded}/{l1Total}分</span>
                     </div>
                     <div className="bg-white divide-y divide-border">
-                      {l1.children.flatMap(l2 => l2.items).map(item => {
-                        const ded = calcEntryDeduction(entries, groups, item.id);
-                        const done = entries[item.id]?.done;
+                      {l1.children.flatMap(l2 => l2.items.map(item => ({ item, l2 }))).map(({ item, l2 }) => {
+                        const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
+                        const ded = derived?.deductedScore ?? calcEntryDeduction(entries, groups, item.id, surveyEntries);
+                        const done = derived ? derived.completed : entries[item.id]?.done;
                         const score = item.maxScore - ded;
                         return (
                           <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-2">
                             <div className="flex-1 min-w-0">
                               <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
                               <div className="flex items-center gap-1.5 mt-0.5">
-                                {!done && <span className="text-[10px] text-amber-600">待录入</span>}
-                                {done && ded > 0 && <span className="text-[10px] text-red-600">扣{ded}分</span>}
-                                {done && ded === 0 && <span className="text-[10px] text-green-600">无扣分</span>}
+                                {derived && !done && <span className="text-[10px] text-amber-600">待问卷回填</span>}
+                                {derived && done && <span className="text-[10px] text-blue-600">问卷已回填</span>}
+                                {!derived && !done && <span className="text-[10px] text-amber-600">待录入</span>}
+                                {!derived && done && ded > 0 && <span className="text-[10px] text-red-600">扣{ded}分</span>}
+                                {!derived && done && ded === 0 && <span className="text-[10px] text-green-600">无扣分</span>}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
@@ -1805,7 +1932,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                                 onClick={() => onEditItem(item.id)}
                                 className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg shrink-0"
                               >
-                                {done ? "修改" : "填写"}
+                                {derived ? "查看" : done ? "修改" : "填写"}
                               </button>
                             </div>
                           </div>
@@ -1894,7 +2021,7 @@ function PSuccess({ town, village, scoreByType, completedVillages, onNextVillage
 
         {/* Combined score */}
         <div className="bg-white rounded-2xl border border-border p-4 w-full mb-3">
-          <div className="text-xs text-muted-foreground mb-1">三项综合得分</div>
+          <div className="text-xs text-muted-foreground mb-1">综合得分</div>
           <div className="text-3xl font-bold text-foreground">
             {combinedCurrent}<span className="text-base font-normal text-muted-foreground">/{combinedMax}</span>
           </div>
@@ -1914,6 +2041,14 @@ function PSuccess({ town, village, scoreByType, completedVillages, onNextVillage
             {typeRows.map(({ type, label, icon }) => {
               const s = scoreByType[type];
               if (!s) return null;
+              if (s.maxScore === 0) {
+                return (
+                  <div key={type} className="flex items-center justify-between">
+                    <span className="text-xs text-foreground">{icon} {label}</span>
+                    <span className="text-xs font-semibold text-green-600">已采集</span>
+                  </div>
+                );
+              }
               const p = s.maxScore > 0 ? Math.round(s.currentScore / s.maxScore * 100) : 0;
               return (
                 <div key={type}>
@@ -2186,13 +2321,13 @@ export default function App() {
   const [scoreByType, setScoreByType] = useState<Partial<Record<FacilityType, TypeScore>>>({});
 
   const groups = ftype === "treatment"
-    ? withoutQuestionnaireItems(TREATMENT)
+    ? TREATMENT
     : ftype === "network"
-      ? withoutQuestionnaireItems(NETWORK)
+      ? NETWORK
       : [];
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
+  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
   const finalScore = total - deducted;
 
   const saveEntry = (e: ItemEntry) => setEntries(prev => ({ ...prev, [e.itemId]: e }));
@@ -2277,7 +2412,7 @@ export default function App() {
         return (
           <P3Criteria
             town={town} village={village} ftype={ftype}
-            groups={groups} entries={entries}
+            groups={groups} entries={entries} surveyEntries={surveyEntries}
             onBack={() => setPage("village")}
             onSelect={id => { setDetailId(id); setPage("detail"); }}
             onSummary={() => setPage("summary")}
@@ -2287,7 +2422,7 @@ export default function App() {
         return detailId ? (
           <P4Detail
             itemId={detailId}
-            groups={groups} entries={entries}
+            groups={groups} entries={entries} surveyEntries={surveyEntries}
             onBack={() => setPage("criteria")}
             onSave={saveEntry}
           />
@@ -2415,4 +2550,3 @@ export default function App() {
     </div>
   );
 }
-
