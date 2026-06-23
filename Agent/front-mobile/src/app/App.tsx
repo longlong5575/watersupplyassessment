@@ -86,8 +86,10 @@ interface TypeScore {
 }
 
 interface WaterQualityEntry {
-  sampleDate: string;
-  samplePoint: string;
+  sampleTime: string;
+  dischargeStandard: string;
+  processType: string;
+  designScale: string;
   hasTpLimit: boolean;
   codValue: string;
   codLimit: string;
@@ -455,21 +457,54 @@ function P0City({ onNext }: { onNext: (c: string) => void }) {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ onNext, submittedData, onViewSubmitted }: {
+function P1Town({ city, onCityChange, onNext, submittedData, onViewSubmitted }: {
+  city: string;
+  onCityChange: (city: string) => void;
   onNext: (t: string) => void;
   submittedData: Record<string, VillageRecord[]>;
   onViewSubmitted: () => void;
 }) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
+  const [cityOpen, setCityOpen] = useState(false);
+  const cities = ["阳江市", "茂名市", "湛江市", "江门市", "清远市", "韶关市"];
   const towns = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"];
 
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
-        <div className="flex items-center gap-1.5 mb-1 mt-1">
-          <MapPin className="w-3.5 h-3.5 text-primary-foreground/55" />
-          <span className="text-xs text-primary-foreground/55 tracking-wide">农村污水PPP现场考核</span>
+        <div className="flex items-start justify-between gap-3 mb-1 mt-1 relative">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <MapPin className="w-3.5 h-3.5 text-primary-foreground/55 shrink-0" />
+            <span className="text-xs text-primary-foreground/55 tracking-wide truncate">农村污水PPP现场考核</span>
+          </div>
+          <button
+            onClick={() => setCityOpen(v => !v)}
+            className="shrink-0 inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs text-primary-foreground"
+          >
+            {city}<ChevronDown className="w-3 h-3" />
+          </button>
+          {cityOpen && (
+            <div className="absolute right-0 top-7 z-30 w-44 overflow-hidden rounded-lg border border-white/10 bg-white shadow-lg">
+              <div className="p-2 border-b border-border">
+                <input
+                  value={city}
+                  onChange={e => onCityChange(e.target.value)}
+                  placeholder="输入城市名称"
+                  className="w-full rounded-md border border-border px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                />
+              </div>
+              {cities.map(c => (
+                <button
+                  key={c}
+                  onClick={() => { onCityChange(c); setCityOpen(false); }}
+                  className={`w-full px-3 py-2 text-left text-xs ${city === c ? "bg-primary/10 text-primary font-semibold" : "text-foreground"}`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核镇街</h1>
       </div>
@@ -783,8 +818,10 @@ function emptySurveyForm(): SurveyFormEntry {
 
 function emptyWaterQualityEntry(): WaterQualityEntry {
   return {
-    sampleDate: "",
-    samplePoint: "",
+    sampleTime: "",
+    dischargeStandard: "",
+    processType: "",
+    designScale: "",
     hasTpLimit: true,
     codValue: "",
     codLimit: "",
@@ -979,7 +1016,7 @@ function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
 }) {
   const [form, setForm] = useState<WaterQualityEntry>({ ...entry });
   const update = (patch: Partial<WaterQualityEntry>) => setForm(prev => ({ ...prev, ...patch }));
-  const canComplete = !!form.sampleDate && !!form.samplePoint && form.conclusion !== "pending";
+  const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale && form.conclusion !== "pending";
 
   const Field = ({ label, value, placeholder, onChange }: {
     label: string;
@@ -1018,8 +1055,10 @@ function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-3">
-          <Field label="采样日期" value={form.sampleDate} placeholder="如：2023-12-10" onChange={sampleDate => update({ sampleDate })} />
-          <Field label="采样点位" value={form.samplePoint} placeholder="如：出水口" onChange={samplePoint => update({ samplePoint })} />
+          <Field label="取样时间" value={form.sampleTime} placeholder="如：2023-12-10 09:30" onChange={sampleTime => update({ sampleTime })} />
+          <Field label="排放标准" value={form.dischargeStandard} placeholder="如：广东省农村生活污水处理排放标准二级" onChange={dischargeStandard => update({ dischargeStandard })} />
+          <Field label="工艺类型" value={form.processType} placeholder="如：A/O + 人工湿地" onChange={processType => update({ processType })} />
+          <Field label="规模（m3/d）" value={form.designScale} placeholder="如：50" onChange={designScale => update({ designScale })} />
           <label className="flex items-center justify-between gap-3 py-1">
             <span className="text-sm text-foreground">执行标准明确 TP 限值</span>
             <input
@@ -2306,6 +2345,7 @@ type Page = "town" | "village" | "facilitytype" | "criteria" | "detail" | "summa
 
 export default function App() {
   const [page, setPage] = useState<Page>("town");
+  const [city, setCity] = useState("江门市");
   const [town, setTown] = useState("");
   const [village, setVillage] = useState("");
   const [ftype, setFtype] = useState<FacilityType>("treatment");
@@ -2372,7 +2412,7 @@ export default function App() {
   const buildPackage = (): TownPackage => ({
     schemaVersion: "1.0",
     exportedAt: new Date().toISOString(),
-    city: "", town,
+    city, town,
     villages: completedVillages,
   });
 
@@ -2381,6 +2421,8 @@ export default function App() {
       case "town":
         return (
           <P1Town
+            city={city}
+            onCityChange={setCity}
             onNext={t => { setTown(t); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry()); setTypeProgress({}); setScoreByType({}); setPage("village"); }}
             submittedData={submittedData}
             onViewSubmitted={() => setPage("submitted_data")}
