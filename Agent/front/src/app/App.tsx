@@ -29,6 +29,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,19 +53,7 @@ interface TownSurvey {
   surveys: { label: string; done: number; total: number }[];
 }
 
-const SURVEY_LABELS = ["污水管理设施", "管网设施", "调查问卷"];
-
-const DASHBOARD_TOWNS: TownSurvey[] = [
-  { name: "北陡镇", status: "completed", surveys: [{ label: "污水管理设施", done: 12, total: 12 }, { label: "管网设施", done: 8, total: 8 }, { label: "调查问卷", done: 24, total: 24 }] },
-  { name: "白沙镇", status: "completed", surveys: [{ label: "污水管理设施", done: 9, total: 9 }, { label: "管网设施", done: 6, total: 6 }, { label: "调查问卷", done: 18, total: 18 }] },
-  { name: "大江镇", status: "completed", surveys: [{ label: "污水管理设施", done: 11, total: 11 }, { label: "管网设施", done: 7, total: 7 }, { label: "调查问卷", done: 22, total: 22 }] },
-  { name: "赤溪镇", status: "inprogress", surveys: [{ label: "污水管理设施", done: 7, total: 10 }, { label: "管网设施", done: 3, total: 6 }, { label: "调查问卷", done: 11, total: 20 }] },
-  { name: "广海镇", status: "inprogress", surveys: [{ label: "污水管理设施", done: 2, total: 8 }, { label: "管网设施", done: 1, total: 5 }, { label: "调查问卷", done: 5, total: 16 }] },
-  { name: "沙堆镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 9 }, { label: "管网设施", done: 0, total: 6 }, { label: "调查问卷", done: 0, total: 18 }] },
-  { name: "古井镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 10 }, { label: "管网设施", done: 0, total: 7 }, { label: "调查问卷", done: 0, total: 20 }] },
-  { name: "潮连镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 8 }, { label: "管网设施", done: 0, total: 5 }, { label: "调查问卷", done: 0, total: 16 }] },
-  { name: "双水镇", status: "pending", surveys: [{ label: "污水管理设施", done: 0, total: 11 }, { label: "管网设施", done: 0, total: 8 }, { label: "调查问卷", done: 0, total: 22 }] },
-];
+const SURVEY_LABELS = ["污水处理设施", "管网设施", "调查问卷"];
 
 type ReportStatus = "completed" | "processing" | "pending" | "error";
 
@@ -97,6 +86,12 @@ interface ScoreItem {
   score: number;
   deduction: number;
   reason: string;
+  category?: string;
+  itemType?: string;
+  evaluationStandard?: string;
+  scoringMethod?: string;
+  dataSource?: string;
+  calculationMethod?: string;
 }
 
 interface SurveyScoreGroup {
@@ -104,39 +99,103 @@ interface SurveyScoreGroup {
   items: ScoreItem[];
 }
 
+type AssessmentStandardItem = {
+  name: string;
+  maxScore: number;
+  description?: string;
+  evaluationStandard?: string;
+  scoringMethod?: string;
+  dataSource?: string;
+  calculationMethod?: string;
+};
+
+type AssessmentStandardGroup = {
+  name: string;
+  children: { name: string; items: AssessmentStandardItem[] }[];
+};
+
+function isQuestionnaireStandardItem(group: AssessmentStandardGroup, child: { name: string }, item: AssessmentStandardItem): boolean {
+  const text = `${group.name} ${child.name} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
+  return (
+    text.includes("问卷调查") ||
+    child.name.includes("满意度") ||
+    item.name.includes("污水收集") ||
+    item.name.includes("整体效果") ||
+    item.name.includes("满意度")
+  );
+}
+
+function buildScoreGroups(
+  label: string,
+  standards: readonly AssessmentStandardGroup[],
+  includeItem: (group: AssessmentStandardGroup, child: { name: string }, item: AssessmentStandardItem) => boolean,
+): SurveyScoreGroup[] {
+  return standards
+    .map(group => ({
+      label: `${label}｜${group.name}`,
+      items: group.children.flatMap(child => child.items.filter(item => includeItem(group, child, item)).map(item => ({
+        name: item.name,
+        fullScore: item.maxScore,
+        score: item.maxScore,
+        deduction: 0,
+        reason: "",
+        category: group.name,
+        itemType: child.name,
+        evaluationStandard: item.evaluationStandard || item.description || "",
+        scoringMethod: item.scoringMethod || "",
+        dataSource: item.dataSource || "",
+        calculationMethod: item.calculationMethod || "",
+      }))),
+    }))
+    .filter(group => group.items.length > 0);
+}
+
 const SCORE_TEMPLATES: SurveyScoreGroup[] = [
-  {
-    label: "污水管理设施",
-    items: [
-      { name: "设施运行率", fullScore: 20, score: 18, deduction: 2, reason: "本期运行率 94%，低于标准值 2%，扣 2 分" },
-      { name: "出水水质达标率", fullScore: 25, score: 25, deduction: 0, reason: "" },
-      { name: "污泥处置规范性", fullScore: 15, score: 12, deduction: 3, reason: "污泥转运记录缺失 3 次，每次扣 1 分" },
-      { name: "设备维护记录完整性", fullScore: 15, score: 15, deduction: 0, reason: "" },
-      { name: "安全生产管理", fullScore: 10, score: 8, deduction: 2, reason: "现场安全标识不规范，扣 2 分" },
-      { name: "信息上报及时性", fullScore: 15, score: 15, deduction: 0, reason: "" },
-    ],
-  },
-  {
-    label: "管网设施",
-    items: [
-      { name: "管网完好率", fullScore: 25, score: 23, deduction: 2, reason: "发现 2 处管网渗漏，每处扣 1 分" },
-      { name: "检查井完好率", fullScore: 20, score: 20, deduction: 0, reason: "" },
-      { name: "清淤疏通记录", fullScore: 15, score: 13, deduction: 2, reason: "本期清淤记录不完整，扣 2 分" },
-      { name: "排水口规范性", fullScore: 15, score: 15, deduction: 0, reason: "" },
-      { name: "管网巡查频次", fullScore: 15, score: 12, deduction: 3, reason: "巡查频次不足，漏查 3 次，每次扣 1 分" },
-      { name: "应急响应处理", fullScore: 10, score: 10, deduction: 0, reason: "" },
-    ],
-  },
-  {
-    label: "调查问卷",
-    items: [
-      { name: "村民满意度", fullScore: 30, score: 27, deduction: 3, reason: "满意度调查得分 90 分，折算后扣 3 分" },
-      { name: "投诉处理及时率", fullScore: 20, score: 20, deduction: 0, reason: "" },
-      { name: "服务响应速度", fullScore: 20, score: 18, deduction: 2, reason: "平均响应时间超标，扣 2 分" },
-      { name: "公示信息完整性", fullScore: 15, score: 15, deduction: 0, reason: "" },
-      { name: "问卷回收率", fullScore: 15, score: 13, deduction: 2, reason: "问卷回收率 86%，低于标准 90%，扣 2 分" },
-    ],
-  },
+  ...buildScoreGroups("污水处理设施", TREATMENT_STANDARDS as unknown as AssessmentStandardGroup[], (group, child, item) => !isQuestionnaireStandardItem(group, child, item)),
+  ...buildScoreGroups("纳厂或接入已建设施的管网设施", NETWORK_STANDARDS as unknown as AssessmentStandardGroup[], (group, child, item) => !isQuestionnaireStandardItem(group, child, item)),
+  ...buildScoreGroups("调查问卷", TREATMENT_STANDARDS as unknown as AssessmentStandardGroup[], isQuestionnaireStandardItem),
+  ...buildScoreGroups("调查问卷", NETWORK_STANDARDS as unknown as AssessmentStandardGroup[], isQuestionnaireStandardItem),
+];
+
+function countScoreItemsByLabel(label: string): number {
+  if (label === "污水处理设施") {
+    return SCORE_TEMPLATES
+      .filter(group => group.label.startsWith("污水处理设施"))
+      .reduce((sum, group) => sum + group.items.length, 0);
+  }
+  if (label === "管网设施") {
+    return SCORE_TEMPLATES
+      .filter(group => group.label.startsWith("纳厂或接入已建设施的管网设施"))
+      .reduce((sum, group) => sum + group.items.length, 0);
+  }
+  return SCORE_TEMPLATES
+    .filter(group => group.label.startsWith("调查问卷"))
+    .reduce((sum, group) => sum + group.items.length, 0);
+}
+
+const DASHBOARD_SURVEY_TOTALS = SURVEY_LABELS.map(label => ({
+  label,
+  total: countScoreItemsByLabel(label),
+}));
+
+function makeDashboardSurveys(progress: number | number[]): TownSurvey["surveys"] {
+  return DASHBOARD_SURVEY_TOTALS.map(({ label, total }, index) => {
+    const ratio = Array.isArray(progress) ? progress[index] ?? 0 : progress;
+    const done = Math.min(total, Math.max(0, Math.round(total * ratio)));
+    return { label, done, total };
+  });
+}
+
+const DASHBOARD_TOWNS: TownSurvey[] = [
+  { name: "北陡镇", status: "completed", surveys: makeDashboardSurveys(1) },
+  { name: "白沙镇", status: "completed", surveys: makeDashboardSurveys(1) },
+  { name: "大江镇", status: "completed", surveys: makeDashboardSurveys(1) },
+  { name: "赤溪镇", status: "inprogress", surveys: makeDashboardSurveys([0.7, 0.5, 0.6]) },
+  { name: "广海镇", status: "inprogress", surveys: makeDashboardSurveys([0.3, 0.2, 0.4]) },
+  { name: "沙堆镇", status: "pending", surveys: makeDashboardSurveys(0) },
+  { name: "古井镇", status: "pending", surveys: makeDashboardSurveys(0) },
+  { name: "潮连镇", status: "pending", surveys: makeDashboardSurveys(0) },
+  { name: "双水镇", status: "pending", surveys: makeDashboardSurveys(0) },
 ];
 
 const PROGRESS_STEPS = [
@@ -1483,7 +1542,7 @@ function TownPieCard({ town }: { town: TownSurvey }) {
   );
 }
 
-const DEFAULT_SURVEYS = () => SURVEY_LABELS.map(label => ({ label, done: 0, total: 0 }));
+const DEFAULT_SURVEYS = () => makeDashboardSurveys(0);
 
 function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
   onNav: (p: Page) => void;
@@ -1843,7 +1902,23 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
                     const isEditing = editingKey === key;
                     return (
                       <tr key={item.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
-                        <td className="px-5 py-2.5 text-xs text-foreground">{item.name}</td>
+                        <td className="px-5 py-3 text-xs text-foreground align-top">
+                          <div className="font-medium">{item.name}</div>
+                          {(item.category || item.itemType) && (
+                            <div className="text-[11px] text-muted-foreground mt-1">
+                              {[item.category, item.itemType].filter(Boolean).join(" / ")}
+                            </div>
+                          )}
+                          {item.evaluationStandard && (
+                            <p className="text-[11px] text-muted-foreground leading-relaxed mt-2 whitespace-pre-line">
+                              {item.evaluationStandard}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground">
+                            {item.scoringMethod && <span>评分方法：{item.scoringMethod}</span>}
+                            {item.dataSource && <span>数据来源：{item.dataSource}</span>}
+                          </div>
+                        </td>
                         <td className="px-4 py-2.5 text-right">
                           {isEditing ? (
                             <input type="number" min={0} value={item.fullScore}
@@ -1988,9 +2063,10 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page: MobileData ─────────────────────────────────────────────────────────
 
-function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
+function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
   onNav: (p: Page) => void;
   towns: TownSurvey[];
+  setSelectedTowns: React.Dispatch<React.SetStateAction<string[]>>;
   methodFiles: File[];
   setMethodFiles: React.Dispatch<React.SetStateAction<File[]>>;
   methodText: string;
@@ -2003,11 +2079,8 @@ function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText,
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const methodFileRef = useRef<HTMLInputElement>(null);
 
-  const visibleTowns = towns.filter(t => !removedTowns.has(t.name));
-  const completed = visibleTowns.filter(t => t.status === "completed");
-  const notCompleted = visibleTowns.filter(t => t.status !== "completed");
-  const allCompleted = notCompleted.length === 0 && completed.length > 0;
-  const canProceed = allCompleted && reportPeriod.trim().length > 0;
+  const visibleTowns = towns.filter(t => t.status === "completed" && !removedTowns.has(t.name));
+  const canProceed = visibleTowns.length > 0 && reportPeriod.trim().length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -2019,10 +2092,10 @@ function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText,
           <div className="px-6 py-4 border-b border-border flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-foreground">当前看板数据概览</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">以下为数据看板中各镇街采集数据{removedTowns.size > 0 && `，已排除 ${removedTowns.size} 个镇街`}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">以下为数据看板中已完成镇街采集数据{removedTowns.size > 0 && `，本次生成已排除 ${removedTowns.size} 个镇街`}</p>
             </div>
             {removedTowns.size > 0 && (
-              <button onClick={() => setRemovedTowns(new Set())} className="text-xs text-primary hover:underline">恢复全部</button>
+              <button onClick={() => setRemovedTowns(new Set())} className="text-xs text-primary hover:underline">恢复本次生成名单</button>
             )}
           </div>
           <table className="w-full text-sm">
@@ -2036,24 +2109,24 @@ function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText,
             </thead>
             <tbody>
               {visibleTowns.map(t => (
-                <tr key={t.name} className={`border-b border-border last:border-0 hover:bg-muted/20 ${t.status === "pending" ? "opacity-50" : ""}`}>
+                <tr key={t.name} className="border-b border-border last:border-0 hover:bg-muted/20">
                   <td className="px-5 py-3 text-xs font-medium text-foreground">{t.name}</td>
                   {t.surveys.map(s => (
                     <td key={s.label} className="px-3 py-3 text-xs font-mono text-muted-foreground">
-                      {t.status === "pending" ? <span className="text-muted-foreground">—</span> : `${s.done}/${s.total}`}
+                      {s.done}/{s.total}
                     </td>
                   ))}
                   <td className="px-3 py-3">
-                    <StatusBadge status={t.status === "completed" ? "completed" : t.status === "inprogress" ? "processing" : "pending"} />
+                    <StatusBadge status="completed" />
                   </td>
                   <td className="px-3 py-3">
                     {removeConfirm === t.name ? (
                       <div className="flex items-center gap-2">
-                        <button onClick={() => { setRemovedTowns(prev => new Set([...prev, t.name])); setRemoveConfirm(null); }} className="text-xs text-[var(--status-error)] hover:underline font-medium">确认</button>
+                        <button onClick={() => { setRemovedTowns(prev => new Set([...prev, t.name])); setRemoveConfirm(null); }} className="text-xs text-[var(--status-error)] hover:underline font-medium">确认移除</button>
                         <button onClick={() => setRemoveConfirm(null)} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
                       </div>
                     ) : (
-                      <button onClick={() => setRemoveConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">删除</button>
+                      <button onClick={() => setRemoveConfirm(t.name)} className="text-xs text-[var(--status-error)] hover:underline">本次不生成</button>
                     )}
                   </td>
                 </tr>
@@ -2061,19 +2134,6 @@ function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText,
             </tbody>
           </table>
         </div>
-
-        {/* Not-completed warning */}
-        {!allCompleted && (
-          <div className="flex items-start gap-2 bg-[var(--status-error-bg)] border border-red-200 rounded-lg px-4 py-3">
-            <AlertCircle size={15} className="text-[var(--status-error)] mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-foreground">调查暂未完成，暂时无法生成报告</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                目前有 {notCompleted.length} 个镇街尚未完成全部调研（{notCompleted.map(t => t.name).join("、")}），请前往数据看板补充数据后再生成。
-              </p>
-            </div>
-          </div>
-        )}
 
         {/* Report period */}
         <div className="bg-card border border-border rounded-lg">
@@ -2154,14 +2214,12 @@ function MobileDataPage({ onNav, towns, methodFiles, setMethodFiles, methodText,
         <div className="flex items-center justify-between pt-1">
           <button onClick={() => onNav("dataupload")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">返回选择</button>
           <div className="flex items-center gap-3">
-            {!allCompleted && (
-              <button onClick={() => onNav("dashboard")} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm border border-border rounded hover:bg-muted/40 transition-colors text-foreground">
-                <BarChart2 size={14} /> 前往数据看板
-              </button>
-            )}
             <button
               disabled={!canProceed}
-              onClick={() => onNav("confirm")}
+              onClick={() => {
+                setSelectedTowns(visibleTowns.map(t => t.name));
+                onNav("confirm");
+              }}
               className={`inline-flex items-center gap-2 px-6 py-2.5 rounded text-sm font-semibold transition-opacity ${canProceed ? "text-primary-foreground hover:opacity-90" : "opacity-40 cursor-not-allowed text-primary-foreground"}`}
               style={{ background: "var(--primary)" }}
             >
@@ -2212,6 +2270,7 @@ export default function App() {
         <MobileDataPage
           onNav={(p) => { if (p === "confirm") setDataSource("mobile"); setPage(p); }}
           towns={towns}
+          setSelectedTowns={setSelectedTowns}
           methodFiles={methodFiles}
           setMethodFiles={setMethodFiles}
           methodText={methodText}
@@ -2236,9 +2295,7 @@ export default function App() {
         />
       );
       case "confirm": {
-        const confirmTowns = dataSource === "mobile"
-          ? towns.filter(t => t.status === "completed").map(t => t.name)
-          : selectedTowns;
+        const confirmTowns = selectedTowns;
         return (
           <ConfirmPage
             onNav={(p) => {

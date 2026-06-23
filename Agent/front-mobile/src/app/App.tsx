@@ -1,14 +1,15 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import {
   ChevronRight, ChevronLeft, Search, Camera, X, CheckCircle,
   AlertCircle, ChevronDown, ChevronUp, Save, Send,
   Plus, Minus, MapPin, Building2, BarChart3,
   AlertTriangle, Info, Check, Package,
 } from "lucide-react";
+import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
 // ==================== TYPES ====================
 
-type FacilityType = "treatment" | "network" | "survey";
+type FacilityType = "treatment" | "network" | "survey" | "water_quality";
 type DeductionType = "fixed" | "range" | "severity";
 type EntryStatus = "pending" | "no_deduction" | "has_deduction" | "incomplete";
 type SelectionType = "no_deduction" | "standard" | "custom";
@@ -22,6 +23,7 @@ interface DeductionOption {
   max?: number;
   unit?: string;
   maxInstances?: number;
+  sourceText?: string;
 }
 
 interface L3Item {
@@ -29,6 +31,11 @@ interface L3Item {
   name: string;
   maxScore: number;
   description: string;
+  evaluationStandard?: string;
+  standardText?: string;
+  scoringMethod?: string;
+  dataSource?: string;
+  calculationMethod?: string;
   options: DeductionOption[];
 }
 
@@ -78,6 +85,21 @@ interface TypeScore {
   deductedScore: number;
 }
 
+interface WaterQualityEntry {
+  sampleDate: string;
+  samplePoint: string;
+  hasTpLimit: boolean;
+  codValue: string;
+  codLimit: string;
+  nh3nValue: string;
+  nh3nLimit: string;
+  tpValue: string;
+  tpLimit: string;
+  conclusion: "pending" | "qualified" | "unqualified";
+  note: string;
+  completed: boolean;
+}
+
 interface VillageRecord {
   village: string;
   facilityType: FacilityType;
@@ -86,6 +108,7 @@ interface VillageRecord {
   deductedScore: number;
   currentScore: number;
   entries: Record<string, ItemEntry>;
+  waterQuality?: WaterQualityEntry;
 }
 
 interface TownPackage {
@@ -120,163 +143,8 @@ function calcSurveyTypeScore(surveyEntries: Record<string, SurveyFormEntry>): Ty
 
 // ==================== SCORING DATA ====================
 
-const TREATMENT: L1Group[] = [
-  {
-    id: "output", name: "产出", icon: "📊",
-    children: [{
-      id: "g_coll", name: "污水收集",
-      items: [{
-        id: "sewage_collection", name: "污水收集", maxScore: 8,
-        description: "检查污水收集管网及检查井完好情况，确保污水有效收集，无明显跑冒滴漏现象",
-        options: [
-          { id: "silt", reason: "检查井内有明显沉泥、浮渣、较多垃圾", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-          { id: "cover", reason: "井盖缺失、打不开、挤压、破损或占用", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-          { id: "pipe_leak", reason: "管网存在渗漏、破损、堵塞", type: "range", min: 1, max: 2 },
-          { id: "no_connect", reason: "污水未接入管网或存在私接雨水情况", type: "range", min: 1, max: 3 },
-        ],
-      }],
-    }],
-  },
-  {
-    id: "effect", name: "效果", icon: "✅",
-    children: [
-      {
-        id: "g_overall", name: "整体效果",
-        items: [{
-          id: "overall_effect", name: "整体效果", maxScore: 6,
-          description: "检查设施点周边环境及水体感官效果，评估整体运维质量",
-          options: [
-            { id: "waste_odor", reason: "设施点范围内有杂物、垃圾堆积、污水或恶臭", type: "range", min: 1, max: 3 },
-            { id: "algae", reason: "水体环境较差或存在较多藻类", type: "range", min: 1, max: 3 },
-            { id: "discharge", reason: "出水口有明显污水直排或散排", type: "fixed", value: 3 },
-          ],
-        }],
-      },
-      {
-        id: "g_quality", name: "污水处理质量",
-        items: [{
-          id: "effluent_quality", name: "污水处理质量", maxScore: 10,
-          description: "检查出水水质是否达到相应排放标准，设施运行是否正常",
-          options: [
-            { id: "quality_fail", reason: "出水水质不达标（单项指标超标）", type: "range", min: 3, max: 5 },
-            { id: "shutdown", reason: "处理设施停运（情况严重的扣5分）", type: "severity", value: 3 },
-            { id: "no_treatment", reason: "污水未经处理直接排放", type: "fixed", value: 10 },
-          ],
-        }],
-      },
-    ],
-  },
-  {
-    id: "management", name: "管理", icon: "📋",
-    children: [
-      {
-        id: "g_facility", name: "设施管理",
-        items: [
-          {
-            id: "env_hygiene", name: "设施点环境卫生", maxScore: 5,
-            description: "检查设施点内外环境整洁情况及绿化维护",
-            options: [
-              { id: "env_waste", reason: "设施点范围内有杂物堆积、垃圾未及时清理", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-              { id: "not_clean", reason: "设施设备表面积垢严重、长期未清洗", type: "range", min: 1, max: 2 },
-              { id: "pest", reason: "存在蚊蝇孳生、鼠患等卫生问题", type: "range", min: 1, max: 2 },
-            ],
-          },
-          {
-            id: "mechanical", name: "机电设备", maxScore: 8,
-            description: "检查机电设备运行状态、维护保养及备品备件情况",
-            options: [
-              { id: "equip_stop", reason: "机电设备未正常运行（非计划停机）", type: "range", min: 2, max: 4 },
-              { id: "instrument", reason: "仪表设备损坏未修复", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-              { id: "no_maint", reason: "设备无维护保养记录或保养不到位", type: "range", min: 1, max: 2 },
-            ],
-          },
-        ],
-      },
-      {
-        id: "g_safety", name: "安全管理",
-        items: [{
-          id: "safety_mgmt", name: "安全管理", maxScore: 5,
-          description: "检查安全警示标识、防护设施及应急预案完备情况",
-          options: [
-            { id: "no_sign", reason: "未设置安全警示标识或标识不清晰、破损", type: "fixed", value: 1 },
-            { id: "no_protect", reason: "安全防护设施缺失或损坏（护栏、盖板等）", type: "range", min: 1, max: 3 },
-            { id: "no_emergency", reason: "无应急预案或应急设备缺失", type: "range", min: 1, max: 2 },
-          ],
-        }],
-      },
-      {
-        id: "g_archive", name: "档案管理",
-        items: [{
-          id: "archives", name: "档案管理", maxScore: 5,
-          description: "检查运维档案、巡查记录及维修记录完整性规范性",
-          options: [
-            { id: "no_records", reason: "未提供设施日常巡查、定期检查记录、维修记录", type: "range", min: 1, max: 3 },
-            { id: "incomplete", reason: "台账不完整或填写不规范", type: "range", min: 1, max: 2 },
-            { id: "no_report", reason: "未按要求提交运维月报/季报", type: "fixed", value: 1 },
-          ],
-        }],
-      },
-    ],
-  },
-];
-
-const NETWORK: L1Group[] = [
-  {
-    id: "output", name: "产出", icon: "📊",
-    children: [{
-      id: "g_net_cond", name: "管网状况",
-      items: [{
-        id: "inspection_wells", name: "检查井/截流井", maxScore: 8,
-        description: "检查检查井及截流井完好状态与运行情况，确保管网正常运行",
-        options: [
-          { id: "well_silt", reason: "检查井内有明显沉泥、浮渣、较多垃圾", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-          { id: "cover_net", reason: "井盖缺失、打不开、挤压、破损或占用", type: "fixed", value: 1, unit: "处", maxInstances: 3 },
-          { id: "overflow", reason: "截流井存在溢流或堵塞现象", type: "range", min: 2, max: 4 },
-        ],
-      }],
-    }],
-  },
-  {
-    id: "effect", name: "效果", icon: "✅",
-    children: [{
-      id: "g_net_eff", name: "接入效果",
-      items: [{
-        id: "connection_effect", name: "整体效果", maxScore: 6,
-        description: "检查污水接入率及管网运行整体效果",
-        options: [
-          { id: "low_rate", reason: "管网接户率低于设计要求", type: "range", min: 1, max: 3 },
-          { id: "pipe_leak_net", reason: "管道存在明显渗漏、破损现象", type: "range", min: 1, max: 3 },
-          { id: "rain_mix", reason: "雨污混接问题未得到整改", type: "range", min: 1, max: 3 },
-        ],
-      }],
-    }],
-  },
-  {
-    id: "management", name: "管理", icon: "📋",
-    children: [{
-      id: "g_daily", name: "日常管理",
-      items: [
-        {
-          id: "net_safety", name: "安全管理", maxScore: 5,
-          description: "检查管网日常巡查及安全管理情况",
-          options: [
-            { id: "no_patrol", reason: "未按规定频率开展管网巡查", type: "range", min: 1, max: 2 },
-            { id: "no_safety_net", reason: "危险路段未设置安全标识或防护设施", type: "fixed", value: 1 },
-            { id: "no_response", reason: "发现问题未及时处理或上报", type: "range", min: 1, max: 2 },
-          ],
-        },
-        {
-          id: "net_archives", name: "档案管理", maxScore: 5,
-          description: "检查管网档案及运维记录完整性",
-          options: [
-            { id: "no_net_rec", reason: "未提供管网巡查、维修记录", type: "range", min: 1, max: 3 },
-            { id: "incomplete_net", reason: "台账记录不完整或不规范", type: "range", min: 1, max: 2 },
-          ],
-        },
-      ],
-    }],
-  },
-];
+const TREATMENT: L1Group[] = TREATMENT_STANDARDS as unknown as L1Group[];
+const NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
 
 // ==================== HELPERS ====================
 
@@ -310,6 +178,14 @@ function calcOptionScore(oe: OptionEntry, opt: DeductionOption): number {
   return 0;
 }
 
+function makeScoreChoices(min: number, max: number): number[] {
+  const values: number[] = [];
+  for (let value = min; value <= max + 0.0001; value += 0.1) {
+    values.push(Number(value.toFixed(1)));
+  }
+  return values;
+}
+
 function calcItemRaw(entry: ItemEntry, item: L3Item): number {
   return entry.options.reduce((sum, oe) => {
     const opt = item.options.find(o => o.id === oe.optionId);
@@ -326,6 +202,32 @@ function calcEntryDeduction(entries: Record<string, ItemEntry>, groups: L1Group[
 
 function totalMaxScore(groups: L1Group[]): number {
   return getAllItems(groups).reduce((s, i) => s + i.maxScore, 0);
+}
+
+function withoutQuestionnaireItems(groups: L1Group[]): L1Group[] {
+  return groups
+    .map(l1 => ({
+      ...l1,
+      children: l1.children
+        .map(l2 => ({
+          ...l2,
+          items: l2.items.filter(item => {
+            const text = `${l1.name} ${l2.name} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
+            return !(
+              text.includes("问卷调查") ||
+              l2.name.includes("满意度") ||
+              item.name.includes("污水收集") ||
+              item.name.includes("整体效果") ||
+              item.name.includes("满意度") ||
+              item.name.includes("公众满意度") ||
+              item.name.includes("实施机构满意度") ||
+              item.name.includes("镇街满意度")
+            );
+          }),
+        }))
+        .filter(l2 => l2.items.length > 0),
+    }))
+    .filter(l1 => l1.children.length > 0);
 }
 
 function makeOptionEntry(optionId: string): OptionEntry {
@@ -646,12 +548,13 @@ function P2Village({ town, onBack, onNext }: {
 
 // ==================== PAGE 2b: FACILITY TYPE ====================
 
-const ALL_FACILITY_TYPES: FacilityType[] = ["treatment", "network", "survey"];
+const ALL_FACILITY_TYPES: FacilityType[] = ["treatment", "network", "survey", "water_quality"];
 
 const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; icon: string }> = {
   treatment: { label: "污水处理设施", sub: "含处理设备及附属构筑物", icon: "🏭" },
   network:   { label: "纳厂/管网设施", sub: "接入已建处理设施",       icon: "🔧" },
   survey:    { label: "调查问卷",      sub: "多方满意度问卷调查",      icon: "📋" },
+  water_quality: { label: "水质抽检情况", sub: "填写出水抽检指标及结论", icon: "💧" },
 };
 
 function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmitVillage }: {
@@ -677,7 +580,7 @@ function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmi
         <div className="flex items-end justify-between">
           <h1 className="text-xl font-semibold text-primary-foreground">考核项目</h1>
           <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${allDone ? "bg-green-500/20 text-green-200" : "bg-white/15 text-primary-foreground/80"}`}>
-            {doneCount}/3 已完成
+            {doneCount}/{ALL_FACILITY_TYPES.length} 已完成
           </span>
         </div>
       </div>
@@ -723,7 +626,7 @@ function P2bFacilityType({ town, village, typeProgress, onBack, onEnter, onSubmi
           }`}
         >
           <Send className="w-4 h-4" />
-          {allDone ? "提交本村考核" : `还差 ${3 - doneCount} 项未完成`}
+          {allDone ? "提交本村考核" : `还差 ${ALL_FACILITY_TYPES.length - doneCount} 项未完成`}
         </button>
       </div>
     </div>
@@ -763,6 +666,27 @@ const RESPONDENT_LABEL: Record<SurveyRespondent, string> = {
   implementation_org: "实施机构",
 };
 
+function questionnaireStandardItems() {
+  return [
+    ...TREATMENT.map(group => ({ source: "污水处理设施", group })),
+    ...NETWORK.map(group => ({ source: "纳厂或接入已建设施的管网设施", group })),
+  ].flatMap(({ source, group }) =>
+    group.children.flatMap(child =>
+      child.items
+        .filter(item => {
+          const text = `${group.name} ${child.name} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
+          return (
+            text.includes("问卷调查") ||
+            child.name.includes("满意度") ||
+            item.name.includes("污水收集") ||
+            item.name.includes("整体效果") ||
+            item.name.includes("满意度")
+          );
+        })
+        .map(item => ({ source, l1: group.name, l2: child.name, l3: item.name, score: item.maxScore }))
+    )
+  );
+}
 
 const RATING_LABELS = ["", "很差", "较差", "一般", "较好", "很好"];
 const RATING_COLORS = ["", "bg-red-500", "bg-orange-400", "bg-amber-400", "bg-blue-500", "bg-green-500"];
@@ -771,6 +695,23 @@ function surveyKey(cat: SurveyCategory, res: SurveyRespondent) { return `${cat}_
 
 function emptySurveyForm(): SurveyFormEntry {
   return { score: 0, comment: "", completed: false };
+}
+
+function emptyWaterQualityEntry(): WaterQualityEntry {
+  return {
+    sampleDate: "",
+    samplePoint: "",
+    hasTpLimit: true,
+    codValue: "",
+    codLimit: "",
+    nh3nValue: "",
+    nh3nLimit: "",
+    tpValue: "",
+    tpLimit: "",
+    conclusion: "pending",
+    note: "",
+    completed: false,
+  };
 }
 
 // ==================== PAGE S1: SURVEY LIST ====================
@@ -937,6 +878,130 @@ function PSurveyForm({ category, respondent, entry, onBack, onSave }: {
           }`}
         >
           <CheckCircle className="w-4 h-4" />完成本份
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ==================== PAGE W1: WATER QUALITY ====================
+
+function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
+  town: string;
+  village: string;
+  entry: WaterQualityEntry;
+  onBack: () => void;
+  onSave: (entry: WaterQualityEntry) => void;
+}) {
+  const [form, setForm] = useState<WaterQualityEntry>({ ...entry });
+  const update = (patch: Partial<WaterQualityEntry>) => setForm(prev => ({ ...prev, ...patch }));
+  const canComplete = !!form.sampleDate && !!form.samplePoint && form.conclusion !== "pending";
+
+  const Field = ({ label, value, placeholder, onChange }: {
+    label: string;
+    value: string;
+    placeholder?: string;
+    onChange: (value: string) => void;
+  }) => (
+    <label className="block">
+      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+        style={{ background: "var(--input-background)" }}
+      />
+    </label>
+  );
+
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <div className="text-xs text-primary-foreground/55 mb-0.5">{town} · {village}</div>
+        <h1 className="text-lg font-semibold text-primary-foreground">水质抽检情况</h1>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 flex gap-2">
+          <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-blue-700 leading-relaxed">
+            根据考核标准，出水水质按 CODCr、NH3-N、TP（如执行标准明确总磷限值）等抽检数据判断。
+          </p>
+        </div>
+
+        <div className="bg-white border border-border rounded-xl p-4 space-y-3">
+          <Field label="采样日期" value={form.sampleDate} placeholder="如：2023-12-10" onChange={sampleDate => update({ sampleDate })} />
+          <Field label="采样点位" value={form.samplePoint} placeholder="如：出水口" onChange={samplePoint => update({ samplePoint })} />
+          <label className="flex items-center justify-between gap-3 py-1">
+            <span className="text-sm text-foreground">执行标准明确 TP 限值</span>
+            <input
+              type="checkbox"
+              checked={form.hasTpLimit}
+              onChange={e => update({ hasTpLimit: e.target.checked })}
+              className="w-4 h-4 accent-primary"
+            />
+          </label>
+        </div>
+
+        <div className="bg-white border border-border rounded-xl p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="CODCr 实测值" value={form.codValue} placeholder="mg/L" onChange={codValue => update({ codValue })} />
+            <Field label="CODCr 限值" value={form.codLimit} placeholder="mg/L" onChange={codLimit => update({ codLimit })} />
+            <Field label="NH3-N 实测值" value={form.nh3nValue} placeholder="mg/L" onChange={nh3nValue => update({ nh3nValue })} />
+            <Field label="NH3-N 限值" value={form.nh3nLimit} placeholder="mg/L" onChange={nh3nLimit => update({ nh3nLimit })} />
+            {form.hasTpLimit && (
+              <>
+                <Field label="TP 实测值" value={form.tpValue} placeholder="mg/L" onChange={tpValue => update({ tpValue })} />
+                <Field label="TP 限值" value={form.tpLimit} placeholder="mg/L" onChange={tpLimit => update({ tpLimit })} />
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white border border-border rounded-xl p-4 space-y-3">
+          <div className="text-xs text-muted-foreground">抽检结论</div>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "qualified" as const, label: "达标" },
+              { value: "unqualified" as const, label: "不达标" },
+            ]).map(item => (
+              <button
+                key={item.value}
+                onClick={() => update({ conclusion: item.value })}
+                className={`py-3 rounded-lg border text-sm font-medium ${
+                  form.conclusion === item.value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-white text-foreground border-border"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <label className="block">
+            <span className="text-xs text-muted-foreground block mb-1.5">备注</span>
+            <textarea
+              value={form.note}
+              onChange={e => update({ note: e.target.value })}
+              placeholder="填写超标指标、检测机构、报告编号等"
+              rows={3}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+              style={{ background: "var(--input-background)" }}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+        <button
+          onClick={() => { onSave({ ...form, completed: canComplete }); onBack(); }}
+          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+        >
+          <Save className="w-4 h-4" />保存水质抽检情况
         </button>
       </div>
     </div>
@@ -1161,6 +1226,38 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
           <p className="text-xs text-blue-700 leading-relaxed">{item.description}</p>
         </div>
 
+        {(item.evaluationStandard || item.scoringMethod || item.dataSource || item.calculationMethod) && (
+          <div className="bg-white border border-border rounded-xl overflow-hidden">
+            <div className="px-3 py-2 border-b border-border text-xs font-semibold text-foreground">考核依据</div>
+            <div className="divide-y divide-border">
+              {item.evaluationStandard && (
+                <div className="px-3 py-2.5">
+                  <div className="text-[11px] text-muted-foreground mb-1">评价标准</div>
+                  <p className="text-xs text-foreground leading-relaxed whitespace-pre-line">{item.evaluationStandard}</p>
+                </div>
+              )}
+              {item.scoringMethod && (
+                <div className="px-3 py-2.5">
+                  <div className="text-[11px] text-muted-foreground mb-1">评分方法</div>
+                  <p className="text-xs text-foreground leading-relaxed">{item.scoringMethod}</p>
+                </div>
+              )}
+              {item.dataSource && (
+                <div className="px-3 py-2.5">
+                  <div className="text-[11px] text-muted-foreground mb-1">数据来源</div>
+                  <p className="text-xs text-foreground leading-relaxed">{item.dataSource}</p>
+                </div>
+              )}
+              {item.calculationMethod && (
+                <div className="px-3 py-2.5">
+                  <div className="text-[11px] text-muted-foreground mb-1">计算方法</div>
+                  <p className="text-xs text-foreground leading-relaxed">{item.calculationMethod}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Deduction options */}
         {item.options.map((opt, oi) => {
           const oe = entry.options[oi];
@@ -1267,7 +1364,7 @@ function P4Detail({ itemId, groups, entries, onBack, onSave }: {
                         <div className="space-y-2">
                           <p className="text-xs text-slate-500">扣分范围 {opt.min}～{opt.max} 分，请选择：</p>
                           <div className="flex gap-2 flex-wrap">
-                            {Array.from({ length: opt.max! - opt.min! + 1 }, (_, k) => opt.min! + k).map(v => (
+                            {makeScoreChoices(opt.min!, opt.max!).map(v => (
                               <button
                                 key={v}
                                 onClick={() => updateOpt(oi, { rangeValue: v })}
@@ -2070,7 +2167,7 @@ function PSubmittedData({ submittedData, onBack }: {
 
 // ==================== MAIN APP ====================
 
-type Page = "town" | "village" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "submitted_data";
+type Page = "town" | "village" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
 
 export default function App() {
   const [page, setPage] = useState<Page>("town");
@@ -2084,10 +2181,15 @@ export default function App() {
   const [showToast, setShowToast] = useState(false);
   const [surveyEntries, setSurveyEntries] = useState<Record<string, SurveyFormEntry>>({});
   const [surveyTarget, setSurveyTarget] = useState<{ cat: SurveyCategory; res: SurveyRespondent } | null>(null);
+  const [waterQuality, setWaterQuality] = useState<WaterQualityEntry>(() => emptyWaterQualityEntry());
   const [typeProgress, setTypeProgress] = useState<Partial<Record<FacilityType, boolean>>>({});
   const [scoreByType, setScoreByType] = useState<Partial<Record<FacilityType, TypeScore>>>({});
 
-  const groups = ftype === "treatment" ? TREATMENT : NETWORK;
+  const groups = ftype === "treatment"
+    ? withoutQuestionnaireItems(TREATMENT)
+    : ftype === "network"
+      ? withoutQuestionnaireItems(NETWORK)
+      : [];
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id), 0);
@@ -2105,7 +2207,7 @@ export default function App() {
     setPage("facilitytype");
   };
 
-  // Called from the hub "提交本村考核" after all 3 types done
+  // Called from the hub after all four directories are completed.
   const handleVillageSubmit = () => {
     const combinedScores = Object.values(scoreByType);
     const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
@@ -2118,6 +2220,7 @@ export default function App() {
       deductedScore: combinedDeducted,
       currentScore: combinedCurrent,
       entries,
+      waterQuality,
     };
     setCompletedVillages(prev => [...prev.filter(r => r.village !== village), record]);
     setPage("success");
@@ -2126,6 +2229,7 @@ export default function App() {
   const handleNextVillage = () => {
     setVillage(""); setEntries({}); setDetailId("");
     setFtype("treatment"); setSurveyEntries({}); setSurveyTarget(null);
+    setWaterQuality(emptyWaterQualityEntry());
     setTypeProgress({}); setScoreByType({});
     setPage("village");
   };
@@ -2142,7 +2246,7 @@ export default function App() {
       case "town":
         return (
           <P1Town
-            onNext={t => { setTown(t); setCompletedVillages([]); setTypeProgress({}); setScoreByType({}); setPage("village"); }}
+            onNext={t => { setTown(t); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry()); setTypeProgress({}); setScoreByType({}); setPage("village"); }}
             submittedData={submittedData}
             onViewSubmitted={() => setPage("submitted_data")}
           />
@@ -2152,7 +2256,7 @@ export default function App() {
           <P2Village
             town={town}
             onBack={() => setPage("town")}
-            onNext={v => { setVillage(v); setPage("facilitytype"); }}
+            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry()); setPage("facilitytype"); }}
           />
         );
       case "facilitytype":
@@ -2164,7 +2268,7 @@ export default function App() {
             onEnter={t => {
               setFtype(t);
               if (!typeProgress[t]) setEntries({});
-              setPage(t === "survey" ? "survey_list" : "criteria");
+              setPage(t === "survey" ? "survey_list" : t === "water_quality" ? "water_quality" : "criteria");
             }}
             onSubmitVillage={handleVillageSubmit}
           />
@@ -2222,6 +2326,7 @@ export default function App() {
               setTown(""); setVillage("");
               setFtype("treatment"); setEntries({});
               setDetailId(""); setCompletedVillages([]);
+              setWaterQuality(emptyWaterQualityEntry());
               setTypeProgress({}); setScoreByType({});
               setShowToast(true);
               setTimeout(() => setShowToast(false), 3000);
@@ -2252,6 +2357,21 @@ export default function App() {
             }}
           />
         ) : null;
+      case "water_quality":
+        return (
+          <PWaterQualityForm
+            town={town}
+            village={village}
+            entry={waterQuality}
+            onBack={() => setPage("facilitytype")}
+            onSave={entry => {
+              setWaterQuality(entry);
+              setTypeProgress(prev => ({ ...prev, water_quality: entry.completed }));
+              setScoreByType(prev => ({ ...prev, water_quality: { maxScore: 0, currentScore: 0, deductedScore: 0 } }));
+              setPage("facilitytype");
+            }}
+          />
+        );
       case "submitted_data":
         return (
           <PSubmittedData
@@ -2295,3 +2415,4 @@ export default function App() {
     </div>
   );
 }
+
