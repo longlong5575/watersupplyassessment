@@ -31,12 +31,14 @@ import {
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
 const TownCompletionChart = lazy(() => import("./TownCompletionChart"));
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type Page =
   | "home"
   | "dashboard"
+  | "records"
   | "towndetail"
   | "dataupload"
   | "upload"
@@ -67,6 +69,7 @@ interface Report {
   status: ReportStatus;
   size: string;
   createdAt: string;
+  downloadUrl?: string;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -272,6 +275,58 @@ const DASHBOARD_TOWNS: TownSurvey[] = [
   { name: "双水镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
 ];
 
+type BackendTownRow = {
+  id: string;
+  name: string;
+  recordCount: number;
+  completedCount: number;
+  villageCount: number;
+  status: TownSurveyStatus;
+};
+
+type BackendReportRow = {
+  id: string;
+  name: string;
+  town: string;
+  period: string;
+  status: ReportStatus;
+  size: number | string;
+  createdAt: string;
+};
+
+function formatReportSize(size: number | string): string {
+  if (typeof size === "string") return size;
+  if (!size) return "0 MB";
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function mapBackendReports(rows: BackendReportRow[]): Report[] {
+  return rows.map(row => ({
+    id: row.id,
+    name: row.name,
+    town: row.town,
+    period: row.period,
+    status: row.status,
+    size: formatReportSize(row.size),
+    createdAt: row.createdAt,
+    downloadUrl: `${API_BASE_URL}/reports/${row.id}/download`,
+  }));
+}
+
+function mapBackendTownRows(rows: BackendTownRow[], current: TownSurvey[]): TownSurvey[] {
+  const existingByName = new Map(current.map(town => [town.name, town]));
+  return rows.map(row => {
+    const existing = existingByName.get(row.name);
+    const progress = row.recordCount > 0 ? 1 : 0;
+    return {
+      name: row.name,
+      status: row.status,
+      facilityType: existing?.facilityType ?? "treatment",
+      surveys: makeDashboardSurveys(progress),
+    };
+  });
+}
+
 const PROGRESS_STEPS = [
   { id: 1, label: "读取资料包", desc: "解压并索引全部附件" },
   { id: 2, label: "识别镇街和附件", desc: "按镇街归档原始附件" },
@@ -407,6 +462,7 @@ function StatusBadge({ status }: { status: ReportStatus }) {
 function Sidebar({ current, onNav }: { current: Page; onNav: (p: Page) => void }) {
   const items = [
     { id: "dashboard" as Page, icon: BarChart2, label: "数据看板", group: ["dashboard"] },
+    { id: "records" as Page, icon: FileCheck, label: "数据复核", group: ["records"] },
     { id: "dataupload" as Page, icon: UploadCloud, label: "生成报告", group: ["dataupload", "home", "upload", "mobile", "confirm", "progress", "result"] },
     { id: "history" as Page, icon: History, label: "历史报告", group: ["history"] },
   ];
@@ -1151,14 +1207,16 @@ function Row({ label, value, mono, valueClass, extra }: { label: string; value: 
 
 // ─── Page 4: Progress ─────────────────────────────────────────────────────────
 
-function ProgressPage({ onNav, onStart, dataSource, methodFiles, methodText, selectedTowns, outputSelected }: {
+function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles, methodText, selectedTowns, outputSelected, reportPeriod }: {
   onNav: (p: Page) => void;
   onStart: () => void;
+  onReportsReady: (reports: Report[]) => void;
   dataSource: "upload" | "mobile";
   methodFiles: File[];
   methodText: string;
   selectedTowns: string[];
   outputSelected: Set<string>;
+  reportPeriod: string;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
   const calcMethodLabel = hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法";
@@ -1170,6 +1228,7 @@ function ProgressPage({ onNav, onStart, dataSource, methodFiles, methodText, sel
   );
 
   const [step, setStep] = useState(0);
+  const [backendDone, setBackendDone] = useState(false);
   useEffect(() => { onStart(); }, []);
   const [logs, setLogs] = useState<string[]>(() => [
     "任务初始化完成",
@@ -1177,6 +1236,52 @@ function ProgressPage({ onNav, onStart, dataSource, methodFiles, methodText, sel
       ? "已读取提供的金额计算方法。"
       : "未提供新的金额计算方法，已使用默认金额计算方法。",
   ]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function createReportTask() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/report-tasks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: dataSource,
+            period: reportPeriod,
+            townNames: selectedTowns,
+            methodText,
+            outputs: Array.from(outputSelected),
+          }),
+        });
+        if (!response.ok) throw new Error(`Report task failed: ${response.status}`);
+        const task = await response.json();
+        const pollTask = async () => {
+          if (cancelled) return;
+          const statusResponse = await fetch(`${API_BASE_URL}/report-tasks/${task.id}`);
+          if (!statusResponse.ok) throw new Error(`Report task polling failed: ${statusResponse.status}`);
+          const latest = await statusResponse.json();
+          if (latest.status === "completed") {
+            onReportsReady(mapBackendReports(latest.reports ?? []));
+            setBackendDone(true);
+            return;
+          }
+          if (latest.status === "failed") throw new Error(latest.error ?? "Report generation failed");
+          window.setTimeout(() => { void pollTask(); }, 1500);
+        };
+        await pollTask();
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) {
+          setLogs(prev => [...prev, "报告任务提交失败，请确认后端服务已启动。"]);
+        }
+      }
+    }
+
+    createReportTask();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (step >= steps.length) return;
@@ -1201,11 +1306,8 @@ function ProgressPage({ onNav, onStart, dataSource, methodFiles, methodText, sel
   const done = step >= steps.length;
 
   useEffect(() => {
-    if (done) {
-      const t = setTimeout(() => onNav("result"), 1000);
-      return () => clearTimeout(t);
-    }
-  }, [done, onNav]);
+    if (backendDone) onNav("result");
+  }, [backendDone, onNav]);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1342,7 +1444,7 @@ function formatElapsed(s: number): string {
   return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分钟`;
 }
 
-function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod }: {
+function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports }: {
   onNav: (p: Page) => void;
   packageFiles: File[];
   methodFiles: File[];
@@ -1352,6 +1454,7 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
   elapsedSeconds: number | null;
   generatedAt: string | null;
   reportPeriod: string;
+  generatedReports: Report[];
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
 
@@ -1367,10 +1470,11 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
   }));
 
   const summaryReport: Report = { id: "r-summary", name: `${reportPeriod}村级设施绩效考核综合报告（汇总）`, town: "全区汇总", period: reportPeriod, status: "completed", size: "4.8 MB", createdAt: nowStr };
-  const reports: Report[] = [
+  const fallbackReports: Report[] = [
     ...(outputSelected.has("separate") ? townReports : []),
     ...(outputSelected.has("summary") ? [summaryReport] : []),
   ];
+  const reports = generatedReports.length > 0 ? generatedReports : fallbackReports;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1426,9 +1530,9 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
                       <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.size}</td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3">
-                          <button className="text-xs text-primary hover:underline flex items-center gap-1">
+                          <a href={r.downloadUrl ?? "#"} className={`text-xs text-primary hover:underline flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}>
                             <Download size={12} /> 下载
-                          </button>
+                          </a>
                           <button className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                             <Eye size={12} /> 详情
                           </button>
@@ -1613,6 +1717,47 @@ function TownPieCard({ town }: { town: TownSurvey }) {
 }
 
 const DEFAULT_SURVEYS = () => makeDashboardSurveys(0);
+
+function RecordsPage() {
+  const [records, setRecords] = useState<Array<{ id: string; town: string; status: string; updatedAt: string }>>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = () => {
+    fetch(`${API_BASE_URL}/records`)
+      .then(response => response.ok ? response.json() : { items: [] })
+      .then(data => setRecords(Array.isArray(data.items) ? data.items : []))
+      .catch(() => setRecords([]));
+  };
+
+  useEffect(() => { load(); const timer = window.setInterval(load, 3000); return () => window.clearInterval(timer); }, []);
+
+  const action = async (id: string, name: "review" | "return" | "lock") => {
+    setBusy(id);
+    try {
+      await fetch(`${API_BASE_URL}/records/${id}/${name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: name === "return" ? JSON.stringify({ reason: "需要补充现场资料" }) : undefined,
+      });
+      load();
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar title="数据复核" breadcrumbs={["数据复核"]} />
+      <div className="px-8 py-6 max-w-6xl">
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="px-5 py-3">镇街</th><th className="px-3 py-3">状态</th><th className="px-3 py-3">更新时间</th><th className="px-3 py-3">操作</th></tr></thead>
+            <tbody>{records.map(record => <tr key={record.id} className="border-b border-border last:border-0"><td className="px-5 py-3">{record.town}</td><td className="px-3 py-3">{record.status}</td><td className="px-3 py-3 text-xs text-muted-foreground">{record.updatedAt}</td><td className="px-3 py-3 flex gap-2"><button disabled={busy === record.id || record.status === "locked"} onClick={() => action(record.id, "review")} className="text-xs text-primary disabled:opacity-40">通过复核</button><button disabled={busy === record.id || record.status === "locked"} onClick={() => action(record.id, "lock")} className="text-xs text-emerald-700 disabled:opacity-40">锁定</button><button disabled={busy === record.id || record.status === "locked"} onClick={() => action(record.id, "return")} className="text-xs text-red-600 disabled:opacity-40">退回</button></td></tr>)}</tbody>
+          </table>
+          {records.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">暂无待复核数据</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
   onNav: (p: Page) => void;
@@ -2484,7 +2629,32 @@ export default function App() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [reportPeriod, setReportPeriod] = useState("");
   const [historyReports, setHistoryReports] = useState<Report[]>(HISTORY_REPORTS);
+  const [generatedReports, setGeneratedReports] = useState<Report[]>([]);
   const progressStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDashboardTowns() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/dashboard/towns`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && Array.isArray(data.items)) {
+          setTowns(prev => mapBackendTownRows(data.items, prev));
+        }
+      } catch (error) {
+        console.warn("Dashboard sync failed", error);
+      }
+    }
+
+    loadDashboardTowns();
+    const timer = window.setInterval(loadDashboardTowns, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   function toggleOutput(id: string) {
     setOutputSelected(prev => {
@@ -2498,6 +2668,7 @@ export default function App() {
     switch (page) {
       case "home": return <HomePage onNav={setPage} reports={historyReports} />;
       case "dashboard": return <DataDashboardPage onNav={setPage} onViewTown={(t) => { setDetailTown(t); setPage("towndetail"); }} towns={towns} setTowns={setTowns} />;
+      case "records": return <RecordsPage />;
       case "towndetail": return <TownDetailPage town={detailTown} onNav={setPage} />;
       case "dataupload": return <DataUploadSelectPage onNav={setPage} />;
       case "mobile": return (
@@ -2556,37 +2727,20 @@ export default function App() {
               const now = new Date();
               const nowStr = now.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\//g, "-");
               setGeneratedAt(nowStr);
-              // Add to history
-              const newReports: Report[] = [
-                ...(outputSelected.has("separate") ? confirmedTowns.map((town, i) => ({
-                  id: `gen-${Date.now()}-${i}`,
-                  name: `${town}${reportPeriod}村级设施考核报告（正文）`,
-                  town,
-                  period: reportPeriod,
-                  status: "completed" as ReportStatus,
-                  size: `${((i * 137 % 8 + 8) / 10).toFixed(1)} MB`,
-                  createdAt: nowStr,
-                })) : []),
-                ...(outputSelected.has("summary") ? [{
-                  id: `gen-${Date.now()}-summary`,
-                  name: `${reportPeriod}村级设施绩效考核综合报告（汇总）`,
-                  town: "全区汇总",
-                  period: reportPeriod,
-                  status: "completed" as ReportStatus,
-                  size: "4.8 MB",
-                  createdAt: nowStr,
-                }] : []),
-              ];
-              setHistoryReports(prev => [...newReports, ...prev]);
             }
             setPage(p);
           }}
-          onStart={() => { progressStartRef.current = Date.now(); }}
+          onStart={() => { progressStartRef.current = Date.now(); setGeneratedReports([]); }}
+          onReportsReady={(reports) => {
+            setGeneratedReports(reports);
+            setHistoryReports(prev => [...reports, ...prev.filter(existing => !reports.some(report => report.id === existing.id))]);
+          }}
           dataSource={dataSource}
           methodFiles={methodFiles}
           methodText={methodText}
           selectedTowns={confirmedTowns}
           outputSelected={outputSelected}
+          reportPeriod={reportPeriod}
         />
       );
       case "result": return (
@@ -2600,6 +2754,7 @@ export default function App() {
           elapsedSeconds={elapsedSeconds}
           generatedAt={generatedAt}
           reportPeriod={reportPeriod}
+          generatedReports={generatedReports}
         />
       );
       case "history": return <HistoryPage onNav={setPage} reports={historyReports} />;

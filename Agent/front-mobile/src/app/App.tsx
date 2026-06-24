@@ -1,4 +1,5 @@
 ﻿import { useState, useRef } from "react";
+import { useEffect } from "react";
 import {
   ChevronRight, ChevronLeft, Search, Camera, X, CheckCircle,
   AlertCircle, ChevronDown, ChevronUp, Save, Send,
@@ -6,6 +7,8 @@ import {
   AlertTriangle, Info, Check, Package,
 } from "lucide-react";
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 // ==================== TYPES ====================
 
@@ -121,6 +124,22 @@ interface TownPackage {
   villages: VillageRecord[];
 }
 
+async function submitTownPackageToBackend(pkg: TownPackage) {
+  const createResponse = await fetch(`${API_BASE_URL}/mobile/assessment-records`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(pkg),
+  });
+  if (!createResponse.ok) throw new Error(`Create record failed: ${createResponse.status}`);
+
+  const record = await createResponse.json();
+  const submitResponse = await fetch(`${API_BASE_URL}/mobile/assessment-records/${record.id}/submit`, {
+    method: "POST",
+  });
+  if (!submitResponse.ok) throw new Error(`Submit record failed: ${submitResponse.status}`);
+  return submitResponse.json();
+}
+
 function triggerDownload(pkg: TownPackage) {
   const json = JSON.stringify(pkg, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -181,8 +200,31 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
   }));
 }
 
-const TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
-const NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
+let TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
+let NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
+
+function applyBackendStandards(items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; deductionOptions?: Array<{ id: string; name: string; deduction: number }> }>) {
+  const l1 = items.filter(item => item.level === 1);
+  const l2 = items.filter(item => item.level === 2);
+  const l3 = items.filter(item => item.level === 3);
+  const groups: L1Group[] = l1.map(group => ({
+    id: group.id,
+    name: group.name,
+    icon: "●",
+    children: l2.filter(child => child.parentId === group.id).map(child => ({
+      id: child.id,
+      name: child.name,
+      items: l3.filter(item => item.parentId === child.id).map(item => ({
+        id: item.id,
+        name: item.name,
+        maxScore: item.fullScore,
+        description: "以已发布考核标准为准",
+        options: (item.deductionOptions ?? []).map(option => ({ id: option.id, name: option.name, reason: option.name, type: "fixed" as const, value: option.deduction, maxInstances: 1 })),
+      })),
+    })),
+  })).filter(group => group.children.some(child => child.items.length));
+  if (groups.length) TREATMENT = groups;
+}
 
 // ==================== HELPERS ====================
 
@@ -464,7 +506,16 @@ function P1Town({ onNext, submittedData, onViewSubmitted }: {
 }) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
-  const towns = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"];
+  const [towns, setTowns] = useState(["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"]);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/mobile/towns`)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (Array.isArray(data?.items) && data.items.length) setTowns(data.items.map((item: { name: string }) => item.name));
+      })
+      .catch(() => undefined);
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -559,7 +610,16 @@ function P2Village({ town, onBack, onNext }: {
 }) {
   const [val, setVal] = useState("");
   const [err, setErr] = useState("");
-  const villages = ["大步头村", "禾塘村", "合益村", "那廖村", "那黎村", "滘尾村"];
+  const [villages, setVillages] = useState(["大步头村", "禾塘村", "合益村", "那廖村", "那黎村", "滘尾村"]);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/mobile/towns/${encodeURIComponent(town)}/villages`)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (Array.isArray(data?.items) && data.items.length) setVillages(data.items.map((item: { name: string }) => item.name));
+      })
+      .catch(() => undefined);
+  }, [town]);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -2171,11 +2231,13 @@ function PSuccess({ town, village, scoreByType, completedVillages, onNextVillage
 
 // ==================== TOWN COMPLETE ====================
 
-function PTownComplete({ town, completedVillages, onBack, onSubmit }: {
+function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, error }: {
   town: string;
   completedVillages: VillageRecord[];
   onBack: () => void;
-  onSubmit: () => void;
+  onSubmit: () => void | Promise<void>;
+  submitting?: boolean;
+  error?: string;
 }) {
 
   const totalDeducted = completedVillages.reduce((s, v) => s + v.deductedScore, 0);
@@ -2246,12 +2308,19 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit }: {
           })}
         </div>
 
+        {error && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Submit */}
         <button
           onClick={onSubmit}
-          className="w-full py-4 bg-[#1a4a38] text-white rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          disabled={submitting}
+          className={`w-full py-4 bg-[#1a4a38] text-white rounded-xl font-semibold text-base flex items-center justify-center gap-2 ${submitting ? "opacity-60 cursor-not-allowed" : ""}`}
         >
-          <Send className="w-4 h-4" />提交
+          <Send className="w-4 h-4" />{submitting ? "提交中..." : "提交"}
         </button>
       </div>
     </div>
@@ -2370,7 +2439,22 @@ export default function App() {
   const [detailId, setDetailId] = useState("");
   const [completedVillages, setCompletedVillages] = useState<VillageRecord[]>([]);
   const [submittedData, setSubmittedData] = useState<Record<string, VillageRecord[]>>({});
+  const [, setStandardRevision] = useState(0);
   const [showToast, setShowToast] = useState(false);
+  const [isTownSubmitting, setIsTownSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/mobile/indicator-standards?facility_type=facility`)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (Array.isArray(data?.items) && data.items.length) {
+          applyBackendStandards(data.items);
+          setStandardRevision(value => value + 1);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
   const [surveyEntries, setSurveyEntries] = useState<Record<string, SurveyFormEntry>>({});
   const [surveyTarget, setSurveyTarget] = useState<{ cat: SurveyCategory; res: SurveyRespondent } | null>(null);
   const [waterQuality, setWaterQuality] = useState<WaterQualityEntry>(() => emptyWaterQualityEntry());
@@ -2532,16 +2616,28 @@ export default function App() {
             town={town}
             completedVillages={completedVillages}
             onBack={() => setPage("success")}
-            onSubmit={() => {
-              setSubmittedData(prev => ({ ...prev, [town]: completedVillages }));
-              setTown(""); setVillage("");
-              setFtype("treatment"); setEntries({});
-              setDetailId(""); setCompletedVillages([]);
-              setWaterQuality(emptyWaterQualityEntry());
-              setTypeProgress({}); setScoreByType({});
-              setShowToast(true);
-              setTimeout(() => setShowToast(false), 3000);
-              setPage("town");
+            submitting={isTownSubmitting}
+            error={submitError}
+            onSubmit={async () => {
+              setIsTownSubmitting(true);
+              setSubmitError("");
+              try {
+                await submitTownPackageToBackend(buildPackage());
+                setSubmittedData(prev => ({ ...prev, [town]: completedVillages }));
+                setTown(""); setVillage("");
+                setFtype("treatment"); setEntries({});
+                setDetailId(""); setCompletedVillages([]);
+                setWaterQuality(emptyWaterQualityEntry());
+                setTypeProgress({}); setScoreByType({});
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 3000);
+                setPage("town");
+              } catch (error) {
+                console.error(error);
+                setSubmitError("提交失败，请确认后端服务已启动后重试。");
+              } finally {
+                setIsTownSubmitting(false);
+              }
             }}
           />
         );
