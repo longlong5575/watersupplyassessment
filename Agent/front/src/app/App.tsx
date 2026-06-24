@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import {
   UploadCloud,
   FileText,
@@ -28,8 +28,9 @@ import {
   Smartphone,
   MapPin,
 } from "lucide-react";
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
+
+const TownCompletionChart = lazy(() => import("./TownCompletionChart"));
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -231,6 +232,18 @@ const DASHBOARD_SURVEY_TOTALS = SURVEY_LABELS.map(label => ({
   total: label === "水质抽检情况" ? 1 : label === "调查问卷" ? 3 : countScoreItemsByLabel(label),
 }));
 
+function facilityLabel(type?: TownSurvey["facilityType"]): string | null {
+  return type === "treatment" ? "污水处理设施" : type === "network" ? "管网设施" : null;
+}
+
+function visibleTownSurveys(town: TownSurvey): TownSurvey["surveys"] {
+  const selectedFacility = facilityLabel(town.facilityType);
+  const visibleLabels = selectedFacility
+    ? [selectedFacility, "调查问卷", "水质抽检情况"]
+    : ["调查问卷", "水质抽检情况"];
+  return town.surveys.filter(survey => visibleLabels.includes(survey.label));
+}
+
 function makeDashboardSurveys(progress: number | number[]): TownSurvey["surveys"] {
   return DASHBOARD_SURVEY_TOTALS.map(({ label, total }, index) => {
     const ratio = Array.isArray(progress) ? progress[index] ?? 0 : progress;
@@ -248,15 +261,15 @@ function surveyDisplayValue(s: TownSurvey["surveys"][number]): string {
 }
 
 const DASHBOARD_TOWNS: TownSurvey[] = [
-  { name: "北陡镇", status: "completed", surveys: makeDashboardSurveys(1) },
-  { name: "白沙镇", status: "completed", surveys: makeDashboardSurveys(1) },
-  { name: "大江镇", status: "completed", surveys: makeDashboardSurveys(1) },
-  { name: "赤溪镇", status: "inprogress", surveys: makeDashboardSurveys([0.7, 0.5, 0.6]) },
-  { name: "广海镇", status: "inprogress", surveys: makeDashboardSurveys([0.3, 0.2, 0.4]) },
-  { name: "沙堆镇", status: "pending", surveys: makeDashboardSurveys(0) },
-  { name: "古井镇", status: "pending", surveys: makeDashboardSurveys(0) },
-  { name: "潮连镇", status: "pending", surveys: makeDashboardSurveys(0) },
-  { name: "双水镇", status: "pending", surveys: makeDashboardSurveys(0) },
+  { name: "北陡镇", status: "completed", facilityType: "treatment", surveys: makeDashboardSurveys(1) },
+  { name: "白沙镇", status: "completed", facilityType: "network", surveys: makeDashboardSurveys(1) },
+  { name: "大江镇", status: "completed", facilityType: "treatment", surveys: makeDashboardSurveys(1) },
+  { name: "赤溪镇", status: "inprogress", facilityType: "network", surveys: makeDashboardSurveys([0.7, 0.5, 0.6]) },
+  { name: "广海镇", status: "inprogress", facilityType: "treatment", surveys: makeDashboardSurveys([0.3, 0.2, 0.4]) },
+  { name: "沙堆镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
+  { name: "古井镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
+  { name: "潮连镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
+  { name: "双水镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
 ];
 
 const PROGRESS_STEPS = [
@@ -1565,8 +1578,9 @@ function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Re
 const PIE_COLORS = ["#1a3a5c", "#e8edf3"];
 
 function TownPieCard({ town }: { town: TownSurvey }) {
-  const totalDone = town.surveys.reduce((s, x) => s + x.done, 0);
-  const totalAll = town.surveys.reduce((s, x) => s + x.total, 0);
+  const surveys = visibleTownSurveys(town);
+  const totalDone = surveys.reduce((s, x) => s + x.done, 0);
+  const totalAll = surveys.reduce((s, x) => s + x.total, 0);
   const pieData = [
     { name: "已完成", value: totalDone },
     { name: "未完成", value: totalAll - totalDone },
@@ -1579,17 +1593,12 @@ function TownPieCard({ town }: { town: TownSurvey }) {
         <span className="ml-auto text-xs font-mono text-muted-foreground">{totalDone}/{totalAll}</span>
       </div>
       <div className="h-32">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie data={pieData} cx="50%" cy="50%" innerRadius={28} outerRadius={48} dataKey="value" strokeWidth={0}>
-              {pieData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} />)}
-            </Pie>
-            <Tooltip formatter={(v: number) => [`${v} 项`, ""]} contentStyle={{ fontSize: 11 }} />
-          </PieChart>
-        </ResponsiveContainer>
+        <Suspense fallback={<div className="h-full animate-pulse rounded-full bg-muted" />}>
+          <TownCompletionChart data={pieData} colors={PIE_COLORS} />
+        </Suspense>
       </div>
       <div className="space-y-1.5 mt-1">
-        {town.surveys.map(s => (
+        {surveys.map(s => (
           <div key={s.label} className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground w-24 shrink-0">{s.label}</span>
             <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
@@ -1614,7 +1623,7 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<TownSurvey | null>(null);
   const [addingNew, setAddingNew] = useState(false);
-  const [newDraft, setNewDraft] = useState<TownSurvey>({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() });
+  const [newDraft, setNewDraft] = useState<TownSurvey>({ name: "", status: "pending", facilityType: "treatment", surveys: DEFAULT_SURVEYS() });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const completed = towns.filter(t => t.status === "completed");
@@ -1642,20 +1651,23 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
     if (!newDraft.name.trim()) return;
     setTowns(prev => [...prev, { ...newDraft }]);
     setAddingNew(false);
-    setNewDraft({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() });
+    setNewDraft({ name: "", status: "pending", facilityType: "treatment", surveys: DEFAULT_SURVEYS() });
   }
 
-  function SurveyInputs({ surveys, onChange }: { surveys: TownSurvey["surveys"]; onChange: (s: TownSurvey["surveys"]) => void }) {
+  function SurveyInputs({ town, onChange }: { town: TownSurvey; onChange: (s: TownSurvey["surveys"]) => void }) {
+    const surveys = visibleTownSurveys(town);
     return (
       <div className="flex gap-3">
-        {surveys.map((s, i) => (
+        {surveys.map(s => {
+          const sourceIndex = town.surveys.findIndex(item => item.label === s.label);
+          return (
           <div key={s.label} className="flex flex-col gap-1">
             <span className="text-xs text-muted-foreground">{s.label}</span>
             {isWaterQualitySurvey(s.label) ? (
               <select
                 value={s.done > 0 ? "done" : "pending"}
                 onChange={e => {
-                  const next = surveys.map((x, j) => j === i ? { ...x, done: e.target.value === "done" ? 1 : 0, total: 1 } : x);
+                  const next = town.surveys.map((x, j) => j === sourceIndex ? { ...x, done: e.target.value === "done" ? 1 : 0, total: 1 } : x);
                   onChange(next);
                 }}
                 className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
@@ -1667,20 +1679,21 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
             ) : (
               <div className="flex items-center gap-1">
                 <input type="number" min={0} value={s.done}
-                  onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, done: Math.min(Number(e.target.value), x.total) } : x); onChange(next); }}
+                  onChange={e => { const next = town.surveys.map((x, j) => j === sourceIndex ? { ...x, done: Math.min(Number(e.target.value), x.total) } : x); onChange(next); }}
                   className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
                   style={{ background: "var(--input-background)" }}
                 />
                 <span className="text-xs text-muted-foreground">/</span>
                 <input type="number" min={0} value={s.total}
-                  onChange={e => { const next = surveys.map((x, j) => j === i ? { ...x, total: Number(e.target.value), done: Math.min(x.done, Number(e.target.value)) } : x); onChange(next); }}
+                  onChange={e => { const next = town.surveys.map((x, j) => j === sourceIndex ? { ...x, total: Number(e.target.value), done: Math.min(x.done, Number(e.target.value)) } : x); onChange(next); }}
                   className="w-12 border border-border rounded px-1.5 py-0.5 text-xs font-mono text-center focus:outline-none focus:ring-1 focus:ring-primary/40"
                   style={{ background: "var(--input-background)" }}
                 />
               </div>
             )}
           </div>
-        ))}
+        );
+        })}
       </div>
     );
   }
@@ -1783,11 +1796,10 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                 <tr className="border-b border-border text-xs text-muted-foreground font-mono">
                   <th className="text-left px-5 py-3 font-medium w-24">镇街名称</th>
                   <th className="text-left px-3 py-3 font-medium w-24">状态</th>
-                  {SURVEY_LABELS.map(l => (
-                    <th key={l} className="text-left px-3 py-3 font-medium whitespace-nowrap">
-                      {l} <span className="opacity-50">{isWaterQualitySurvey(l) ? "是否完成" : "完成/总量"}</span>
-                    </th>
-                  ))}
+                  <th className="text-left px-3 py-3 font-medium whitespace-nowrap">设施类型</th>
+                  <th className="text-left px-3 py-3 font-medium whitespace-nowrap">设施考核 <span className="opacity-50">完成/总量</span></th>
+                  <th className="text-left px-3 py-3 font-medium whitespace-nowrap">调查问卷 <span className="opacity-50">完成/总量</span></th>
+                  <th className="text-left px-3 py-3 font-medium whitespace-nowrap">水质抽检情况 <span className="opacity-50">是否完成</span></th>
                   <th className="text-left px-3 py-3 font-medium">操作</th>
                 </tr>
               </thead>
@@ -1795,6 +1807,9 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                 {towns.map(t => {
                   const isEditing = editingId === t.name;
                   const draft = isEditing ? editDraft! : t;
+                  const facilitySurvey = facilityLabel(t.facilityType) ? t.surveys.find(s => s.label === facilityLabel(t.facilityType)) : undefined;
+                  const questionnaireSurvey = t.surveys.find(s => s.label === "调查问卷");
+                  const waterQualitySurvey = t.surveys.find(s => s.label === "水质抽检情况");
                   return (
                     <tr key={t.name} className={`border-b border-border last:border-0 ${isEditing ? "bg-blue-50" : "hover:bg-muted/20"}`}>
                       <td className="px-5 py-2.5">
@@ -1819,24 +1834,28 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                           <StatusBadge status={t.status === "completed" ? "completed" : t.status === "inprogress" ? "processing" : "pending"} />
                         )}
                       </td>
+                      <td className="px-3 py-2.5">
+                        {isEditing ? (
+                          <select value={draft.facilityType ?? ""} onChange={e => setEditDraft(d => d ? { ...d, facilityType: e.target.value as TownSurvey["facilityType"] } : d)}
+                            className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
+                            style={{ background: "var(--input-background)" }}>
+                            <option value="treatment">污水处理设施</option>
+                            <option value="network">管网设施</option>
+                          </select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{facilityLabel(t.facilityType) ?? "待接入"}</span>
+                        )}
+                      </td>
                       {isEditing ? (
-                        <td colSpan={SURVEY_LABELS.length} className="px-3 py-2.5">
-                          <SurveyInputs surveys={draft.surveys} onChange={s => setEditDraft(d => d ? { ...d, surveys: s } : d)} />
+                        <td colSpan={3} className="px-3 py-2.5">
+                          <SurveyInputs town={draft} onChange={s => setEditDraft(d => d ? { ...d, surveys: s } : d)} />
                         </td>
                       ) : (
-                        t.surveys.map(s => (
-                          <td key={s.label} className="px-3 py-2.5 text-xs font-mono text-muted-foreground">
-                            {isWaterQualitySurvey(s.label) ? (
-                              <span className={s.done > 0 ? "text-[var(--status-success)]" : "text-muted-foreground"}>
-                                {surveyDisplayValue(s)}
-                              </span>
-                            ) : (
-                              <>
-                                <span className={s.done === s.total && s.total > 0 ? "text-[var(--status-success)]" : ""}>{s.done}</span>/{s.total}
-                              </>
-                            )}
-                          </td>
-                        ))
+                        <>
+                          <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground">{facilitySurvey ? <><span className={facilitySurvey.done === facilitySurvey.total && facilitySurvey.total > 0 ? "text-[var(--status-success)]" : ""}>{facilitySurvey.done}</span>/{facilitySurvey.total}</> : "-"}</td>
+                          <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground">{questionnaireSurvey ? <><span className={questionnaireSurvey.done === questionnaireSurvey.total && questionnaireSurvey.total > 0 ? "text-[var(--status-success)]" : ""}>{questionnaireSurvey.done}</span>/{questionnaireSurvey.total}</> : "-"}</td>
+                          <td className="px-3 py-2.5 text-xs font-mono text-muted-foreground">{waterQualitySurvey ? <span className={waterQualitySurvey.done > 0 ? "text-[var(--status-success)]" : "text-muted-foreground"}>{surveyDisplayValue(waterQualitySurvey)}</span> : "-"}</td>
+                        </>
                       )}
                       <td className="px-3 py-2.5">
                         {isEditing ? (
@@ -1877,13 +1896,21 @@ function DataDashboardPage({ onNav, onViewTown, towns, setTowns }: {
                         <option value="pending">未开始</option>
                       </select>
                     </td>
-                    <td colSpan={SURVEY_LABELS.length} className="px-3 py-2.5">
-                      <SurveyInputs surveys={newDraft.surveys} onChange={s => setNewDraft(d => ({ ...d, surveys: s }))} />
+                    <td className="px-3 py-2.5">
+                      <select value={newDraft.facilityType} onChange={e => setNewDraft(d => ({ ...d, facilityType: e.target.value as TownSurvey["facilityType"] }))}
+                        className="border border-border rounded px-1.5 py-0.5 text-xs focus:outline-none"
+                        style={{ background: "var(--input-background)" }}>
+                        <option value="treatment">污水处理设施</option>
+                        <option value="network">管网设施</option>
+                      </select>
+                    </td>
+                    <td colSpan={3} className="px-3 py-2.5">
+                      <SurveyInputs town={newDraft} onChange={s => setNewDraft(d => ({ ...d, surveys: s }))} />
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex gap-2">
                         <button onClick={saveNew} disabled={!newDraft.name.trim()} className="text-xs text-[var(--status-success)] hover:underline font-medium disabled:opacity-40">添加</button>
-                        <button onClick={() => { setAddingNew(false); setNewDraft({ name: "", status: "pending", surveys: DEFAULT_SURVEYS() }); }} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
+                        <button onClick={() => { setAddingNew(false); setNewDraft({ name: "", status: "pending", facilityType: "treatment", surveys: DEFAULT_SURVEYS() }); }} className="text-xs text-muted-foreground hover:text-foreground">取消</button>
                       </div>
                     </td>
                   </tr>
