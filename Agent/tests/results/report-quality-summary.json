@@ -1,0 +1,92 @@
+{
+  "report": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\Agent\\backend\\storage\\generated_reports\\北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+  "passed": true,
+  "badTokens": [],
+  "replacementChars": 0,
+  "paymentTables": [
+    {
+      "markers": [
+        "农村污水处理设施点数",
+        "设计处理规模"
+      ],
+      "found": true,
+      "columns": 6,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 5,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "可用性付费基数Pk3",
+        "第九批"
+      ],
+      "found": true,
+      "columns": 13,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 12,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "建设期考核系数E1",
+        "运维服务绩效考核系数Ec1"
+      ],
+      "found": true,
+      "columns": 5,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 4,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "可用性付费基数（元/月）Pk3",
+        "可用性付费(元/月)"
+      ],
+      "found": true,
+      "columns": 7,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 6,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "第一批运维服务费(元/月)",
+        "运维服务费合计"
+      ],
+      "found": true,
+      "columns": 11,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 10,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "第八批运维服务费(元/月)",
+        "第九批运维服务费(元/月)"
+      ],
+      "found": true,
+      "columns": 8,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 6,
+      "inconsistentNumeric": []
+    },
+    {
+      "markers": [
+        "每月合计扣减费用",
+        "第一~七批运维服务费"
+      ],
+      "found": true,
+      "columns": 10,
+      "dataRows": 1,
+      "dataRowLengthsOk": true,
+      "numericCells": 9,
+      "inconsistentNumeric": []
+    }
+  ]
+}

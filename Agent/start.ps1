@@ -2,11 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $agentRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logPath = Join-Path $agentRoot "startup.log"
-$backendName = [string]::Concat([char]0x540E, [char]0x7AEF)
-$frontendName = [string]::Concat([char]0x524D, [char]0x7AEF)
-$backend = Join-Path $agentRoot $backendName
-$front = Join-Path (Join-Path $agentRoot $frontendName) "front"
-$mobile = Join-Path (Join-Path $agentRoot $frontendName) "front-mobile"
+$backend = Join-Path $agentRoot "backend"
+$front = Join-Path (Join-Path $agentRoot "frontend") "front"
+$mobile = Join-Path (Join-Path $agentRoot "frontend") "front-mobile"
 
 function Add-CommonRuntimePaths {
   foreach ($path in @("$env:ProgramFiles\nodejs", "$env:LOCALAPPDATA\Programs\Python\Python312", "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts")) {
