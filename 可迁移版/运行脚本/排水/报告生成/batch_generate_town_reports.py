@@ -135,19 +135,41 @@ def apply_font_rules(doc):
                     run.bold = False
 
 
+def to_decimal(value, default="0"):
+    if value in (None, ""):
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    text = str(value).strip()
+    if not text:
+        return Decimal(default)
+    text = text.replace(",", "").replace("，", "").replace(" ", "")
+    if text.endswith("%"):
+        return Decimal(text[:-1]) / Decimal("100")
+    return Decimal(text)
+
+
 def decimal2(value):
-    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return to_decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def display_number(value, places=2):
+def display_number(value, places=2, trim=True):
     if value in (None, ""):
         return ""
-    quantized = Decimal(str(value)).quantize(
+    quantized = to_decimal(value).quantize(
         Decimal("1") if places == 0 else Decimal("1." + "0" * places),
         rounding=ROUND_HALF_UP,
     )
     text = f"{quantized:.{places}f}"
-    return text.rstrip("0").rstrip(".") if "." in text else text
+    return text.rstrip("0").rstrip(".") if trim and "." in text else text
+
+
+def display_money(value):
+    return display_number(value, 2, trim=False)
+
+
+def display_coefficient(value, places=3):
+    return display_number(value, places, trim=False)
 
 
 def read_xlsx_rows(path):
@@ -226,17 +248,14 @@ def load_amount_basis():
         if town not in TOWNS:
             continue
         batch_names = ["第一", "第二", "第三", "第四", "第五", "第六", "第七", "第八", "第九"]
-        batches = [
-            Decimal(record.get(f"{name}批运维服务费基数（元/月）") or "0")
-            for name in batch_names
-        ]
+        batches = [to_decimal(record.get(f"{name}批运维服务费基数（元/月）")) for name in batch_names]
         result[town] = {
             "facility_count": record.get("农村污水处理设施点数", ""),
             "design_scale": record.get("设计处理规模", ""),
-            "pk3": Decimal(record["可用性付费基数Pk3（万元/年）"] or "0"),
-            "py3": Decimal(record["运维服务费基数Py3（万元/年）"] or "0"),
+            "pk3": to_decimal(record["可用性付费基数Pk3（万元/年）"]),
+            "py3": to_decimal(record["运维服务费基数Py3（万元/年）"]),
             "batches": batches,
-            "e1": Decimal(record.get("建设期考核系数E1") or "1"),
+            "e1": to_decimal(record.get("建设期考核系数E1"), default="1"),
         }
     missing_towns = [town for town in TOWNS if town not in result]
     if missing_towns:
@@ -256,11 +275,10 @@ def validate_common_material():
 
 
 def append_row_from_template(table, values):
-    row = deepcopy(table.rows[-1]._tr)
-    table._tbl.append(row)
-    cells = row.tc_lst
+    row = table.add_row()
+    cells = row.cells
     for index, cell in enumerate(cells):
-        set_tc_text(cell, str(values[index]) if index < len(values) else "")
+        cell.text = str(values[index]) if index < len(values) else ""
     return row
 
 
@@ -802,34 +820,36 @@ def populate_payment_tables(doc, targets, metrics):
         batches = basis["batches"]
         append_row_from_template(tables["basis"], [
             sequence, town, basis["facility_count"], basis["design_scale"],
-            display_number(basis["pk3"]), display_number(basis["py3"]),
+            display_money(basis["pk3"]), display_money(basis["py3"]),
         ])
         append_row_from_template(tables["amount_basis"], [
-            sequence, town, display_number(basis["pk3"]), display_number(basis["py3"]),
-            *[display_number(value) for value in batches],
+            sequence, town, display_money(basis["pk3"]), display_money(basis["py3"]),
+            *[display_money(value) for value in batches],
         ])
         append_row_from_template(tables["coefficients"], [
-            sequence, town, display_number(basis["e1"], 3), display_number(data["ec1"], 3), display_number(data["ec2"], 3),
+            sequence, town, display_coefficient(basis["e1"], 3), display_coefficient(data["ec1"], 3), display_coefficient(data["ec2"], 3),
         ])
         append_row_from_template(tables["availability"], [
-            sequence, town, display_number(basis["pk3"]), display_number(pay["availability_base"]),
-            display_number(basis["e1"], 3), display_number(data["ec2"], 3), display_number(pay["availability"]),
+            sequence, town, display_money(basis["pk3"]), display_money(pay["availability_base"]),
+            display_coefficient(basis["e1"], 3), display_coefficient(data["ec2"], 3), display_money(pay["availability"]),
         ])
         calculated_batches = [decimal2(value * data["ec1"]) for value in batches[:7]]
         append_row_from_template(tables["om"], [
-            sequence, town, display_number(data["ec1"], 3),
-            *[display_number(value) for value in calculated_batches], display_number(pay["om"]),
+            sequence, town, display_coefficient(data["ec1"], 3),
+            *[display_money(value) for value in calculated_batches], display_money(pay["om"]),
         ])
         append_row_from_template(tables["batch89"], [
-            sequence, town, "1", display_number(batches[7]), display_number(data["ec1"], 3),
-            display_number(pay["batch8"]), display_number(batches[8]), "",
+            sequence, town, "1.000", display_money(batches[7]), display_coefficient(data["ec1"], 3),
+            display_money(pay["batch8"]), display_money(batches[8]), "",
         ])
         append_row_from_template(tables["deductions"], [
             sequence, town,
-            display_number(pay["availability_base"]), display_number(pay["availability"]), display_number(pay["availability_deduct"]),
-            display_number(pay["om_base"]), display_number(pay["om"]), display_number(pay["om_deduct"]),
-            display_number(pay["batch8_deduct"]), display_number(pay["total_deduct"]),
+            display_money(pay["availability_base"]), display_money(pay["availability"]), display_money(pay["availability_deduct"]),
+            display_money(pay["om_base"]), display_money(pay["om"]), display_money(pay["om_deduct"]),
+            display_money(pay["batch8_deduct"]), display_money(pay["total_deduct"]),
         ])
+    for table in tables.values():
+        set_table_font(table, 8)
 
 
 def replace_problem_sections(doc, targets, metrics):
@@ -963,18 +983,26 @@ def main():
     os.makedirs(FINAL_DIR, exist_ok=True)
     if not TOWNS:
         raise FileNotFoundError(f"未在资料目录识别到镇街附件资料：{DATA_DIR}")
+    requested_towns = [item.strip() for item in os.environ.get("REPORT_TOWNS", "").split(",") if item.strip()]
+    targets = [town for town in TOWNS if not requested_towns or town in requested_towns]
+    missing_requested = [town for town in requested_towns if town not in TOWNS]
+    if missing_requested:
+        raise ValueError("资料目录缺少指定镇街：" + "、".join(missing_requested))
+    if not targets:
+        raise ValueError("未找到需要生成报告的镇街。")
+    include_summary = os.environ.get("REPORT_INCLUDE_SUMMARY", "1").lower() not in {"0", "false", "no"}
     delete_old_baisha_chixi_outputs()
     common_material = validate_common_material()
     metrics = collect_metrics()
     attach_payments(metrics, load_amount_basis())
 
     generated = []
-    for town in TOWNS:
+    for town in targets:
         generated.append(copy_existing_or_generate(town, metrics))
 
-    if len(TOWNS) > 1:
+    if include_summary and len(targets) > 1:
         generated.append(generate_report(
-            TOWNS,
+            targets,
             metrics,
             f"{PROJECT_NAME}2023年下半年度村级设施考核报告（正文）.docx",
         ))

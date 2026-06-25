@@ -1,1 +1,9 @@
-启动日志.txt
+**/.venv/
+**/node_modules/
+**/dist/
+**/storage/
+**/__pycache__/
+*.pyc
+*.pyo
+startup.log
+.env.local

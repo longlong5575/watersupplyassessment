@@ -50,13 +50,10 @@ def run_report_task(task_id: str) -> None:
                 records = [record for record in records if record.town.name in town_names]
             if task.payload.get("source") == "dashboard" and not records:
                 raise RuntimeError("No reviewed assessment records are available for report generation.")
-            generate_official_reports()
-            task.progress = 90
-            output_dir = settings.project_root / "生成" / "报告"
-            if not output_dir.exists():
-                output_dir = settings.project_root / "生成"
-            names = town_names
             include_summary = "summary" in task.payload.get("outputs", [])
+            output_dir = generate_official_reports(town_names=town_names or None, include_summary=include_summary)
+            task.progress = 90
+            names = town_names
             output_paths = []
             for path in output_dir.glob("*.docx"):
                 report_town = path.name.split("2023")[0]
