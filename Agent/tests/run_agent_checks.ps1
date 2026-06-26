@@ -1,4 +1,6 @@
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $backend = Join-Path $agentRoot "backend"
@@ -18,6 +20,16 @@ function Invoke-Checked {
   param([scriptblock]$Command)
   & $Command
   if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code $LASTEXITCODE" }
+}
+
+function Install-PythonRequirements {
+  param([string]$PythonExe)
+  & $PythonExe -m pip install --disable-pip-version-check -r requirements.txt
+  if ($LASTEXITCODE -eq 0) { return }
+
+  Write-Host "默认 Python 源安装失败，切换到清华镜像重试..."
+  & $PythonExe -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+  if ($LASTEXITCODE -ne 0) { throw "Python dependencies install failed with exit code $LASTEXITCODE" }
 }
 
 function Copy-FrontendForCheck {
@@ -40,19 +52,25 @@ function Invoke-FrontendChecks {
     [scriptblock]$MarkTypecheck,
     [scriptblock]$MarkBuild
   )
-  $baseTemp = Join-Path $env:PUBLIC "CodexAgentChecks"
-  try {
-    New-Item -ItemType Directory -Force -Path $baseTemp | Out-Null
-  }
-  catch {
-    $baseTemp = Join-Path $env:SystemDrive "CodexAgentChecks"
+  $baseCandidates = @(
+    $env:AGENT_CHECK_ROOT,
+    (Join-Path $env:SystemDrive "CodexAgentChecks"),
+    (Join-Path $env:PUBLIC "CodexAgentChecks"),
+    $env:TEMP
+  ) | Where-Object { $_ }
+  $baseTemp = $null
+  foreach ($candidate in $baseCandidates) {
     try {
-      New-Item -ItemType Directory -Force -Path $baseTemp | Out-Null
+      New-Item -ItemType Directory -Force -Path $candidate -ErrorAction Stop | Out-Null
+      $probe = Join-Path $candidate ("probe-" + [guid]::NewGuid().ToString("N"))
+      New-Item -ItemType Directory -Force -Path $probe -ErrorAction Stop | Out-Null
+      Remove-Item -LiteralPath $probe -Recurse -Force
+      $baseTemp = $candidate
+      break
     }
-    catch {
-      $baseTemp = $env:TEMP
-    }
+    catch {}
   }
+  if (-not $baseTemp) { throw "No writable frontend check directory is available." }
   $checkRoot = Join-Path $baseTemp ("agent-frontend-checks-" + [guid]::NewGuid().ToString("N"))
   New-Item -ItemType Directory -Force -Path $checkRoot | Out-Null
   try {
@@ -91,20 +109,32 @@ try {
   New-Item -ItemType Directory -Force -Path (Join-Path $backend "storage") | Out-Null
   $pythonExe = Join-Path $backend ".venv\Scripts\python.exe"
   if (-not (Test-Path -LiteralPath $pythonExe)) {
-    $python312 = $env:PYTHON312_EXE
-    if (-not $python312 -or -not (Test-Path -LiteralPath $python312)) {
-      $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-      if (Test-Path -LiteralPath $candidate) { $python312 = $candidate }
-      else { $python312 = (& py -3.12 -c "import sys; print(sys.executable)").Trim() }
+    $pythonCandidates = @(
+      $env:PYTHON312_EXE,
+      (Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"),
+      (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $python312 = $null
+    foreach ($candidate in $pythonCandidates) {
+      try {
+        & $candidate -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" | Out-Null
+        if ($LASTEXITCODE -eq 0) { $python312 = $candidate; break }
+      }
+      catch {}
+    }
+    if (-not $python312) {
+      $python312 = (& py -3.12 -c "import sys; print(sys.executable)").Trim()
     }
     Invoke-Checked { & $python312 -m venv .venv }
-    Invoke-Checked { & $pythonExe -m pip install -r requirements.txt }
+    Install-PythonRequirements -PythonExe $pythonExe
   }
   $summary.backendVenvReady = $true
   Invoke-Checked { & $pythonExe -m compileall -q app }
   $summary.backendCompile = $true
-  $apiJson = & $pythonExe -c "from app.core.database import Base, engine, SessionLocal; from app.services.seed import seed_database; Base.metadata.drop_all(engine); Base.metadata.create_all(engine); s=SessionLocal(); seed_database(s); s.close(); from fastapi.testclient import TestClient; from app.main import app; c=TestClient(app); towns=c.get('/api/mobile/towns').json()['items']; cycles=c.get('/api/mobile/assessment-cycles').json()['items']; standards=c.get('/api/mobile/indicator-standards').json()['items']; rec=c.post('/api/mobile/assessment-records',json={'town':towns[0]['name'],'period':'2023\u5e74\u4e0b\u534a\u5e74\u5ea6','entries':[{'deduction':1,'reason':'\u81ea\u52a8\u5316\u6d4b\u8bd5\u6263\u5206'}]}).json(); submitted=c.post('/api/mobile/assessment-records/'+rec['id']+'/submit').json(); overview=c.get('/api/dashboard/overview').json(); reviewed=c.post('/api/records/'+rec['id']+'/review').json(); locked=c.post('/api/records/'+rec['id']+'/lock').json(); import json; print(json.dumps({'health':c.get('/health').json()['status'],'towns':len(towns),'cycles':len(cycles),'standards':len(standards),'submitted':submitted['status'],'dashboardSubmitted':overview['submittedRecords'],'reviewed':reviewed['status'],'locked':locked['status']}, ensure_ascii=False))"
-  $summary.backendApiFlow = $apiJson | ConvertFrom-Json
+  $env:PYTHONPATH = $backend
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "run_report_task_check.py") }
+  $reportSummary = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $resultDir "report-task-summary.json") | ConvertFrom-Json
+  $summary.backendApiFlow = $reportSummary.reportTask
 }
 finally { Pop-Location }
 

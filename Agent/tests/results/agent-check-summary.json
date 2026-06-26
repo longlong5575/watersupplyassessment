@@ -1,16 +1,21 @@
 ﻿{
-    "generatedAt":  "2026-06-25T10:18:34",
+    "generatedAt":  "2026-06-26T10:22:48",
     "backendVenvReady":  true,
     "backendCompile":  true,
     "backendApiFlow":  {
-                           "health":  "ok",
-                           "towns":  10,
-                           "cycles":  1,
-                           "standards":  3,
-                           "submitted":  "submitted",
-                           "dashboardSubmitted":  1,
-                           "reviewed":  "reviewed",
-                           "locked":  "locked"
+                           "town":  "北陡镇",
+                           "taskStatus":  "completed",
+                           "progress":  100,
+                           "reports":  1,
+                           "reportNames":  [
+                                               "北陡镇2023年下半年度村级设施考核报告（正文）.docx"
+                                           ],
+                           "scoreCount":  3,
+                           "surveyCount":  4,
+                           "waterQualityCount":  1,
+                           "attachmentCount":  1,
+                           "reviewLogCount":  3,
+                           "error":  null
                        },
     "desktopTypecheck":  true,
     "mobileTypecheck":  true,

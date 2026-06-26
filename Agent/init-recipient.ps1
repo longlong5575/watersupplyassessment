@@ -25,6 +25,14 @@ function Initialize-Frontend([string]$directory) {
   finally { Pop-Location }
 }
 
+function Install-PythonRequirements {
+  param([string]$PythonExe)
+  & $PythonExe -m pip install --disable-pip-version-check -r requirements.txt
+  if ($LASTEXITCODE -eq 0) { return }
+  & $PythonExe -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+  if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
+}
+
 Require-Command "node"
 
 $python312 = $env:PYTHON312_EXE
@@ -41,7 +49,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $backend ".venv") -Recurse -Force
   }
   & $python312 -m venv .venv
-  & ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+  Install-PythonRequirements ".\.venv\Scripts\python.exe"
 }
 finally { Pop-Location }
 

@@ -65,7 +65,8 @@ if [[ ! -d "$BACKEND/.venv" ]]; then
 fi
 
 log "Installing backend dependencies..."
-"$BACKEND/.venv/bin/python" -m pip install -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1
+"$BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1 || \
+  "$BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1
 
 for app_dir in "$FRONT" "$MOBILE"; do
   if [[ -f "$app_dir/.env.example" && ! -f "$app_dir/.env.local" ]]; then

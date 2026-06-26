@@ -125,7 +125,7 @@ def build() -> Path:
     add_heading(doc, "一、测试结论", 1)
     add_para(doc, "结论：Agent 前后端联调验证通过。移动端提交、后台看板同步、数据复核锁定、正式报告任务、PC 前端构建、移动端构建均已通过验证。", "结论：")
     add_para(doc, "报告质量：已补充正式报告表格数字检查，付款相关表格列数完整，未发现空值占位、科学计数法、异常小数格式或替换字符。", "报告质量：")
-    add_para(doc, "启动说明：保留静默启动能力，建议收件人使用 Agent/start.vbs 入口；该入口通过 Windows Script Host 隐藏 PowerShell 启动过程，不弹出命令行黑框。", "启动说明：")
+    add_para(doc, "启动说明：保留静默启动能力，建议收件人使用 Agent/点我启动.vbs 入口；Agent/start.vbs 作为同等静默入口保留。两个入口都通过 Windows Script Host 隐藏 PowerShell 启动过程，不弹出命令行黑框。", "启动说明：")
 
     add_heading(doc, "二、测试范围", 1)
     add_table(
@@ -207,7 +207,7 @@ def build() -> Path:
     )
 
     add_heading(doc, "七、交付建议", 1)
-    add_para(doc, "1. 收件人运行入口：双击 Agent/start.vbs。")
+    add_para(doc, "1. 收件人运行入口：双击 Agent/点我启动.vbs；如需英文文件名，也可双击 Agent/start.vbs。")
     add_para(doc, "2. 测试工程师复测入口：执行 Agent/tests/run_agent_checks.ps1。")
     add_para(doc, "3. 测试结果位置：Agent/tests/results。")
     add_para(doc, "4. 本地运行产物 .venv、node_modules、dist、storage、日志不纳入上传交付。")
