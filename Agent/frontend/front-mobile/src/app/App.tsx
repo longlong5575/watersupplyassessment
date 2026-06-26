@@ -208,6 +208,20 @@ function joinUnique(parts: Array<string | undefined>, separator = "\n") {
   return Array.from(new Set(parts.filter((part): part is string => Boolean(part?.trim())))).join(separator);
 }
 
+function cleanStandardText(...parts: Array<string | undefined>) {
+  const clean = parts.find(part => part?.trim() && !part.includes("???"));
+  if (clean) return clean;
+  return (parts.find(part => part?.trim()) ?? "").replace(/\?+/g, "").trim();
+}
+
+function cleanDeductionOption(option: DeductionOption): DeductionOption {
+  return {
+    ...option,
+    reason: cleanStandardText(option.reason, option.sourceText) || "扣分项",
+    sourceText: cleanStandardText(option.sourceText, option.reason),
+  };
+}
+
 function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId: string; name?: string; maxScore: number }>): L1Group[] {
   return groups.map(l1 => ({
     ...l1,
@@ -216,12 +230,23 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
       for (const item of l2.items) {
         const rule = rules[item.id];
         if (!rule) {
-          items.push({ ...item, options: item.options.map(opt => ({ ...opt })) });
+          items.push({
+            ...item,
+            calculationMethod: cleanStandardText(item.calculationMethod, item.scoringMethod, item.evaluationStandard),
+            options: item.options.map(cleanDeductionOption),
+          });
           continue;
         }
         const target = items.find(existing => existing.id === rule.targetId);
         if (!target) {
-          items.push({ ...item, id: rule.targetId, name: rule.name ?? item.name, maxScore: rule.maxScore, options: item.options.map(opt => ({ ...opt })) });
+          items.push({
+            ...item,
+            id: rule.targetId,
+            name: rule.name ?? item.name,
+            maxScore: rule.maxScore,
+            calculationMethod: cleanStandardText(item.calculationMethod, item.scoringMethod, item.evaluationStandard),
+            options: item.options.map(cleanDeductionOption),
+          });
           continue;
         }
         target.name = rule.name ?? target.name;
@@ -231,7 +256,7 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
         target.standardText = joinUnique([target.standardText, item.standardText]);
         target.scoringMethod = joinUnique([target.scoringMethod, item.scoringMethod], "、");
         target.dataSource = joinUnique([target.dataSource, item.dataSource], "、");
-        target.options = [...target.options, ...item.options.map(opt => ({ ...opt }))];
+        target.options = [...target.options, ...item.options.map(cleanDeductionOption)];
       }
       return { ...l2, items };
     }),

@@ -1,0 +1,544 @@
+{
+  "passed": true,
+  "caseCount": 24,
+  "reportTask": {
+    "status": "completed",
+    "progress": 100,
+    "reports": 4,
+    "reportNames": [
+      "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+      "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+      "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+      "项目2023年下半年度村级设施考核报告（正文）.docx"
+    ]
+  },
+  "database": {
+    "records": 4,
+    "scores": 4,
+    "attachments": 1,
+    "reviewLogs": 7
+  },
+  "cases": [
+    {
+      "name": "健康检查",
+      "status": "passed",
+      "detail": "{\"status\":\"ok\",\"database\":\"connected\"}"
+    },
+    {
+      "name": "多镇街基础数据",
+      "status": "passed",
+      "detail": [
+        {
+          "id": "13b75832-baa3-41c0-9554-8f24b57bd54b",
+          "name": "北陡镇"
+        },
+        {
+          "id": "8bf7b926-e685-4a31-afde-a0be3bcf4326",
+          "name": "赤溪镇"
+        },
+        {
+          "id": "4cde9a59-9a78-427c-bbbe-79250643170e",
+          "name": "广海镇"
+        }
+      ]
+    },
+    {
+      "name": "评分标准不少于 5 个三级指标",
+      "status": "passed",
+      "detail": [
+        {
+          "id": "b80f4520-bf3d-4efd-94af-bc62392a22a5",
+          "parentId": "83671de7-e8c1-46bb-9023-c602231ee29e",
+          "code": "treatment_01",
+          "name": "污水收集",
+          "level": 3,
+          "fullScore": 5.0,
+          "facilityType": "facility",
+          "deductionOptions": [
+            {
+              "id": "d0b10555-da92-4d11-bb54-b85eb3cf0af9",
+              "name": "1.村民问卷“污水收集有无有效”得分A（0-5，问卷平均分）；\n2.镇政府代表对设施收集状况评分B（0-5）\n3.考核小组对村内收集情况、覆盖面、进水表观等评分C（0-5）\n加权得分D=0.3A+0.3B+0.4C（以设施为单位）",
+              "deduction": 5.0,
+              "type": "range",
+              "requiresPhoto": false
+            }
+          ]
+        },
+        {
+          "id": "ffc49244-ea6a-478d-9605-0cc0fe6eaccd",
+          "parentId": "83671de7-e8c1-46bb-9023-c602231ee29e",
+          "code": "treatment_02",
+          "name": "整体效果",
+          "level": 3,
+          "fullScore": 5.0,
+          "facilityType": "facility",
+          "deductionOptions": [
+            {
+              "id": "3d47b8c9-1f57-4f19-ba61-ae070b4a9157",
+              "name": "针对村内存在污水直接排入天然水体，原纳污水体未得到明显改善，是否存在污水积存、乱排乱放和横流等情况进行评分（1-5）（村民问卷A、镇政府B、考核小组C）.\n加权得分D=0.3A+0.3B+0.4C（以设施为单位）",
+              "deduction": 5.0,
+              "type": "range",
+              "requiresPhoto": false
+            }
+          ]
+        },
+        {
+          "id": "b382087c-20c0-445b-bca6-53e51999f9df",
+          "parentId": "83671de7-e8c1-46bb-9023-c602231ee29e",
+          "code": "treatment_03",
+          "name": "污水处理质量",
+          "level": 3,
+          "fullScore": 8.0,
+          "facilityType": "facility",
+          "deductionOptions": [
+            {
+              "id": "c05f72f5-c14d-4cc3-a02b-5672ad2ced4b",
+              "name": "（1）有总磷标准的，CODCr不达标扣4分；NH3-N或TP不达标每一项扣2分。",
+              "deduction": 4.0,
+              "type": "fixed",
+              "requiresPhoto": false
+            },
+            {
+              "id": "b3d2f888-ed0a-49a9-bbc3-850bdc49918f",
+              "name": "（2）无总磷标准的，CODCr不达标扣5分；NH3-N不达标扣3分。",
+              "deduction": 5.0,
+              "type": "fixed",
+              "requiresPhoto": false
+            }
+          ]
+        },
+        {
+          "id": "87ea26fc-3b0e-4e81-9364-3b34f9b54e2c",
+          "parentId": "83671de7-e8c1-46bb-9023-c602231ee29e",
+          "code": "treatment_04",
+          "name": "污泥处理质量",
+          "level": 3,
+          "fullScore": 1.0,
+          "facilityType": "facility",
+          "deductionOptions": [
+            {
+              "id": "f8cc2b4e-ea32-431f-91d5-acb9456620fe",
+              "name": "未按合规范要求处理或去向不明未妥善处理的的扣0.5-1分。",
+              "deduction": 1.0,
+              "type": "range",
+              "requiresPhoto": true
+            }
+          ]
+        },
+        {
+          "id": "afc9b1d7-09c1-4ab6-ad89-4cf131762139",
+          "parentId": "83671de7-e8c1-46bb-9023-c602231ee29e",
+          "code": "treatment_05",
+          "name": "设施实际运行",
+          "level": 3,
+          "fullScore": 4.0,
+          "facilityType": "facility",
+          "deductionOptions": [
+            {
+              "id": "49efbd17-d7c8-4f01-8215-b9582e5ea1bc",
+              "name": "设施进出水量偏离实际，如进出水量差距大、进水量长期极少、设施处理水量长期超负荷等，根据严重程度扣1-4分",
+              "deduction": 4.0,
+              "type": "range",
+              "requiresPhoto": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "未登录移动端提交被拒绝",
+      "status": "passed",
+      "detail": "{\"detail\":\"Authentication required\"}"
+    },
+    {
+      "name": "移动端账号不能后台复核",
+      "status": "passed",
+      "detail": "{\"detail\":\"Admin role required\"}"
+    },
+    {
+      "name": "错误镇街提交返回 422",
+      "status": "passed",
+      "detail": "{\"detail\":\"A valid town is required\"}"
+    },
+    {
+      "name": "批量村庄包拆分记录",
+      "status": "passed",
+      "detail": {
+        "id": "a7b09f24-8b7a-4086-8fa9-c868ada0ec6f",
+        "status": "draft",
+        "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+        "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+        "townId": "13b75832-baa3-41c0-9554-8f24b57bd54b",
+        "town": "北陡镇",
+        "villageId": "b69da61a-a037-48d0-bcb6-5e1f62d13218",
+        "indicatorVersionId": "16b567cf-ef4e-4357-a4f1-45d9fcacfe45",
+        "totalScore": 4.0,
+        "period": "2023年下半年度",
+        "createdAt": "2026-06-26T03:25:09.573697",
+        "updatedAt": "2026-06-26T03:25:09.579908",
+        "recordIds": [
+          "a7b09f24-8b7a-4086-8fa9-c868ada0ec6f"
+        ]
+      }
+    },
+    {
+      "name": "批量村庄包重复同步不新增记录",
+      "status": "passed",
+      "detail": {
+        "id": "a7b09f24-8b7a-4086-8fa9-c868ada0ec6f",
+        "status": "draft",
+        "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+        "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+        "townId": "13b75832-baa3-41c0-9554-8f24b57bd54b",
+        "town": "北陡镇",
+        "villageId": "b69da61a-a037-48d0-bcb6-5e1f62d13218",
+        "indicatorVersionId": "16b567cf-ef4e-4357-a4f1-45d9fcacfe45",
+        "totalScore": 4.0,
+        "period": "2023年下半年度",
+        "createdAt": "2026-06-26T03:25:09.573697",
+        "updatedAt": "2026-06-26T03:25:09.596599",
+        "recordIds": [
+          "a7b09f24-8b7a-4086-8fa9-c868ada0ec6f"
+        ]
+      }
+    },
+    {
+      "name": "数据库批量记录数正确",
+      "status": "passed",
+      "detail": 1
+    },
+    {
+      "name": "附件绑定错误评分被拒绝",
+      "status": "passed",
+      "detail": "{\"detail\":\"Score not found for this record\"}"
+    },
+    {
+      "name": "附件绑定正确评分成功",
+      "status": "passed",
+      "detail": "{\"id\":\"f0dd0d54-62af-4513-8407-06d648914553\",\"filename\":\"evidence.txt\",\"size\":8,\"scoreId\":\"ed54249a-c921-4172-aafe-3ec809e40c05\",\"deductionOptionId\":null}"
+    },
+    {
+      "name": "锁定后移动端评分修改被拒绝",
+      "status": "passed",
+      "detail": null
+    },
+    {
+      "name": "锁定后后台删除被拒绝",
+      "status": "passed",
+      "detail": null
+    },
+    {
+      "name": "缺照片风险可筛出",
+      "status": "passed",
+      "detail": [
+        {
+          "id": "28a14ebb-ac2e-40d0-8b94-2b5eb2df4e96",
+          "status": "submitted",
+          "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+          "cityName": "江门市",
+          "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+          "cycleName": "2023年下半年度",
+          "townId": "8bf7b926-e685-4a31-afde-a0be3bcf4326",
+          "town": "赤溪镇",
+          "villageId": null,
+          "villageName": null,
+          "indicatorVersionId": "16b567cf-ef4e-4357-a4f1-45d9fcacfe45",
+          "indicatorVersionName": "江门市2023年下半年度版",
+          "totalScore": 4.0,
+          "scores": [
+            {
+              "id": "ab5a8856-37bc-4d1b-941c-dae8817c3817",
+              "indicatorId": "b382087c-20c0-445b-bca6-53e51999f9df",
+              "indicatorName": "污水处理质量",
+              "indicatorFullScore": 8.0,
+              "deductionOptionId": null,
+              "deductionOptionName": null,
+              "score": 4.0,
+              "deduction": 4.0,
+              "reason": "故意不传照片",
+              "source": "manual"
+            }
+          ],
+          "raw": {
+            "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+            "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+            "town": "赤溪镇",
+            "period": "2023年下半年度",
+            "facilityName": "赤溪镇-extreme-missing-photo",
+            "facilityType": "extreme-missing-photo",
+            "entries": [
+              {
+                "indicatorId": "b382087c-20c0-445b-bca6-53e51999f9df",
+                "deduction": 4,
+                "reason": "故意不传照片"
+              }
+            ]
+          },
+          "submittedAt": "2026-06-26T03:25:09.725732",
+          "reviewedAt": null,
+          "lockedAt": null,
+          "createdAt": "2026-06-26T03:25:09.699947",
+          "updatedAt": "2026-06-26T03:25:09.725732"
+        }
+      ]
+    },
+    {
+      "name": "低分风险可筛出",
+      "status": "passed",
+      "detail": [
+        {
+          "id": "2801ed96-00c8-43c6-b81f-a38860d54aa8",
+          "status": "submitted",
+          "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+          "cityName": "江门市",
+          "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+          "cycleName": "2023年下半年度",
+          "townId": "4cde9a59-9a78-427c-bbbe-79250643170e",
+          "town": "广海镇",
+          "villageId": null,
+          "villageName": null,
+          "indicatorVersionId": "16b567cf-ef4e-4357-a4f1-45d9fcacfe45",
+          "indicatorVersionName": "江门市2023年下半年度版",
+          "totalScore": 0.0,
+          "scores": [
+            {
+              "id": "78e0f560-b48f-4438-bad7-7aa68fe2cf3b",
+              "indicatorId": "87ea26fc-3b0e-4e81-9364-3b34f9b54e2c",
+              "indicatorName": "污泥处理质量",
+              "indicatorFullScore": 1.0,
+              "deductionOptionId": null,
+              "deductionOptionName": null,
+              "score": 0.0,
+              "deduction": 99.0,
+              "reason": "低分风险",
+              "source": "manual"
+            }
+          ],
+          "raw": {
+            "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+            "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+            "town": "广海镇",
+            "period": "2023年下半年度",
+            "facilityName": "广海镇-extreme-low-score",
+            "facilityType": "extreme-low-score",
+            "entries": [
+              {
+                "indicatorId": "87ea26fc-3b0e-4e81-9364-3b34f9b54e2c",
+                "deduction": 99,
+                "reason": "低分风险"
+              }
+            ]
+          },
+          "submittedAt": "2026-06-26T03:25:09.731936",
+          "reviewedAt": null,
+          "lockedAt": null,
+          "createdAt": "2026-06-26T03:25:09.714233",
+          "updatedAt": "2026-06-26T03:25:09.731936"
+        }
+      ]
+    },
+    {
+      "name": "提交记录可退回",
+      "status": "passed",
+      "detail": "{\"id\":\"28a14ebb-ac2e-40d0-8b94-2b5eb2df4e96\",\"status\":\"returned\",\"cityId\":\"c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2\",\"cityName\":\"江门市\",\"cycleId\":\"5792cc5e-2666-45a4-a5cb-48509bc4e74c\",\"cycleName\":\"2023年下半年度\",\"townId\":\"8bf7b926-e685-4a31-afde-a0be3bcf4326\",\"town\":\"赤溪镇\",\"villageId\":null,\"villageName\":null,\"indicatorVersionId\":\"16b567cf-ef4e-4357-a4f1-45d9fcacfe45\",\"indicatorVersionName\":\"江门市2023年下半年度版\",\"totalScore\":4.0,\"scores\":[{\"id\":\"ab5a8856-37bc-4d1b-941c-dae8817c3817\",\"indicatorId\":\"b382087c-20c0-445b-bca6-53e51999f9df\",\"indicatorName\":\"污水处理质量\",\"indicatorFullScore\":8.0,\"deductionOptionId\":null,\"deductionOptionName\":null,\"score\":4.0,\"deduction\":4.0,\"reason\":\"故意不传照片\",\"source\":\"manual\"}],\"raw\":{\"cityId\":\"c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2\",\"cycleId\":\"5792cc5e-2666-45a4-a5cb-48509bc4e74c\",\"town\":\"赤溪镇\",\"period\":\"2023年下半年度\",\"facilityName\":\"赤溪镇-extreme-missing-photo\",\"facilityType\":\"extreme-missing-photo\",\"entries\":[{\"indicatorId\":\"b382087c-20c0-445b-bca6-53e51999f9df\",\"deduction\":4,\"reason\":\"故意不传照片\"}]},\"submittedAt\":\"2026-06-26T03:25:09.725732\",\"reviewedAt\":null,\"lockedAt\":null,\"createdAt\":\"2026-06-26T03:25:09.699947\",\"updatedAt\":\"2026-06-26T03:25:09.765259\"}"
+    },
+    {
+      "name": "退回后重复同步仍复用原记录",
+      "status": "passed",
+      "detail": {
+        "id": "28a14ebb-ac2e-40d0-8b94-2b5eb2df4e96",
+        "status": "returned",
+        "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+        "cycleId": "5792cc5e-2666-45a4-a5cb-48509bc4e74c",
+        "townId": "8bf7b926-e685-4a31-afde-a0be3bcf4326",
+        "town": "赤溪镇",
+        "villageId": null,
+        "indicatorVersionId": "16b567cf-ef4e-4357-a4f1-45d9fcacfe45",
+        "totalScore": 7.0,
+        "period": "2023年下半年度",
+        "createdAt": "2026-06-26T03:25:09.699947",
+        "updatedAt": "2026-06-26T03:25:09.782545",
+        "recordIds": [
+          "28a14ebb-ac2e-40d0-8b94-2b5eb2df4e96"
+        ]
+      }
+    },
+    {
+      "name": "退回补正后可重新提交",
+      "status": "passed",
+      "detail": "{\"id\":\"28a14ebb-ac2e-40d0-8b94-2b5eb2df4e96\",\"status\":\"submitted\",\"cityId\":\"c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2\",\"cycleId\":\"5792cc5e-2666-45a4-a5cb-48509bc4e74c\",\"townId\":\"8bf7b926-e685-4a31-afde-a0be3bcf4326\",\"town\":\"赤溪镇\",\"villageId\":null,\"indicatorVersionId\":\"16b567cf-ef4e-4357-a4f1-45d9fcacfe45\",\"totalScore\":7.0,\"period\":\"2023年下半年度\",\"createdAt\":\"2026-06-26T03:25:09.699947\",\"updatedAt\":\"2026-06-26T03:25:09.791563+00:00\"}"
+    },
+    {
+      "name": "无复核数据镇街报告被拦截",
+      "status": "passed",
+      "detail": "{\"detail\":\"Report generation requires reviewed or locked assessment records.\"}"
+    },
+    {
+      "name": "多镇街报告任务创建成功",
+      "status": "passed",
+      "detail": "{\"id\":\"907a1c92-67b2-438a-9454-0d0658a93fcd\",\"status\":\"completed\",\"progress\":100,\"reports\":[]}"
+    },
+    {
+      "name": "多镇街报告任务完成",
+      "status": "passed",
+      "detail": {
+        "id": "907a1c92-67b2-438a-9454-0d0658a93fcd",
+        "status": "completed",
+        "progress": 100,
+        "error": null,
+        "reports": [
+          {
+            "id": "873c57e0-61ee-4ee5-82d9-e3c22b26fa93",
+            "name": "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425207,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "13b75832-baa3-41c0-9554-8f24b57bd54b"
+          },
+          {
+            "id": "032dde46-1b10-4164-bd24-f558193cc26c",
+            "name": "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425069,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "4cde9a59-9a78-427c-bbbe-79250643170e"
+          },
+          {
+            "id": "91cfc872-41d7-44f8-9e1d-133c9eee83aa",
+            "name": "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425232,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "8bf7b926-e685-4a31-afde-a0be3bcf4326"
+          },
+          {
+            "id": "9d323265-053b-4147-8eeb-ff87f20894c3",
+            "name": "项目2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5432798,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "多镇街报告至少生成两份",
+      "status": "passed",
+      "detail": {
+        "id": "907a1c92-67b2-438a-9454-0d0658a93fcd",
+        "status": "completed",
+        "progress": 100,
+        "error": null,
+        "reports": [
+          {
+            "id": "873c57e0-61ee-4ee5-82d9-e3c22b26fa93",
+            "name": "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425207,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "13b75832-baa3-41c0-9554-8f24b57bd54b"
+          },
+          {
+            "id": "032dde46-1b10-4164-bd24-f558193cc26c",
+            "name": "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425069,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "4cde9a59-9a78-427c-bbbe-79250643170e"
+          },
+          {
+            "id": "91cfc872-41d7-44f8-9e1d-133c9eee83aa",
+            "name": "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5425232,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": "8bf7b926-e685-4a31-afde-a0be3bcf4326"
+          },
+          {
+            "id": "9d323265-053b-4147-8eeb-ff87f20894c3",
+            "name": "项目2023年下半年度村级设施考核报告（正文）.docx",
+            "status": "completed",
+            "size": 5432798,
+            "createdAt": "2026-06-26T03:25:36.288136",
+            "town": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "生成报告均可下载",
+      "status": "passed",
+      "detail": {
+        "downloadOk": 4,
+        "reports": 4
+      }
+    },
+    {
+      "name": "后台看板包含多镇街同步结果",
+      "status": "passed",
+      "detail": [
+        {
+          "id": "13b75832-baa3-41c0-9554-8f24b57bd54b",
+          "name": "北陡镇",
+          "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+          "cityName": "江门市",
+          "recordCount": 2,
+          "completedCount": 1,
+          "villageCount": 2,
+          "status": "completed",
+          "deductionTotal": 3.0,
+          "surveyCount": 0,
+          "waterQualityCount": 0,
+          "attachmentCount": 1,
+          "pendingReviewCount": 0,
+          "reviewedCount": 0,
+          "lockedCount": 1,
+          "returnedCount": 0,
+          "lowScoreCount": 2,
+          "missingPhotoCount": 1
+        },
+        {
+          "id": "4cde9a59-9a78-427c-bbbe-79250643170e",
+          "name": "广海镇",
+          "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+          "cityName": "江门市",
+          "recordCount": 1,
+          "completedCount": 1,
+          "villageCount": 1,
+          "status": "completed",
+          "deductionTotal": 99.0,
+          "surveyCount": 0,
+          "waterQualityCount": 0,
+          "attachmentCount": 0,
+          "pendingReviewCount": 0,
+          "reviewedCount": 0,
+          "lockedCount": 1,
+          "returnedCount": 0,
+          "lowScoreCount": 1,
+          "missingPhotoCount": 1
+        },
+        {
+          "id": "8bf7b926-e685-4a31-afde-a0be3bcf4326",
+          "name": "赤溪镇",
+          "cityId": "c6ca2b55-2fd4-4344-9bbb-c2ead634e5c2",
+          "cityName": "江门市",
+          "recordCount": 1,
+          "completedCount": 1,
+          "villageCount": 1,
+          "status": "completed",
+          "deductionTotal": 1.0,
+          "surveyCount": 0,
+          "waterQualityCount": 0,
+          "attachmentCount": 0,
+          "pendingReviewCount": 0,
+          "reviewedCount": 0,
+          "lockedCount": 1,
+          "returnedCount": 0,
+          "lowScoreCount": 1,
+          "missingPhotoCount": 1
+        }
+      ]
+    }
+  ]
+}

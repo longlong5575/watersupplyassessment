@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "checkedFiles": 5,
+  "selectedTowns": [
+    "北陡镇",
+    "广海镇",
+    "赤溪镇"
+  ],
+  "generatedReports": [
+    "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+    "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+    "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+    "项目2023年下半年度村级设施考核报告（正文）.docx"
+  ],
+  "checks": [
+    {
+      "file": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\watersupplyassessment\\Agent\\backend\\storage\\generated_reports\\北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+      "name": "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+      "passed": true,
+      "issues": [],
+      "tables": 19,
+      "paragraphs": 375
+    },
+    {
+      "file": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\watersupplyassessment\\Agent\\backend\\storage\\generated_reports\\广海镇2023年下半年度村级设施考核报告（正文）.docx",
+      "name": "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+      "passed": true,
+      "issues": [],
+      "tables": 19,
+      "paragraphs": 375
+    },
+    {
+      "file": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\watersupplyassessment\\Agent\\backend\\storage\\generated_reports\\赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+      "name": "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+      "passed": true,
+      "issues": [],
+      "tables": 19,
+      "paragraphs": 375
+    },
+    {
+      "file": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\watersupplyassessment\\Agent\\backend\\storage\\generated_reports\\项目2023年下半年度村级设施考核报告（正文）.docx",
+      "name": "项目2023年下半年度村级设施考核报告（正文）.docx",
+      "passed": true,
+      "issues": [],
+      "tables": 21,
+      "paragraphs": 401
+    },
+    {
+      "file": "C:\\Users\\陈弼戈\\Desktop\\codex\\排水\\watersupplyassessment\\Agent\\tests\\Agent前后端联调测试验证报告.docx",
+      "name": "Agent前后端联调测试验证报告.docx",
+      "passed": true,
+      "issues": [],
+      "tables": 9,
+      "paragraphs": 30
+    }
+  ]
+}

@@ -14,6 +14,18 @@ def _option_value(option: dict) -> float:
     return float(option.get("value") or option.get("max") or option.get("min") or 0)
 
 
+def _clean_standard_text(*values: str | None, fallback: str = "扣分项") -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text and "???" not in text:
+            return text
+    for value in values:
+        text = str(value or "").replace("?", "").strip()
+        if text:
+            return text
+    return fallback
+
+
 def _requires_photo(item: dict) -> bool:
     text = f"{item.get('scoringMethod', '')}{item.get('dataSource', '')}{item.get('name', '')}"
     return "问卷" not in text and "抽检水质" not in text and item.get("name") != "污水处理质量"
@@ -95,7 +107,12 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion) -> None:
                         session.add(
                             DeductionOption(
                                 indicator_id=l3.id,
-                                name=option.get("reason") or option.get("sourceText") or "扣分项",
+                                name=_clean_standard_text(
+                                    option.get("reason"),
+                                    option.get("sourceText"),
+                                    item.get("evaluationStandard"),
+                                    item.get("standardText"),
+                                ),
                                 deduction_type=option.get("type") or "fixed",
                                 deduction_value=_option_value(option),
                                 requires_photo=_requires_photo(item),

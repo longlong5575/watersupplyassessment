@@ -1,5 +1,5 @@
 ﻿{
-    "generatedAt":  "2026-06-26T10:22:48",
+    "generatedAt":  "2026-06-26T11:24:51",
     "backendVenvReady":  true,
     "backendCompile":  true,
     "backendApiFlow":  {
@@ -17,6 +17,32 @@
                            "reviewLogCount":  3,
                            "error":  null
                        },
+    "extremeApiFlow":  {
+                           "reports":  4,
+                           "reportNames":  [
+                                               "北陡镇2023年下半年度村级设施考核报告（正文）.docx",
+                                               "广海镇2023年下半年度村级设施考核报告（正文）.docx",
+                                               "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
+                                               "项目2023年下半年度村级设施考核报告（正文）.docx"
+                                           ],
+                           "caseCount":  24,
+                           "passed":  true
+                       },
+    "reportQuality":  {
+                          "replacementChars":  0,
+                          "paymentTables":  7,
+                          "badTokens":  0,
+                          "passed":  true
+                      },
+    "docxOutput":  {
+                       "checkedFiles":  5,
+                       "selectedTowns":  [
+                                             "北陡镇",
+                                             "广海镇",
+                                             "赤溪镇"
+                                         ],
+                       "passed":  true
+                   },
     "desktopTypecheck":  true,
     "mobileTypecheck":  true,
     "desktopBuild":  true,

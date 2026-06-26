@@ -195,6 +195,12 @@ function joinUnique(parts: Array<string | undefined>, separator = "\n"): string 
   return Array.from(new Set(parts.filter((part): part is string => Boolean(part?.trim())))).join(separator);
 }
 
+function cleanStandardText(...parts: Array<string | undefined>): string {
+  const clean = parts.find(part => part?.trim() && !part.includes("???"));
+  if (clean) return clean;
+  return (parts.find(part => part?.trim()) ?? "").replace(/\?+/g, "").trim();
+}
+
 function mergeTreatmentItems(groups: readonly AssessmentStandardGroup[]): AssessmentStandardGroup[] {
   return groups.map(group => ({
     ...group,
@@ -244,7 +250,7 @@ function buildScoreGroups(
         evaluationStandard: item.evaluationStandard || item.description || "",
         scoringMethod: item.scoringMethod || "",
         dataSource: item.dataSource || "",
-        calculationMethod: item.calculationMethod || "",
+        calculationMethod: cleanStandardText(item.calculationMethod, item.scoringMethod, item.evaluationStandard, item.description),
       }))),
     }))
     .filter(group => group.items.length > 0);

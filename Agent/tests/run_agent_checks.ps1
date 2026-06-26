@@ -98,6 +98,9 @@ $summary = [ordered]@{
   backendVenvReady = $false
   backendCompile = $false
   backendApiFlow = $null
+  extremeApiFlow = $null
+  reportQuality = $null
+  docxOutput = $null
   desktopTypecheck = $false
   mobileTypecheck = $false
   desktopBuild = $false
@@ -135,6 +138,32 @@ try {
   Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "run_report_task_check.py") }
   $reportSummary = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $resultDir "report-task-summary.json") | ConvertFrom-Json
   $summary.backendApiFlow = $reportSummary.reportTask
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "run_extreme_checks.py") }
+  $extremeSummary = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $resultDir "extreme-check-summary.json") | ConvertFrom-Json
+  $summary.extremeApiFlow = @{
+    passed = $extremeSummary.passed
+    caseCount = $extremeSummary.caseCount
+    reports = $extremeSummary.reportTask.reports
+    reportNames = $extremeSummary.reportTask.reportNames
+  }
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_report_quality.py") }
+  $qualitySummary = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $resultDir "report-quality-summary.json") | ConvertFrom-Json
+  $summary.reportQuality = @{
+    passed = $qualitySummary.passed
+    paymentTables = @($qualitySummary.paymentTables).Count
+    badTokens = @($qualitySummary.badTokens).Count
+    replacementChars = $qualitySummary.replacementChars
+  }
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "build_test_report.py") }
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_docx_outputs.py") }
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "build_test_report.py") }
+  Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_docx_outputs.py") }
+  $docxSummary = Get-Content -Encoding UTF8 -LiteralPath (Join-Path $resultDir "docx-output-summary.json") | ConvertFrom-Json
+  $summary.docxOutput = @{
+    passed = $docxSummary.passed
+    checkedFiles = $docxSummary.checkedFiles
+    selectedTowns = $docxSummary.selectedTowns
+  }
 }
 finally { Pop-Location }
 
