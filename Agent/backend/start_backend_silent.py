@@ -13,7 +13,7 @@ ERR_LOG = BACKEND_DIR / "server.err.log"
 
 
 def main() -> None:
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
     with OUT_LOG.open("ab") as stdout, ERR_LOG.open("ab") as stderr:
         process = subprocess.Popen(
             [

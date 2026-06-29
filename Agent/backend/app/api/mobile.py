@@ -20,6 +20,7 @@ from app.services.assessment_ingest import (
 
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
+PROJECT_NAMES = {"郁南项目", "茂南项目"}
 
 
 def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
@@ -33,7 +34,7 @@ def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
         "villageId": record.village_id,
         "indicatorVersionId": record.indicator_version_id,
         "totalScore": float(record.total_score) if record.total_score is not None else None,
-        "period": record.raw_payload.get("period", "2023年下半年度"),
+        "period": record.raw_payload.get("period", "2026年第2季度"),
         "createdAt": record.created_at.isoformat(),
         "updatedAt": record.updated_at.isoformat(),
     }
@@ -42,6 +43,12 @@ def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
 @router.get("/cities")
 def cities(session: Session = Depends(get_session)):
     return {"items": [{"id": city.id, "name": city.name} for city in session.scalars(select(City)).all()]}
+
+
+@router.get("/projects")
+def projects(session: Session = Depends(get_session)):
+    statement = select(City).where(City.name.in_(PROJECT_NAMES)).order_by(City.name)
+    return {"items": [{"id": city.id, "name": city.name, "standardScope": city.name} for city in session.scalars(statement).all()]}
 
 
 @router.get("/assessment-cycles")
@@ -53,13 +60,21 @@ def cycles(city_id: str | None = None, session: Session = Depends(get_session)):
 
 
 @router.get("/towns")
-def towns(session: Session = Depends(get_session)):
-    return {"items": [{"id": town.id, "name": town.name} for town in session.scalars(select(Town).order_by(Town.name)).all()]}
+def towns(city_id: str | None = None, session: Session = Depends(get_session)):
+    statement = select(Town)
+    if city_id:
+        statement = statement.where(Town.city_id == city_id)
+    return {"items": [{"id": town.id, "name": town.name} for town in session.scalars(statement.order_by(Town.name)).all()]}
 
 
 @router.get("/towns/{town_id}/villages")
-def villages(town_id: str, session: Session = Depends(get_session)):
-    town = session.get(Town, town_id) or session.scalar(select(Town).where(Town.name == town_id))
+def villages(town_id: str, city_id: str | None = None, session: Session = Depends(get_session)):
+    town = session.get(Town, town_id)
+    if town is None:
+        statement = select(Town).where(Town.name == town_id)
+        if city_id:
+            statement = statement.where(Town.city_id == city_id)
+        town = session.scalar(statement)
     if town is None: raise HTTPException(status_code=404, detail="Town not found")
     return {"items": [{"id": village.id, "name": village.name} for village in session.scalars(select(Village).where(Village.town_id == town.id)).all()]}
 

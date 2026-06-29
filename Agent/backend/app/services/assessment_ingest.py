@@ -62,9 +62,13 @@ def resolve_cycle(session: Session, raw: dict[str, Any], city_id: str) -> Assess
 def resolve_town(session: Session, raw: dict[str, Any]) -> Town:
     town_id = raw.get("townId") or raw.get("town_id")
     town_name = raw.get("town") or raw.get("townName")
+    city_id = raw.get("cityId") or raw.get("city_id")
     town = session.get(Town, town_id) if town_id else None
     if town is None and town_name:
-        town = session.scalar(select(Town).where(Town.name == town_name))
+        statement = select(Town).where(Town.name == town_name)
+        if city_id:
+            statement = statement.where(Town.city_id == city_id)
+        town = session.scalar(statement)
     if town is None:
         raise ValueError("A valid town is required")
     return town
@@ -152,7 +156,7 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
 
 
 def _raw_facility_type(raw: dict[str, Any]) -> str:
-    return str(raw.get("facilityType") or raw.get("facility_type") or raw.get("primaryFacilityType") or "unknown")
+    return str(raw.get("primaryFacilityType") or raw.get("facilityScope") or raw.get("facilityType") or raw.get("facility_type") or "unknown")
 
 
 def find_existing_record(

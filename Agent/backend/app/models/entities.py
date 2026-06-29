@@ -201,3 +201,22 @@ class Report(IdMixin, TimestampMixin, Base):
     data_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     task_parameters: Mapped[dict] = mapped_column(JSON, default=dict)
     town: Mapped[Town | None] = relationship()
+
+
+class AgentRun(IdMixin, TimestampMixin, Base):
+    __tablename__ = "agent_runs"
+    record_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_records.id"), nullable=True, index=True)
+    report_task_id: Mapped[str | None] = mapped_column(ForeignKey("report_tasks.id"), nullable=True, index=True)
+    capability: Mapped[str] = mapped_column(String(80))
+    provider: Mapped[str] = mapped_column(String(60), default="deterministic")
+    model: Mapped[str] = mapped_column(String(120), default="rules-v1")
+    status: Mapped[str] = mapped_column(String(30), default="completed")
+    input_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    warnings: Mapped[list] = mapped_column(JSON, default=list)
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    accepted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    confirmed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -5,7 +5,28 @@ from app.models import AssessmentCycle, City, DeductionOption, Indicator, Indica
 from app.services.standard_catalog import item_score_total, load_standard_groups
 
 
-DEFAULT_TOWNS = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "广海镇", "海宴镇", "汶村镇", "水步镇", "斗山镇", "川岛镇"]
+PROJECTS = [
+    {
+        "name": "郁南项目",
+        "cycle": "2026年第2季度",
+        "standard": "郁南项目农村生活污水绩效考核标准",
+        "towns": {
+            "都城镇": ["富窝村", "承平村", "夏袭村"],
+            "平台镇": ["古同村", "大地村", "平台村"],
+            "桂圩镇": ["桂圩村", "罗顺村", "勿坦村"],
+        },
+    },
+    {
+        "name": "茂南项目",
+        "cycle": "2026年第2季度",
+        "standard": "茂南项目农村生活污水绩效考核标准",
+        "towns": {
+            "金塘镇": ["牙象村", "丰田村", "白土村"],
+            "鳌头镇": ["文运村", "彰教山村", "飞马村"],
+            "镇盛镇": ["荷榭村", "联唐村", "斜岭村"],
+        },
+    },
+]
 
 
 def _option_value(option: dict) -> float:
@@ -55,6 +76,7 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion) -> None:
     )
     if enabled_level3_count >= 40:
         return
+
     for indicator in session.scalars(select(Indicator).where(Indicator.version_id == version.id)).all():
         indicator.enabled = False
     session.flush()
@@ -124,31 +146,50 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion) -> None:
                         session.add(ScoreSourceMapping(indicator_id=l3.id, source_type="survey", source_key=source_key, rule=rule))
 
 
-def seed_database(session: Session) -> None:
-    city = session.scalar(select(City).where(City.name == "江门市"))
+def _seed_project(session: Session, project: dict) -> None:
+    city = session.scalar(select(City).where(City.name == project["name"]))
     if city is None:
-        city = City(name="江门市")
+        city = City(name=project["name"])
         session.add(city)
         session.flush()
-    cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city.id))
+
+    cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city.id, AssessmentCycle.name == project["cycle"]))
     if cycle is None:
-        cycle = AssessmentCycle(city_id=city.id, name="2023年下半年度")
+        cycle = session.scalar(
+            select(AssessmentCycle).where(
+                AssessmentCycle.city_id == city.id,
+                AssessmentCycle.name == "2026年度考核",
+            )
+        )
+        if cycle is not None:
+            cycle.name = project["cycle"]
+    if cycle is None:
+        cycle = AssessmentCycle(city_id=city.id, name=project["cycle"])
         session.add(cycle)
         session.flush()
-    version = session.scalar(select(IndicatorVersion).where(IndicatorVersion.cycle_id == cycle.id))
+
+    version = session.scalar(select(IndicatorVersion).where(IndicatorVersion.cycle_id == cycle.id, IndicatorVersion.name == project["standard"]))
     if version is None:
-        version = IndicatorVersion(city_id=city.id, cycle_id=cycle.id, name="江门市2023年下半年度版")
+        version = IndicatorVersion(city_id=city.id, cycle_id=cycle.id, name=project["standard"])
         session.add(version)
         session.flush()
     _seed_standard_groups(session, version)
-    for name in DEFAULT_TOWNS:
-        town = session.scalar(select(Town).where(Town.city_id == city.id, Town.name == name))
+
+    for town_name, villages in project["towns"].items():
+        town = session.scalar(select(Town).where(Town.city_id == city.id, Town.name == town_name))
         if town is None:
-            town = Town(city_id=city.id, name=name)
+            town = Town(city_id=city.id, name=town_name)
             session.add(town)
             session.flush()
-        if session.scalar(select(Village).where(Village.town_id == town.id)) is None:
-            session.add(Village(town_id=town.id, name=f"{name}示范村"))
+        for village_name in villages:
+            if session.scalar(select(Village).where(Village.town_id == town.id, Village.name == village_name)) is None:
+                session.add(Village(town_id=town.id, name=village_name))
+
+
+def seed_database(session: Session) -> None:
+    for project in PROJECTS:
+        _seed_project(session, project)
+
     if session.scalar(select(User).where(User.username == "admin")) is None:
         session.add(User(username="admin", display_name="系统管理员", role="admin"))
     if session.scalar(select(User).where(User.username == "inspector")) is None:

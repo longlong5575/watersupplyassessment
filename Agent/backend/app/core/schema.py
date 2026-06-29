@@ -22,6 +22,27 @@ REPORT_COLUMNS = {
     "task_parameters": "JSON DEFAULT '{}'",
 }
 
+AGENT_RUN_COLUMNS = {
+    "id": "VARCHAR(36) PRIMARY KEY",
+    "created_at": "DATETIME",
+    "updated_at": "DATETIME",
+    "record_id": "VARCHAR(36)",
+    "report_task_id": "VARCHAR(36)",
+    "capability": "VARCHAR(80)",
+    "provider": "VARCHAR(60) DEFAULT 'deterministic'",
+    "model": "VARCHAR(120) DEFAULT 'rules-v1'",
+    "status": "VARCHAR(30) DEFAULT 'completed'",
+    "input_summary": "JSON DEFAULT '{}'",
+    "output": "JSON DEFAULT '{}'",
+    "evidence_refs": "JSON DEFAULT '[]'",
+    "warnings": "JSON DEFAULT '[]'",
+    "confidence": "FLOAT DEFAULT 0",
+    "accepted": "BOOLEAN",
+    "confirmed_by_id": "VARCHAR(36)",
+    "confirmed_at": "DATETIME",
+    "error": "TEXT",
+}
+
 
 def _ensure_columns(table: str, columns: dict[str, str]) -> None:
     with engine.begin() as connection:
@@ -31,8 +52,15 @@ def _ensure_columns(table: str, columns: dict[str, str]) -> None:
                 connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
 
 
+def _ensure_table(table: str, columns: dict[str, str]) -> None:
+    column_sql = ", ".join(f"{name} {definition}" for name, definition in columns.items())
+    with engine.begin() as connection:
+        connection.execute(text(f"CREATE TABLE IF NOT EXISTS {table} ({column_sql})"))
+
+
 def ensure_local_schema() -> None:
     if not settings.database_url.startswith("sqlite"):
         return
     _ensure_columns("report_tasks", REPORT_TASK_COLUMNS)
     _ensure_columns("reports", REPORT_COLUMNS)
+    _ensure_table("agent_runs", AGENT_RUN_COLUMNS)

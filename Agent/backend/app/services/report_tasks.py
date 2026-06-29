@@ -139,6 +139,12 @@ def run_report_task(task_id: str) -> None:
                         task_parameters=task.payload,
                     )
                 )
+            try:
+                from app.services.agent import create_report_task_agent_run
+
+                create_report_task_agent_run(session, task)
+            except Exception as agent_exc:
+                task.payload = {**task.payload, "agentWarning": str(agent_exc)}
             task.status, task.progress, task.completed_at = "completed", 100, utcnow()
         except Exception as exc:
             task.status = "failed"

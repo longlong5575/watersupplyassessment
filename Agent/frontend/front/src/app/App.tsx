@@ -996,7 +996,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
               type="text"
               value={reportPeriod}
               onChange={(e) => setReportPeriod(e.target.value)}
-              placeholder="例如：2023年下半年度、2024年第一季度"
+              placeholder="例如：2026年第2季度"
               className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               style={{ background: "var(--input-background)" }}
             />
@@ -1189,7 +1189,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
 // ─── OutputOptions ────────────────────────────────────────────────────────────
 
 const OUTPUT_OPTIONS = [
-  { id: "separate", label: "按镇分别生成", desc: "每个镇街单独输出一份 DOCX 报告" },
+  { id: "separate", label: "按镇街分别生成", desc: "每个镇街单独输出一份 DOCX 报告" },
   { id: "summary", label: "生成汇总报告", desc: "额外生成一份涵盖全部镇街的综合考核报告" },
 ] as const;
 
@@ -1906,6 +1906,10 @@ type ReviewRecordRow = {
   town: string;
   status: string;
   updatedAt: string;
+  projectName?: string | null;
+  primaryFacilityType?: string | null;
+  standardFacilityType?: string | null;
+  facilityTypeLabel?: string | null;
   cityName?: string | null;
   cycleName?: string | null;
   villageName?: string | null;
@@ -1924,7 +1928,7 @@ type ReviewRecordRow = {
     reason?: string;
     source: string;
   }>;
-  raw?: { village?: string; villageName?: string; waterQuality?: unknown };
+  raw?: { village?: string; villageName?: string; waterQuality?: unknown; primaryFacilityType?: string; standardFacilityType?: string; facilityType?: string };
 };
 
 type ScoreDraft = {
@@ -1938,6 +1942,43 @@ type ReviewRecordDetail = ReviewRecordRow & {
   waterQuality?: Array<{ id: string; conclusion?: string; sampledAt?: string | null; payload?: { sampleTime?: string; note?: string } }>;
   attachments?: Array<{ id: string; filename: string; scoreId?: string | null; deductionOptionId?: string | null; size: number; downloadUrl?: string }>;
   reviewLogs?: Array<{ id: string; action: string; reason?: string | null; beforePayload?: { scores?: Array<{ id: string; score?: number | null; deduction?: number; reason?: string | null }>; status?: string }; afterPayload?: { scores?: Array<{ id: string; score?: number | null; deduction?: number; reason?: string | null }>; status?: string }; createdAt: string }>;
+};
+
+function reviewRecordProject(record: ReviewRecordRow): string {
+  return record.projectName || record.cityName || "-";
+}
+
+function reviewRecordFacility(record: ReviewRecordRow): string {
+  const rawType = record.raw?.primaryFacilityType || record.raw?.facilityType || record.primaryFacilityType || record.standardFacilityType;
+  const mapped: Record<string, string> = {
+    town_plant: "镇街污水厂",
+    town_network: "镇街污水收集管网",
+    rural_treatment: "农村污水处理设施",
+    treatment: "污水处理设施",
+    network: "污水收集管网",
+  };
+  return record.facilityTypeLabel || (rawType ? mapped[rawType] ?? rawType : "-");
+}
+
+type AgentEvidenceRef = { kind: string; id: string; label: string; field?: string };
+type AgentRun = {
+  id: string;
+  capability: string;
+  confidence: number;
+  accepted?: boolean | null;
+  confirmedAt?: string | null;
+  createdAt: string;
+  output: {
+    summary: string;
+    issues?: Array<{ title: string; description?: string; severity?: string; deduction?: number; evidenceRefs?: AgentEvidenceRef[] }>;
+    suggestions?: Array<{ title: string; text: string; evidenceRefs?: AgentEvidenceRef[] }>;
+    draftParagraphs?: Array<{ title: string; text: string; evidenceRefs?: AgentEvidenceRef[] }>;
+    semanticChecks?: Array<{ name: string; passed: boolean; message: string }>;
+    evidenceRefs?: AgentEvidenceRef[];
+    warnings?: string[];
+    boundaries?: string[];
+    source?: string;
+  };
 };
 
 function recordStatusLabel(status: string): string {
@@ -2154,6 +2195,7 @@ function recordStatusClass(status: string): string {
 function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | null; onClearTownFilter?: () => void }) {
   const [records, setRecords] = useState<ReviewRecordRow[]>([]);
   const [selected, setSelected] = useState<ReviewRecordDetail | null>(null);
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, ScoreDraft>>({});
   const [scorePatchReason, setScorePatchReason] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -2161,6 +2203,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [savingScores, setSavingScores] = useState(false);
+  const [agentBusy, setAgentBusy] = useState(false);
 
   const load = () => {
     const params = new URLSearchParams();
@@ -2199,8 +2242,45 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
         }
         setScoreDrafts(drafts);
         setScorePatchReason("");
+        await loadAgentRuns(id);
       }
     } finally { setBusy(null); }
+  };
+
+  const loadAgentRuns = async (recordId: string) => {
+    const response = await fetch(`${API_BASE_URL}/agent/records/${recordId}/runs`);
+    const data = response.ok ? await response.json() : { items: [] };
+    setAgentRuns(Array.isArray(data.items) ? data.items : []);
+  };
+
+  const generateAgentAnalysis = async () => {
+    if (!selected) return;
+    setAgentBusy(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/agent/records/${selected.id}/analysis`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error("agent analysis failed");
+      await loadAgentRuns(selected.id);
+    } finally {
+      setAgentBusy(false);
+    }
+  };
+
+  const confirmAgentRun = async (runId: string, accepted: boolean) => {
+    if (!selected) return;
+    setAgentBusy(true);
+    try {
+      await fetch(`${API_BASE_URL}/agent/runs/${runId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ accepted }),
+      });
+      await loadAgentRuns(selected.id);
+    } finally {
+      setAgentBusy(false);
+    }
   };
 
   const action = async (id: string, name: "review" | "return" | "lock") => {
@@ -2438,6 +2518,88 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
                   ))}
                   {!selected.surveys?.length && !selected.waterQuality?.length && !selected.attachments?.length && <p>暂无问卷、水质或照片证据</p>}
                 </div>
+              </div>
+            </div>
+            <div className="px-5 pb-4">
+              <div className="rounded-lg border border-border overflow-hidden">
+                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={14} className="text-primary" />
+                    <div>
+                      <h4 className="text-xs font-semibold text-foreground">Agent 辅助分析</h4>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">只做问题归纳和语义提示，不改分数、不算金额</p>
+                    </div>
+                  </div>
+                  <button
+                    disabled={agentBusy}
+                    onClick={generateAgentAnalysis}
+                    className="h-8 rounded bg-primary px-3 text-xs text-primary-foreground disabled:opacity-40"
+                  >
+                    {agentBusy ? "分析中..." : "生成分析"}
+                  </button>
+                </div>
+                {agentRuns[0] ? (
+                  <div className="px-4 py-3 space-y-3 text-xs">
+                    <div className="flex items-start justify-between gap-4">
+                      <p className="text-foreground leading-relaxed">{agentRuns[0].output.summary}</p>
+                      <div className="shrink-0 text-right">
+                        <p className="font-mono text-muted-foreground">置信度 {(agentRuns[0].confidence * 100).toFixed(0)}%</p>
+                        <p className="mt-1 text-muted-foreground">{agentRuns[0].accepted == null ? "待确认" : agentRuns[0].accepted ? "已采用" : "已弃用"}</p>
+                      </div>
+                    </div>
+                    {!!agentRuns[0].output.warnings?.length && (
+                      <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                        {agentRuns[0].output.warnings.map(item => <p key={item}>{item}</p>)}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="mb-1 font-semibold text-muted-foreground">主要问题</p>
+                        <div className="space-y-1">
+                          {(agentRuns[0].output.issues ?? []).slice(0, 4).map((item, index) => (
+                            <div key={`${item.title}-${index}`} className="rounded border border-border px-3 py-2">
+                              <p className="font-medium text-foreground">{item.title}</p>
+                              <p className="mt-1 text-muted-foreground">{item.description || "存在扣分或风险提示"}</p>
+                            </div>
+                          ))}
+                          {!agentRuns[0].output.issues?.length && <p className="text-muted-foreground">暂无明显问题归纳</p>}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-1 font-semibold text-muted-foreground">建议和草稿</p>
+                        <div className="space-y-1">
+                          {(agentRuns[0].output.suggestions ?? []).slice(0, 3).map(item => (
+                            <div key={item.title} className="rounded border border-border px-3 py-2">
+                              <p className="font-medium text-foreground">{item.title}</p>
+                              <p className="mt-1 text-muted-foreground">{item.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {!!agentRuns[0].output.semanticChecks?.length && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {agentRuns[0].output.semanticChecks.map(item => (
+                          <div key={item.name} className="rounded border border-border px-3 py-2">
+                            <p className={item.passed ? "text-[var(--status-success)]" : "text-[var(--status-error)]"}>{item.name}</p>
+                            <p className="mt-1 text-muted-foreground">{item.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between border-t border-border pt-3">
+                      <p className="text-muted-foreground">
+                        来源 {agentRuns[0].output.source || "deterministic-agent"} · 证据 {agentRuns[0].output.evidenceRefs?.length ?? 0} 条 · {agentRuns[0].createdAt}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button disabled={agentBusy} onClick={() => confirmAgentRun(agentRuns[0].id, false)} className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">弃用</button>
+                        <button disabled={agentBusy} onClick={() => confirmAgentRun(agentRuns[0].id, true)} className="text-xs text-primary hover:underline disabled:opacity-40">确认采用</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">尚未生成 Agent 辅助分析</div>
+                )}
               </div>
             </div>
             <div className="px-5 pb-4">
@@ -3323,7 +3485,7 @@ function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethod
               type="text"
               value={reportPeriod}
               onChange={e => setReportPeriod(e.target.value)}
-              placeholder="例如：2023年下半年度、2024年第一季度"
+              placeholder="例如：2026年第2季度"
               className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               style={{ background: "var(--input-background)" }}
             />
@@ -3448,7 +3610,7 @@ export default function App() {
 
     async function loadCities() {
       try {
-        const response = await fetch(`${API_BASE_URL}/mobile/cities`);
+        const response = await fetch(`${API_BASE_URL}/mobile/projects`);
         const data = response.ok ? await response.json() : { items: [] };
         if (!cancelled && Array.isArray(data.items)) setCities(data.items);
       } catch (error) {

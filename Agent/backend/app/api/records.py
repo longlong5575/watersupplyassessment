@@ -64,11 +64,23 @@ def serialize(record: AssessmentRecord, session: Session) -> dict[str, Any]:
     cycle = session.get(AssessmentCycle, record.cycle_id)
     village = session.get(Village, record.village_id) if record.village_id else None
     version = session.get(IndicatorVersion, record.indicator_version_id) if record.indicator_version_id else None
+    raw_payload = record.raw_payload or {}
+    primary_facility_type = raw_payload.get("primaryFacilityType") or raw_payload.get("facilityScope") or raw_payload.get("facilityType")
+    standard_facility_type = raw_payload.get("standardFacilityType") or raw_payload.get("facilityType")
+    facility_type_label = {
+        "town_plant": "镇街污水厂",
+        "town_network": "镇街污水收集管网",
+        "rural_treatment": "农村污水处理设施",
+        "treatment": "污水处理设施",
+        "network": "污水收集管网",
+    }.get(str(primary_facility_type or ""), str(primary_facility_type or standard_facility_type or ""))
     return {
         "id": record.id,
         "status": record.status,
         "cityId": record.city_id,
         "cityName": city.name if city else None,
+        "projectId": record.city_id,
+        "projectName": city.name if city else None,
         "cycleId": record.cycle_id,
         "cycleName": cycle.name if cycle else None,
         "townId": record.town_id,
@@ -77,6 +89,9 @@ def serialize(record: AssessmentRecord, session: Session) -> dict[str, Any]:
         "villageName": village.name if village else None,
         "indicatorVersionId": record.indicator_version_id,
         "indicatorVersionName": version.name if version else None,
+        "primaryFacilityType": primary_facility_type,
+        "standardFacilityType": standard_facility_type,
+        "facilityTypeLabel": facility_type_label,
         "totalScore": float(record.total_score) if record.total_score is not None else None,
         "scores": scores,
         "raw": record.raw_payload,

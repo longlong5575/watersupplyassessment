@@ -35,8 +35,8 @@ function Install-Python312 {
 }
 
 function Start-Frontend([string]$directory) {
-  $command = "Set-Location -LiteralPath '$directory'; if (Get-Command pnpm -ErrorAction SilentlyContinue) { pnpm run dev:local } else { npx --yes pnpm@10.12.1 run dev:local }"
-  Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$command`""
+  $name = Split-Path -Leaf $directory
+  & (Join-Path $backend ".venv\Scripts\pythonw.exe") (Join-Path $agentRoot "start_frontend_silent.py") $directory $name
 }
 
 function Wait-ForUrl([string]$url) {
