@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import agent, auth, dashboard, mobile, records, reports, standards, uploads
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
+from app.core.schema import ensure_local_schema
 from app.services.seed import seed_database
 
 
@@ -29,6 +30,7 @@ app.include_router(uploads.router)
 def startup() -> None:
     # Development fallback; production schema changes are managed by Alembic.
     Base.metadata.create_all(bind=engine)
+    ensure_local_schema()
     with SessionLocal() as session:
         seed_database(session)
 

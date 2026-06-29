@@ -175,10 +175,15 @@ class ReviewLog(IdMixin, TimestampMixin, Base):
 class ReportTask(IdMixin, TimestampMixin, Base):
     __tablename__ = "report_tasks"
     cycle_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_cycles.id"), nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    data_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    dataset_hash: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Report(IdMixin, TimestampMixin, Base):
@@ -190,3 +195,9 @@ class Report(IdMixin, TimestampMixin, Base):
     storage_key: Mapped[str] = mapped_column(String(500))
     size: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(30), default="completed")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    format: Mapped[str] = mapped_column(String(20), default="docx")
+    dataset_hash: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    data_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    task_parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    town: Mapped[Town | None] = relationship()

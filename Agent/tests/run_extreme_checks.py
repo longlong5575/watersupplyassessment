@@ -252,13 +252,22 @@ def main() -> None:
     require(cases, "多镇街报告任务创建成功", multi_report.status_code == 200, multi_report.text)
     task = wait_task(client, multi_report.json()["id"])
     require(cases, "多镇街报告任务完成", task.get("status") == "completed" and task.get("progress") == 100, task)
+    require(cases, "报告任务固化数据快照", bool(task.get("datasetHash")) and bool(task.get("dataSnapshot", {}).get("recordIds")), task)
     require(cases, "多镇街报告至少生成两份", len(task.get("reports", [])) >= 2, task)
+    require(
+        cases,
+        "报告记录包含版本和追溯范围",
+        all(item.get("version", 0) >= 1 and item.get("datasetHash") == task.get("datasetHash") and item.get("recordIds") for item in task.get("reports", [])),
+        task.get("reports", []),
+    )
     download_ok = 0
     for report in task.get("reports", []):
         response = client.get(f"/api/reports/{report['id']}/download")
         if response.status_code == 200 and len(response.content) > 1000:
             download_ok += 1
     require(cases, "生成报告均可下载", download_ok == len(task.get("reports", [])), {"downloadOk": download_ok, "reports": len(task.get("reports", []))})
+    task_history = client.get("/api/report-tasks").json()["items"]
+    require(cases, "报告任务历史列表可追溯", any(item["id"] == task["id"] and item.get("datasetHash") for item in task_history), task_history)
 
     dashboard = client.get("/api/dashboard/towns").json()
     selected_rows = [item for item in dashboard["items"] if item["name"] in {town["name"] for town in selected_towns}]
@@ -280,6 +289,9 @@ def main() -> None:
             "progress": task.get("progress"),
             "reports": len(task.get("reports", [])),
             "reportNames": [item.get("name") for item in task.get("reports", [])],
+            "datasetHash": task.get("datasetHash"),
+            "recordIds": task.get("dataSnapshot", {}).get("recordIds", []),
+            "reportVersions": [item.get("version") for item in task.get("reports", [])],
         },
         "database": summary,
         "cases": cases,

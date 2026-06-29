@@ -1,5 +1,5 @@
 ﻿{
-    "generatedAt":  "2026-06-26T11:24:51",
+    "generatedAt":  "2026-06-29T11:32:40",
     "backendVenvReady":  true,
     "backendCompile":  true,
     "backendApiFlow":  {
@@ -10,6 +10,19 @@
                            "reportNames":  [
                                                "北陡镇2023年下半年度村级设施考核报告（正文）.docx"
                                            ],
+                           "datasetHash":  "107a6041d93f637c854877dca8a79d8e193112e19d3e8e44fad82d849ee4d235",
+                           "recordIds":  [
+                                             "ed513204-2721-4223-a31d-0afdc76262c6"
+                                         ],
+                           "indicatorVersionIds":  [
+                                                       "a37fd380-7f50-494e-9c35-ce1f20dd1317"
+                                                   ],
+                           "reportVersions":  [
+                                                  1
+                                              ],
+                           "repeatedReportVersions":  [
+                                                          2
+                                                      ],
                            "scoreCount":  3,
                            "surveyCount":  4,
                            "waterQualityCount":  1,
@@ -25,7 +38,7 @@
                                                "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
                                                "项目2023年下半年度村级设施考核报告（正文）.docx"
                                            ],
-                           "caseCount":  24,
+                           "caseCount":  27,
                            "passed":  true
                        },
     "reportQuality":  {

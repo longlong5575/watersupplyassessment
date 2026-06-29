@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from app.core.database import Base, SessionLocal, engine
 from app.main import app
-from app.models import AssessmentRecord, AssessmentScore, Attachment, ReviewLog, SurveyRecord, WaterQualityRecord
+from app.models import AssessmentRecord, AssessmentScore, Attachment, Report, ReviewLog, SurveyRecord, WaterQualityRecord
 from app.services.seed import seed_database
 
 
@@ -231,6 +231,40 @@ def main() -> None:
         if task["status"] in {"completed", "failed"}:
             break
         time.sleep(1)
+    assert task["status"] == "completed", task
+    assert task["datasetHash"], task
+    assert task["dataSnapshot"]["recordIds"], task
+    assert task["dataSnapshot"]["indicatorVersionIds"], task
+    assert task["reports"], task
+    first_report = task["reports"][0]
+    assert first_report["version"] == 1, first_report
+    assert first_report["datasetHash"] == task["datasetHash"], first_report
+    assert first_report["recordIds"], first_report
+    assert first_report["indicatorVersionIds"], first_report
+
+    repeated = client.post(
+        "/api/report-tasks",
+        json={"period": period, "townNames": [town], "outputs": ["town"], "source": "dashboard"},
+        headers=admin_headers,
+    ).json()
+    repeated_task = None
+    for _ in range(80):
+        repeated_task = client.get(f"/api/report-tasks/{repeated['id']}").json()
+        if repeated_task["status"] in {"completed", "failed"}:
+            break
+        time.sleep(1)
+    assert repeated_task["status"] == "completed", repeated_task
+    assert repeated_task["reports"][0]["version"] == 2, repeated_task
+
+    tasks = client.get("/api/report-tasks", headers=admin_headers).json()["items"]
+    assert any(item["id"] == created["id"] for item in tasks), tasks
+    assert any(item["id"] == repeated["id"] for item in tasks), tasks
+
+    session = SessionLocal()
+    report_rows = session.scalars(select(Report).where(Report.name == first_report["name"]).order_by(Report.version)).all()
+    storage_keys = [item.storage_key for item in report_rows]
+    session.close()
+    assert len(storage_keys) >= 2 and len(set(storage_keys)) == len(storage_keys), storage_keys
 
     result = {
         "town": town,
@@ -238,6 +272,11 @@ def main() -> None:
         "progress": task["progress"] if task else None,
         "reports": len(task.get("reports", [])) if task else 0,
         "reportNames": [item.get("name") for item in task.get("reports", [])] if task else [],
+        "datasetHash": task.get("datasetHash") if task else None,
+        "recordIds": task.get("dataSnapshot", {}).get("recordIds", []) if task else [],
+        "indicatorVersionIds": task.get("dataSnapshot", {}).get("indicatorVersionIds", []) if task else [],
+        "reportVersions": [item.get("version") for item in (task.get("reports", []) if task else [])],
+        "repeatedReportVersions": [item.get("version") for item in (repeated_task.get("reports", []) if repeated_task else [])],
         "scoreCount": score_count,
         "surveyCount": survey_count,
         "waterQualityCount": water_quality_count,

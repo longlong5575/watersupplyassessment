@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   FileCheck,
   Eye,
@@ -98,6 +99,10 @@ interface Report {
   size: string;
   createdAt: string;
   downloadUrl?: string;
+  version?: number;
+  datasetHash?: string;
+  recordIds?: string[];
+  indicatorVersionIds?: string[];
 }
 
 type AuthUser = {
@@ -354,10 +359,15 @@ type BackendReportRow = {
   id: string;
   name: string;
   town: string;
-  period: string;
+  period?: string;
+  cycleName?: string;
   status: ReportStatus;
   size: number | string;
   createdAt: string;
+  version?: number;
+  datasetHash?: string;
+  recordIds?: string[];
+  indicatorVersionIds?: string[];
 };
 
 function formatReportSize(size: number | string): string {
@@ -370,12 +380,16 @@ function mapBackendReports(rows: BackendReportRow[]): Report[] {
   return rows.map(row => ({
     id: row.id,
     name: row.name,
-    town: row.town,
-    period: row.period,
+    town: row.town || "项目",
+    period: row.period || row.cycleName || "当前周期",
     status: row.status,
     size: formatReportSize(row.size),
     createdAt: row.createdAt,
     downloadUrl: `${API_BASE_URL}/reports/${row.id}/download`,
+    version: row.version,
+    datasetHash: row.datasetHash,
+    recordIds: row.recordIds ?? [],
+    indicatorVersionIds: row.indicatorVersionIds ?? [],
   }));
 }
 
@@ -1378,6 +1392,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
 
   const [step, setStep] = useState(0);
   const [backendDone, setBackendDone] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
   useEffect(() => { onStart(); }, []);
   const [logs, setLogs] = useState<string[]>(() => [
     "任务初始化完成",
@@ -1402,7 +1417,10 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
             outputs: Array.from(outputSelected),
           }),
         });
-        if (!response.ok) throw new Error(`Report task failed: ${response.status}`);
+        if (!response.ok) {
+          const detail = await response.json().catch(() => null);
+          throw new Error(detail?.detail ?? `Report task failed: ${response.status}`);
+        }
         const task = await response.json();
         const pollTask = async () => {
           if (cancelled) return;
@@ -1421,7 +1439,9 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
       } catch (error) {
         console.error(error);
         if (!cancelled) {
-          setLogs(prev => [...prev, "报告任务提交失败，请确认后端服务已启动。"]);
+          const message = error instanceof Error ? error.message : "报告任务提交失败，请确认后端服务已启动。";
+          setBackendError(message);
+          setLogs(prev => [...prev, message]);
         }
       }
     }
@@ -1548,10 +1568,17 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
                 <div className="h-px bg-border" />
                 <div>
                   <p className="text-xs text-muted-foreground mb-1.5">异常状态</p>
-                  <div className="flex items-center gap-2 text-xs text-[var(--status-success)]">
-                    <Shield size={12} />
-                    无异常
-                  </div>
+                  {backendError ? (
+                    <div className="flex items-start gap-2 text-xs text-[var(--status-error)]">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                      <span>{backendError}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-[var(--status-success)]">
+                      <Shield size={12} />
+                      无异常
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1787,6 +1814,8 @@ function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Re
                 <th className="text-left px-3 py-3 font-medium">报告名称</th>
                 <th className="text-left px-3 py-3 font-medium">镇街</th>
                 <th className="text-left px-3 py-3 font-medium">周期</th>
+                <th className="text-left px-3 py-3 font-medium">版本</th>
+                <th className="text-left px-3 py-3 font-medium">追溯</th>
                 <th className="text-left px-3 py-3 font-medium">状态</th>
                 <th className="text-left px-3 py-3 font-medium">生成时间</th>
                 <th className="text-left px-3 py-3 font-medium">操作</th>
@@ -1804,13 +1833,18 @@ function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Re
                   </td>
                   <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.town}</td>
                   <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.period}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground font-mono">v{r.version ?? 1}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground font-mono">
+                    <div>{r.datasetHash ? r.datasetHash.slice(0, 8) : "未记录"}</div>
+                    <div className="text-[10px] text-muted-foreground">{r.recordIds?.length ?? 0} 条记录</div>
+                  </td>
                   <td className="px-3 py-3"><StatusBadge status={r.status} /></td>
                   <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.createdAt}</td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-3">
-                      <button className="text-xs text-primary hover:underline flex items-center gap-1">
+                      <a href={r.downloadUrl} className="text-xs text-primary hover:underline flex items-center gap-1">
                         <Download size={12} /> 下载
-                      </button>
+                      </a>
                       <button className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                         <Eye size={12} /> 详情
                       </button>

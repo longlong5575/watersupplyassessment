@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import admin_user
-from app.models import AssessmentCycle, AssessmentRecord, Report, ReportTask, Town
+from app.models import AssessmentCycle, Report, ReportTask, Town
 from app.schemas import ReportTaskRequest
+from app.services.report_dataset import build_report_dataset, validate_report_dataset
 from app.services.report_tasks import run_report_task
 
 
@@ -17,7 +18,50 @@ router = APIRouter(tags=["reports"])
 
 
 def serialize_report(item: Report) -> dict:
-    return {"id": item.id, "name": item.name, "status": item.status, "size": item.size, "createdAt": item.created_at.isoformat(), "town": item.town_id}
+    town_name = None
+    try:
+        town_name = item.town.name if getattr(item, "town", None) else None
+    except Exception:
+        town_name = None
+    return {
+        "id": item.id,
+        "taskId": item.task_id,
+        "name": item.name,
+        "status": item.status,
+        "size": item.size,
+        "createdAt": item.created_at.isoformat(),
+        "town": town_name or item.town_id,
+        "cycleId": item.cycle_id,
+        "version": item.version,
+        "format": item.format,
+        "datasetHash": item.dataset_hash,
+        "recordIds": item.data_snapshot.get("recordIds", []),
+        "indicatorVersionIds": item.data_snapshot.get("indicatorVersionIds", []),
+    }
+
+
+def serialize_task(item: ReportTask, reports: list[Report] | None = None) -> dict:
+    return {
+        "id": item.id,
+        "status": item.status,
+        "progress": item.progress,
+        "error": item.error,
+        "createdAt": item.created_at.isoformat(),
+        "updatedAt": item.updated_at.isoformat(),
+        "startedAt": item.started_at.isoformat() if item.started_at else None,
+        "completedAt": item.completed_at.isoformat() if item.completed_at else None,
+        "payload": item.payload,
+        "datasetHash": item.dataset_hash,
+        "dataSnapshot": {
+            "cycleId": item.data_snapshot.get("cycleId"),
+            "cycleName": item.data_snapshot.get("cycleName"),
+            "requestedTowns": item.data_snapshot.get("requestedTowns", []),
+            "towns": item.data_snapshot.get("towns", []),
+            "recordIds": item.data_snapshot.get("recordIds", []),
+            "indicatorVersionIds": item.data_snapshot.get("indicatorVersionIds", []),
+        },
+        "reports": [serialize_report(report) for report in (reports or [])],
+    }
 
 
 @router.post("/api/report-tasks")
@@ -30,16 +74,20 @@ def create_task(payload: ReportTaskRequest, session: Session = Depends(get_sessi
         towns = session.scalars(select(Town).where(Town.id.in_(payload.townIds))).all()
         task_payload["townNames"] = sorted({*payload.townNames, *(town.name for town in towns)})
     if task_payload.get("source") == "dashboard":
-        record_query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
-        if cycle is not None:
-            record_query = record_query.where(AssessmentRecord.cycle_id == cycle.id)
-        reviewed_records = list(session.scalars(record_query).all())
-        town_names = set(task_payload.get("townNames", []))
-        if town_names:
-            reviewed_records = [record for record in reviewed_records if record.town.name in town_names]
-        if not reviewed_records:
-            raise HTTPException(status_code=422, detail="Report generation requires reviewed or locked assessment records.")
-    task = ReportTask(cycle_id=cycle.id if cycle else None, payload=task_payload)
+        try:
+            snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None)
+            validate_report_dataset(snapshot)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None)
+    task = ReportTask(
+        cycle_id=cycle.id if cycle else None,
+        created_by_id=user.id,
+        payload=task_payload,
+        data_snapshot=snapshot,
+        dataset_hash=snapshot.get("hash"),
+    )
     session.add(task)
     session.commit()
     # Redis/Celery is the production path; local development remains usable without a worker.
@@ -53,7 +101,7 @@ def create_task(payload: ReportTaskRequest, session: Session = Depends(get_sessi
         except Exception:
             run_report_task(task.id)
     session.refresh(task)
-    return {"id": task.id, "status": task.status, "progress": task.progress, "reports": []}
+    return {"id": task.id, "status": task.status, "progress": task.progress, "datasetHash": task.dataset_hash, "reports": []}
 
 
 @router.get("/api/report-tasks/{task_id}")
@@ -61,7 +109,16 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
     task = session.get(ReportTask, task_id)
     if task is None: raise HTTPException(status_code=404, detail="Report task not found")
     reports = session.scalars(select(Report).where(Report.task_id == task.id)).all()
-    return {"id": task.id, "status": task.status, "progress": task.progress, "error": task.error, "reports": [serialize_report(item) for item in reports]}
+    return serialize_task(task, list(reports))
+
+
+@router.get("/api/report-tasks")
+def list_tasks(session: Session = Depends(get_session), status: str | None = None):
+    query = select(ReportTask).order_by(ReportTask.created_at.desc())
+    if status:
+        query = query.where(ReportTask.status == status)
+    tasks = list(session.scalars(query).all())
+    return {"items": [serialize_task(item) for item in tasks]}
 
 
 @router.get("/api/reports")

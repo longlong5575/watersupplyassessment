@@ -188,6 +188,11 @@ def build() -> Path:
             ["任务进度", str(report_task.get("progress"))],
             ["登记报告数量", str(report_task.get("reports"))],
             ["报告名称", "；".join(report_task.get("reportNames", []))],
+            ["数据快照哈希", str(report_task.get("datasetHash", ""))],
+            ["追溯记录数量", str(len(report_task.get("recordIds", [])))],
+            ["评分标准版本数量", str(len(report_task.get("indicatorVersionIds", [])))],
+            ["报告版本", "、".join(str(item) for item in report_task.get("reportVersions", []))],
+            ["重复生成版本", "、".join(str(item) for item in report_task.get("repeatedReportVersions", []))],
         ],
     )
 
