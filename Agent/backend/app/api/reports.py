@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import admin_user
-from app.models import AssessmentCycle, Report, ReportTask, Town
+from app.models import AssessmentCycle, City, Report, ReportTask, Town
 from app.schemas import ReportTaskRequest
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
 from app.services.report_tasks import run_report_task
@@ -66,21 +66,36 @@ def serialize_task(item: ReportTask, reports: list[Report] | None = None) -> dic
 
 @router.post("/api/report-tasks")
 def create_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
-    cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.name == payload.period))
+    project = session.get(City, payload.projectId) if payload.projectId else None
+    cycle_query = select(AssessmentCycle).where(AssessmentCycle.name == payload.period)
+    if project is not None:
+        cycle_query = cycle_query.where(AssessmentCycle.city_id == project.id)
+    cycle = session.scalar(cycle_query)
     if cycle is None:
-        cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.status == "active"))
+        fallback_query = select(AssessmentCycle).where(AssessmentCycle.status == "active")
+        if project is not None:
+            fallback_query = fallback_query.where(AssessmentCycle.city_id == project.id)
+        cycle = session.scalar(fallback_query)
+    if payload.projectId and project is None:
+        raise HTTPException(status_code=422, detail="Project not found")
     task_payload = payload.model_dump()
     if payload.townIds:
         towns = session.scalars(select(Town).where(Town.id.in_(payload.townIds))).all()
+        if project and any(town.city_id != project.id for town in towns):
+            raise HTTPException(status_code=422, detail="Selected towns do not belong to the project")
         task_payload["townNames"] = sorted({*payload.townNames, *(town.name for town in towns)})
+    elif project and payload.townNames:
+        valid_names = set(session.scalars(select(Town.name).where(Town.city_id == project.id, Town.name.in_(payload.townNames))).all())
+        if valid_names != set(payload.townNames):
+            raise HTTPException(status_code=422, detail="Selected towns do not belong to the project")
     if task_payload.get("source") == "dashboard":
         try:
-            snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None)
+            snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
             validate_report_dataset(snapshot)
         except RuntimeError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     else:
-        snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None)
+        snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
     task = ReportTask(
         cycle_id=cycle.id if cycle else None,
         created_by_id=user.id,

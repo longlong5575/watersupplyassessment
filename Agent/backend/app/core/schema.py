@@ -43,6 +43,28 @@ AGENT_RUN_COLUMNS = {
     "error": "TEXT",
 }
 
+TOWN_COLUMNS = {
+    "chapter_code": "VARCHAR(40)",
+    "assessment_targets": "JSON DEFAULT '[]'",
+    "assessment_object": "JSON DEFAULT '{}'",
+    "report_template": "JSON DEFAULT '{}'",
+    "sort_order": "INTEGER DEFAULT 0",
+    "is_active": "BOOLEAN DEFAULT 1",
+}
+
+VILLAGE_COLUMNS = {
+    "administrative_village": "VARCHAR(160)",
+    "chapter_code": "VARCHAR(60)",
+    "assessment_object": "JSON DEFAULT '{}'",
+    "report_template": "JSON DEFAULT '{}'",
+    "sort_order": "INTEGER DEFAULT 0",
+    "is_active": "BOOLEAN DEFAULT 1",
+}
+
+DEDUCTION_OPTION_COLUMNS = {
+    "meta": "JSON DEFAULT '{}'",
+}
+
 
 def _ensure_columns(table: str, columns: dict[str, str]) -> None:
     with engine.begin() as connection:
@@ -63,4 +85,7 @@ def ensure_local_schema() -> None:
         return
     _ensure_columns("report_tasks", REPORT_TASK_COLUMNS)
     _ensure_columns("reports", REPORT_COLUMNS)
+    _ensure_columns("towns", TOWN_COLUMNS)
+    _ensure_columns("villages", VILLAGE_COLUMNS)
+    _ensure_columns("deduction_options", DEDUCTION_OPTION_COLUMNS)
     _ensure_table("agent_runs", AGENT_RUN_COLUMNS)

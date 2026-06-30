@@ -69,8 +69,10 @@ def resolve_town(session: Session, raw: dict[str, Any]) -> Town:
         if city_id:
             statement = statement.where(Town.city_id == city_id)
         town = session.scalar(statement)
-    if town is None:
+    if town is None or not town.is_active:
         raise ValueError("A valid town is required")
+    if city_id and town.city_id != city_id:
+        raise ValueError("Town does not belong to the selected project")
     return town
 
 
@@ -80,6 +82,8 @@ def resolve_village(session: Session, raw: dict[str, Any], town_id: str) -> Vill
     village = session.get(Village, village_id) if village_id else None
     if village is None and village_name:
         village = session.scalar(select(Village).where(Village.town_id == town_id, Village.name == village_name))
+    if village is not None and (village.town_id != town_id or not village.is_active):
+        raise ValueError("Village does not belong to the selected town")
     return village
 
 
@@ -127,9 +131,20 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
     cycle = resolve_cycle(session, raw, city.id)
     village = resolve_village(session, raw, town.id)
     version = resolve_indicator_version(session, raw, city.id, cycle.id)
+    facility_type = _raw_facility_type(raw)
+    if facility_type not in (town.assessment_targets or []):
+        raise ValueError("The selected assessment type is not configured for this town")
+    if facility_type == "rural_treatment" and village is None:
+        raise ValueError("A rural treatment assessment requires a valid village facility")
+    if facility_type != "rural_treatment" and village is not None:
+        raise ValueError("Town plant and network assessments must not bind a village")
+    if version is None:
+        raise ValueError("A published indicator version is required")
     record = find_existing_record(session, raw, city.id, cycle.id, town.id, village.id if village else None, version.id if version else None)
     if record is not None and record.status == "locked":
         raise ValueError("Assessment record is locked")
+    requested_status = raw.get("status")
+    next_status = requested_status if requested_status in {"draft", "submitted"} else "draft"
     if record is None:
         record = AssessmentRecord(
             city_id=city.id,
@@ -137,13 +152,13 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
             town_id=town.id,
             village_id=village.id if village else None,
             indicator_version_id=version.id if version else None,
-            status=raw.get("status", "draft"),
+            status=next_status,
             total_score=raw.get("currentScore"),
             raw_payload=raw,
         )
         session.add(record)
     else:
-        record.status = raw.get("status", record.status if record.status in {"draft", "returned"} else "draft")
+        record.status = next_status if record.status in {"draft", "returned"} else record.status
         record.total_score = raw.get("currentScore")
         record.raw_payload = raw
     session.flush()
@@ -224,7 +239,8 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
     for key, entry in _entry_items(entries):
         indicator_id = entry.get("indicatorId") or entry.get("indicator_id") or entry.get("itemId") or key
         indicator = session.get(Indicator, indicator_id) if indicator_id else None
-        if indicator is None:
+        expected_type = _raw_facility_type(record.raw_payload or {})
+        if indicator is None or indicator.version_id != record.indicator_version_id or indicator.facility_type != expected_type:
             continue
         options = entry.get("options") if isinstance(entry.get("options"), list) else []
         selected_options = [option for option in options if isinstance(option, dict) and option.get("selection") not in (None, "no_deduction")]
@@ -241,26 +257,27 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
             session.add(score)
             created.append(score)
             continue
-        for option_entry in selected_options:
-            option_id, deduction, reason = _score_option(session, option_entry)
-            score_value = max(float(indicator.full_score) - deduction, 0)
-            score = AssessmentScore(
-                record_id=record.id,
-                indicator_id=indicator.id,
-                deduction_option_id=option_id,
-                score=score_value,
-                deduction=deduction,
-                reason=reason or entry.get("generalNote"),
-                source=entry.get("source", "manual"),
-            )
-            session.add(score)
-            session.flush()
+        evaluated = [_score_option(session, option_entry) for option_entry in selected_options]
+        deduction = min(sum(item[1] for item in evaluated), float(indicator.full_score))
+        reasons = [item[2] for item in evaluated if item[2]]
+        score = AssessmentScore(
+            record_id=record.id,
+            indicator_id=indicator.id,
+            deduction_option_id=evaluated[0][0] if len(evaluated) == 1 else None,
+            score=max(float(indicator.full_score) - deduction, 0),
+            deduction=deduction,
+            reason="；".join(reasons) or entry.get("generalNote"),
+            source=entry.get("source", "manual"),
+        )
+        session.add(score)
+        session.flush()
+        for option_entry, (option_id, _, _) in zip(selected_options, evaluated):
             sync_option_photos(session, record.id, score.id, option_id, option_entry)
-            created.append(score)
+        created.append(score)
     session.flush()
-    total = sum(_to_float(item.score) for item in created)
     if created:
-        record.total_score = total
+        total_deduction = sum(_to_float(item.deduction) for item in created)
+        record.total_score = max(0, min(100 - total_deduction, 100))
     return created
 
 
@@ -416,6 +433,10 @@ def sync_water_quality(session: Session, record: AssessmentRecord, payload: Any)
 
 
 def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecord:
+    if record.status == "locked":
+        raise ValueError("Assessment record is locked")
+    if record.status == "reviewed":
+        raise ValueError("Reviewed records must be returned before resubmission")
     record.status = "submitted"
     record.submitted_at = datetime.now(timezone.utc)
     session.flush()

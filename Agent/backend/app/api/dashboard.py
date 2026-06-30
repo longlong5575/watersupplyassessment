@@ -23,7 +23,7 @@ def _has_missing_deduction_photo(record: AssessmentRecord, attachments: list[Att
 
 @router.get("/towns")
 def towns(city_id: str | None = None, town_id: str | None = None, session: Session = Depends(get_session)):
-    query = select(Town).order_by(Town.name)
+    query = select(Town).where(Town.is_active.is_(True)).order_by(Town.sort_order, Town.name)
     if city_id:
         query = query.where(Town.city_id == city_id)
     if town_id:
@@ -44,7 +44,7 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
                 AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]),
             )
         ) or 0
-        village_count = session.scalar(select(func.count(Village.id)).where(Village.town_id == town.id)) or 0
+        village_count = session.scalar(select(func.count(Village.id)).where(Village.town_id == town.id, Village.is_active.is_(True))) or 0
         deduction_total = 0
         survey_count = 0
         water_quality_count = 0
@@ -91,6 +91,10 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
                 "name": town.name,
                 "cityId": town.city_id,
                 "cityName": city.name if city else None,
+                "chapterCode": town.chapter_code,
+                "assessmentTargets": town.assessment_targets or [],
+                "assessmentObject": town.assessment_object or {},
+                "reportTemplate": town.report_template or {},
                 "recordCount": len(record_ids),
                 "completedCount": completed_count,
                 "villageCount": max(village_count, len(record_ids), 1),
@@ -153,7 +157,7 @@ def deduction_ranking(session: Session = Depends(get_session)):
 
 @router.get("/villages")
 def villages(town_id: str | None = None, session: Session = Depends(get_session)):
-    query = select(Village)
+    query = select(Village).where(Village.is_active.is_(True))
     if town_id:
         query = query.where(Village.town_id == town_id)
-    return {"items": [{"id": village.id, "name": village.name, "townId": village.town_id} for village in session.scalars(query).all()]}
+    return {"items": [{"id": village.id, "name": village.name, "townId": village.town_id, "administrativeVillage": village.administrative_village, "chapterCode": village.chapter_code, "assessmentObject": village.assessment_object or {}} for village in session.scalars(query.order_by(Village.sort_order, Village.name)).all()]}

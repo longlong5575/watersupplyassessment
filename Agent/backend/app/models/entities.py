@@ -47,6 +47,12 @@ class Town(IdMixin, TimestampMixin, Base):
     __tablename__ = "towns"
     city_id: Mapped[str] = mapped_column(ForeignKey("cities.id"), index=True)
     name: Mapped[str] = mapped_column(String(120), index=True)
+    chapter_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    assessment_targets: Mapped[list] = mapped_column(JSON, default=list)
+    assessment_object: Mapped[dict] = mapped_column(JSON, default=dict)
+    report_template: Mapped[dict] = mapped_column(JSON, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     city: Mapped[City] = relationship()
     villages: Mapped[list[Village]] = relationship(back_populates="town")
 
@@ -55,6 +61,12 @@ class Village(IdMixin, TimestampMixin, Base):
     __tablename__ = "villages"
     town_id: Mapped[str] = mapped_column(ForeignKey("towns.id"), index=True)
     name: Mapped[str] = mapped_column(String(160))
+    administrative_village: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    chapter_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    assessment_object: Mapped[dict] = mapped_column(JSON, default=dict)
+    report_template: Mapped[dict] = mapped_column(JSON, default=dict)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     town: Mapped[Town] = relationship(back_populates="villages")
 
 
@@ -94,6 +106,7 @@ class DeductionOption(IdMixin, TimestampMixin, Base):
     deduction_type: Mapped[str] = mapped_column(String(40), default="fixed")
     deduction_value: Mapped[float] = mapped_column(Float, default=0)
     requires_photo: Mapped[bool] = mapped_column(Boolean, default=False)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class AssessmentRecord(IdMixin, TimestampMixin, Base):

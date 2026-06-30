@@ -13,13 +13,16 @@ from app.models import (
     AssessmentRecord,
     AssessmentScore,
     Attachment,
+    AgentRun,
     DeductionOption,
     Indicator,
     IndicatorVersion,
     ReviewLog,
     SurveyRecord,
     Town,
+    Village,
     WaterQualityRecord,
+    City,
 )
 
 
@@ -66,8 +69,12 @@ def build_report_dataset(
     *,
     cycle: AssessmentCycle | None,
     town_names: set[str] | None = None,
+    city_id: str | None = None,
 ) -> dict[str, Any]:
     query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
+    project_id = city_id or (cycle.city_id if cycle else None)
+    if project_id:
+        query = query.where(AssessmentRecord.city_id == project_id)
     if cycle is not None:
         query = query.where(AssessmentRecord.cycle_id == cycle.id)
     records = list(session.scalars(query).all())
@@ -80,9 +87,17 @@ def build_report_dataset(
     version_ids = sorted({record.indicator_version_id for record in records if record.indicator_version_id})
 
     for record in sorted(records, key=lambda item: (item.town.name, item.created_at.isoformat(), item.id)):
+        village = session.get(Village, record.village_id) if record.village_id else None
         surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)).all())
         water = list(session.scalars(select(WaterQualityRecord).where(WaterQualityRecord.record_id == record.id)).all())
         attachments = list(session.scalars(select(Attachment).where(Attachment.record_id == record.id)).all())
+        accepted_agent_runs = list(
+            session.scalars(
+                select(AgentRun)
+                .where(AgentRun.record_id == record.id, AgentRun.accepted.is_(True))
+                .order_by(AgentRun.created_at.desc())
+            ).all()
+        )
         logs = list(session.scalars(select(ReviewLog).where(ReviewLog.record_id == record.id)).all())
         record_payloads.append(
             {
@@ -92,7 +107,13 @@ def build_report_dataset(
                 "townId": record.town_id,
                 "town": record.town.name,
                 "villageId": record.village_id,
+                "village": village.name if village else None,
+                "administrativeVillage": village.administrative_village if village else None,
+                "villageChapterCode": village.chapter_code if village else None,
+                "villageAssessmentObject": village.assessment_object if village else {},
+                "villageReportTemplate": village.report_template if village else {},
                 "facilityId": record.facility_id,
+                "facilityType": (record.raw_payload or {}).get("primaryFacilityType") or (record.raw_payload or {}).get("facilityType"),
                 "indicatorVersionId": record.indicator_version_id,
                 "status": record.status,
                 "totalScore": record.total_score,
@@ -119,9 +140,21 @@ def build_report_dataset(
                         "filename": item.filename,
                         "scoreId": item.score_id,
                         "deductionOptionId": item.deduction_option_id,
+                        "contentType": item.content_type,
                         "size": item.size,
                     }
                     for item in attachments
+                ],
+                "agentRuns": [
+                    {
+                        "id": item.id,
+                        "capability": item.capability,
+                        "confidence": item.confidence,
+                        "confirmedAt": item.confirmed_at,
+                        "output": item.output,
+                        "evidenceRefs": item.evidence_refs,
+                    }
+                    for item in accepted_agent_runs
                 ],
                 "reviewLogs": [
                     {"id": item.id, "action": item.action, "reason": item.reason, "createdAt": item.created_at}
@@ -134,9 +167,15 @@ def build_report_dataset(
     for record in record_payloads:
         by_town.setdefault(record["town"], []).append(record)
     for town_name, town_records in sorted(by_town.items()):
+        town = session.scalar(select(Town).where(Town.name == town_name, Town.city_id == project_id)) if project_id else session.scalar(select(Town).where(Town.name == town_name))
         town_payloads.append(
             {
                 "town": town_name,
+                "townId": town.id if town else None,
+                "chapterCode": town.chapter_code if town else None,
+                "assessmentTargets": town.assessment_targets if town else [],
+                "assessmentObject": town.assessment_object if town else {},
+                "reportTemplate": town.report_template if town else {},
                 "recordCount": len(town_records),
                 "lockedCount": sum(1 for item in town_records if item["status"] == "locked"),
                 "reviewedCount": sum(1 for item in town_records if item["status"] == "reviewed"),
@@ -151,13 +190,16 @@ def build_report_dataset(
         session.get(IndicatorVersion, version_id)
         for version_id in version_ids
     ]
-    towns = [
-        session.scalar(select(Town).where(Town.name == name))
-        for name in sorted(town_names or by_town.keys())
-    ]
+    town_queries = [select(Town).where(Town.name == name) for name in sorted(town_names or by_town.keys())]
+    if project_id:
+        town_queries = [query.where(Town.city_id == project_id) for query in town_queries]
+    towns = [session.scalar(query) for query in town_queries]
+    project = session.get(City, project_id) if project_id else None
     snapshot = {
         "cycleId": cycle.id if cycle else None,
         "cycleName": cycle.name if cycle else None,
+        "projectId": project_id,
+        "projectName": project.name if project else None,
         "requestedTowns": sorted(town_names or []),
         "towns": town_payloads,
         "records": record_payloads,

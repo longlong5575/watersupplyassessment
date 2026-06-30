@@ -146,6 +146,22 @@ def main() -> None:
     record_detail = client.get(f"/api/records/{record['id']}").json()
     assert record_detail["cycleName"], record_detail
     assert record_detail["scores"][0].get("indicatorName") is not None, record_detail["scores"]
+    before_agent_score = record_detail["totalScore"]
+    agent_analysis = client.post(f"/api/agent/records/{record['id']}/analysis", headers=admin_headers)
+    assert agent_analysis.status_code == 200, agent_analysis.text
+    agent_payload = agent_analysis.json()
+    assert agent_payload["output"]["source"] == "deterministic-agent-v1", agent_payload
+    assert agent_payload["output"]["summary"], agent_payload
+    assert "不决定分数" in agent_payload["output"]["boundaries"], agent_payload
+    assert agent_payload["evidenceRefs"], agent_payload
+    confirmed_agent = client.post(
+        f"/api/agent/runs/{agent_payload['id']}/confirm",
+        json={"accepted": True},
+        headers=admin_headers,
+    )
+    assert confirmed_agent.status_code == 200 and confirmed_agent.json()["accepted"] is True, confirmed_agent.text
+    record_detail_after_agent = client.get(f"/api/records/{record['id']}").json()
+    assert record_detail_after_agent["totalScore"] == before_agent_score, record_detail_after_agent
     client.post(f"/api/records/{record['id']}/review", headers=admin_headers)
     client.post(f"/api/records/{record['id']}/lock", headers=admin_headers)
     locked_score_update = client.put(
@@ -241,6 +257,11 @@ def main() -> None:
     assert first_report["datasetHash"] == task["datasetHash"], first_report
     assert first_report["recordIds"], first_report
     assert first_report["indicatorVersionIds"], first_report
+    task_agent = client.post(f"/api/agent/report-tasks/{created['id']}/analysis", headers=admin_headers)
+    assert task_agent.status_code == 200, task_agent.text
+    task_agent_payload = task_agent.json()
+    assert task_agent_payload["output"]["semanticChecks"], task_agent_payload
+    assert any(item["name"] == "确定性边界" and item["passed"] for item in task_agent_payload["output"]["semanticChecks"]), task_agent_payload
 
     repeated = client.post(
         "/api/report-tasks",
@@ -277,6 +298,10 @@ def main() -> None:
         "indicatorVersionIds": task.get("dataSnapshot", {}).get("indicatorVersionIds", []) if task else [],
         "reportVersions": [item.get("version") for item in (task.get("reports", []) if task else [])],
         "repeatedReportVersions": [item.get("version") for item in (repeated_task.get("reports", []) if repeated_task else [])],
+        "agentRunId": agent_payload["id"],
+        "agentAccepted": confirmed_agent.json()["accepted"],
+        "agentConfidence": agent_payload["confidence"],
+        "taskAgentRunId": task_agent_payload["id"],
         "scoreCount": score_count,
         "surveyCount": survey_count,
         "waterQualityCount": water_quality_count,

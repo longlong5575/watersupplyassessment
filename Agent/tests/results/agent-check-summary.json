@@ -1,5 +1,5 @@
 ﻿{
-    "generatedAt":  "2026-06-29T11:32:40",
+    "generatedAt":  "2026-06-29T11:46:56",
     "backendVenvReady":  true,
     "backendCompile":  true,
     "backendApiFlow":  {
@@ -10,12 +10,12 @@
                            "reportNames":  [
                                                "北陡镇2023年下半年度村级设施考核报告（正文）.docx"
                                            ],
-                           "datasetHash":  "107a6041d93f637c854877dca8a79d8e193112e19d3e8e44fad82d849ee4d235",
+                           "datasetHash":  "49ed1a76882f662d30133bc420ce9ee5ca6ebfbc6802556c25a59d7d40c661a2",
                            "recordIds":  [
-                                             "ed513204-2721-4223-a31d-0afdc76262c6"
+                                             "8584de42-fd36-404b-afb7-9a5efaa69ace"
                                          ],
                            "indicatorVersionIds":  [
-                                                       "a37fd380-7f50-494e-9c35-ce1f20dd1317"
+                                                       "9923c22c-2f8a-4db1-81d1-b4c1eb3764c3"
                                                    ],
                            "reportVersions":  [
                                                   1
@@ -23,6 +23,10 @@
                            "repeatedReportVersions":  [
                                                           2
                                                       ],
+                           "agentRunId":  "7e4221ba-bfc6-49d6-8cd0-3d127eba1aa4",
+                           "agentAccepted":  true,
+                           "agentConfidence":  0.64,
+                           "taskAgentRunId":  "ece24ab8-506e-4eea-afe9-5cff624d4b34",
                            "scoreCount":  3,
                            "surveyCount":  4,
                            "waterQualityCount":  1,
@@ -38,7 +42,7 @@
                                                "赤溪镇2023年下半年度村级设施考核报告（正文）.docx",
                                                "项目2023年下半年度村级设施考核报告（正文）.docx"
                                            ],
-                           "caseCount":  27,
+                           "caseCount":  29,
                            "passed":  true
                        },
     "reportQuality":  {

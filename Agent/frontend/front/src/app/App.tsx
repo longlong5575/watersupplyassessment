@@ -129,14 +129,7 @@ function authHeaders(): HeadersInit {
 
 const TOWNS = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "广海镇", "沙堆镇", "古井镇", "潮连镇", "新会区", "双水镇", "崖门镇", "司前镇", "大泽镇", "三江镇", "罗坑镇", "田头镇", "睦洲镇"];
 
-const HISTORY_REPORTS: Report[] = [
-  { id: "1", name: "北陡镇2023年下半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年下半年度", status: "completed", size: "1.2 MB", createdAt: "2024-01-15 14:32" },
-  { id: "2", name: "白沙镇2023年下半年度村级设施考核报告（正文）", town: "白沙镇", period: "2023年下半年度", status: "completed", size: "1.1 MB", createdAt: "2024-01-15 14:32" },
-  { id: "3", name: "大江镇2023年下半年度村级设施考核报告（正文）", town: "大江镇", period: "2023年下半年度", status: "completed", size: "1.3 MB", createdAt: "2024-01-15 14:32" },
-  { id: "4", name: "赤溪镇2023年下半年度村级设施考核报告（正文）", town: "赤溪镇", period: "2023年下半年度", status: "completed", size: "0.9 MB", createdAt: "2024-01-15 14:32" },
-  { id: "5", name: "汇总报告：2023年下半年度绩效考核综合报告", town: "全区汇总", period: "2023年下半年度", status: "completed", size: "4.8 MB", createdAt: "2024-01-15 15:05" },
-  { id: "6", name: "北陡镇2023年上半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年上半年度", status: "completed", size: "1.1 MB", createdAt: "2023-08-10 09:14" },
-];
+const HISTORY_REPORTS: Report[] = [];
 
 interface ScoreItem {
   name: string;
@@ -694,6 +687,9 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
 
 function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Report[] }) {
   const recent = reports.slice(0, 4);
+  const completedReports = reports.filter(report => report.status === "completed");
+  const coveredTowns = new Set(completedReports.map(report => report.town).filter(town => town && !town.includes("汇总")));
+  const latestCreatedAt = completedReports[0]?.createdAt?.slice(0, 10) ?? "暂无";
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="生成绩效考核报告" breadcrumbs={["生成报告"]} />
@@ -735,9 +731,9 @@ function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Repor
         {/* Stats row */}
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "累计生成报告", value: "142", unit: "份", icon: FileCheck },
-            { label: "覆盖镇街", value: "17", unit: "个", icon: BarChart2 },
-            { label: "最近生成", value: "2024-01-15", unit: "", icon: Clock },
+            { label: "累计生成报告", value: String(completedReports.length), unit: "份", icon: FileCheck },
+            { label: "覆盖镇街", value: String(coveredTowns.size), unit: "个", icon: BarChart2 },
+            { label: "最近生成", value: latestCreatedAt, unit: "", icon: Clock },
           ].map(({ label, value, unit, icon: Icon }) => (
             <div key={label} className="bg-card border border-border rounded-lg px-5 py-4 flex items-center gap-4">
               <div className="w-9 h-9 rounded flex items-center justify-center" style={{ background: "var(--secondary)" }}>
@@ -772,6 +768,13 @@ function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Repor
               </tr>
             </thead>
             <tbody>
+              {recent.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-muted-foreground">
+                    暂无已生成报告
+                  </td>
+                </tr>
+              )}
               {recent.map((r, i) => (
                 <tr key={r.id} className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors ${i % 2 === 0 ? "" : ""}`}>
                   <td className="px-6 py-3 text-foreground max-w-xs">
@@ -1370,7 +1373,7 @@ function Row({ label, value, mono, valueClass, extra }: { label: string; value: 
 
 // ─── Page 4: Progress ─────────────────────────────────────────────────────────
 
-function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles, methodText, selectedTowns, outputSelected, reportPeriod }: {
+function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles, methodText, selectedTowns, outputSelected, reportPeriod, projectId }: {
   onNav: (p: Page) => void;
   onStart: () => void;
   onReportsReady: (reports: Report[]) => void;
@@ -1380,6 +1383,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
   selectedTowns: string[];
   outputSelected: Set<string>;
   reportPeriod: string;
+  projectId: string;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
   const calcMethodLabel = hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法";
@@ -1411,6 +1415,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
           headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({
             source: dataSource,
+            projectId,
             period: reportPeriod,
             townNames: selectedTowns,
             methodText,
@@ -3393,9 +3398,12 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page: MobileData ─────────────────────────────────────────────────────────
 
-function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
+function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSelectedTowns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
   onNav: (p: Page) => void;
   towns: TownSurvey[];
+  cities: CityOption[];
+  projectId: string;
+  setProjectId: React.Dispatch<React.SetStateAction<string>>;
   setSelectedTowns: React.Dispatch<React.SetStateAction<string[]>>;
   methodFiles: File[];
   setMethodFiles: React.Dispatch<React.SetStateAction<File[]>>;
@@ -3409,13 +3417,21 @@ function MobileDataPage({ onNav, towns, setSelectedTowns, methodFiles, setMethod
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const methodFileRef = useRef<HTMLInputElement>(null);
 
-  const visibleTowns = towns.filter(t => t.status === "completed" && !removedTowns.has(t.name));
-  const canProceed = visibleTowns.length > 0 && reportPeriod.trim().length > 0;
+  const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
+  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && reportPeriod.trim().length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="使用数据看板数据" breadcrumbs={["生成报告", "使用数据看板数据"]} />
       <div className="px-8 py-6 max-w-3xl space-y-5">
+
+        <div className="bg-card border border-border rounded-lg px-6 py-4">
+          <label className="block text-sm font-semibold text-foreground mb-2">报告所属项目</label>
+          <select value={projectId} onChange={event => { setProjectId(event.target.value); setRemovedTowns(new Set()); }} className="w-full border border-border rounded px-3 py-2 text-sm bg-background">
+            <option value="">请选择项目</option>
+            {cities.map(city => <option key={city.id} value={city.id}>{city.name}</option>)}
+          </select>
+        </div>
 
         {/* Data overview */}
         <div className="bg-card border border-border rounded-lg">
@@ -3589,6 +3605,7 @@ export default function App() {
   const [towns, setTowns] = useState<TownSurvey[]>(DASHBOARD_TOWNS.map(t => ({ ...t, surveys: t.surveys.map(s => ({ ...s })) })));
   const [cities, setCities] = useState<CityOption[]>([]);
   const [dashboardCityId, setDashboardCityId] = useState("");
+  const [reportProjectId, setReportProjectId] = useState("");
   const [dashboardTownId, setDashboardTownId] = useState("");
   const [dashboardOverview, setDashboardOverview] = useState<DashboardOverview | null>(null);
   const [dataSource, setDataSource] = useState<"upload" | "mobile">("upload");
@@ -3613,6 +3630,7 @@ export default function App() {
         const response = await fetch(`${API_BASE_URL}/mobile/projects`);
         const data = response.ok ? await response.json() : { items: [] };
         if (!cancelled && Array.isArray(data.items)) setCities(data.items);
+        if (!cancelled && Array.isArray(data.items) && data.items.length) setReportProjectId(current => current || data.items[0].id);
       } catch (error) {
         console.warn("City sync failed", error);
       }
@@ -3684,6 +3702,9 @@ export default function App() {
         <MobileDataPage
           onNav={(p) => { if (p === "confirm") setDataSource("mobile"); setPage(p); }}
           towns={towns}
+          cities={cities}
+          projectId={reportProjectId}
+          setProjectId={setReportProjectId}
           setSelectedTowns={setSelectedTowns}
           methodFiles={methodFiles}
           setMethodFiles={setMethodFiles}
@@ -3750,6 +3771,7 @@ export default function App() {
           selectedTowns={confirmedTowns}
           outputSelected={outputSelected}
           reportPeriod={reportPeriod}
+          projectId={reportProjectId}
         />
       );
       case "result": return (

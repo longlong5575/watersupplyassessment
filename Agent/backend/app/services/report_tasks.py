@@ -1,6 +1,7 @@
 import shutil
 import traceback
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,6 +11,428 @@ from app.core.config import settings
 from app.models import AssessmentCycle, AssessmentRecord, Attachment, Report, ReportTask, SurveyRecord, Town, WaterQualityRecord
 from app.models.entities import utcnow
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
+
+
+REPORT_TYPE_LABELS = {
+    "town_plant": "镇街污水处理厂",
+    "town_network": "镇街污水收集管网",
+    "rural_treatment": "农村污水处理设施",
+}
+STATUS_LABELS = {
+    "reviewed": "已复核",
+    "locked": "已锁定",
+    "submitted": "已提交",
+    "draft": "草稿",
+}
+
+PROJECT_REPORT_PROFILES = {
+    "郁南项目": {
+        "shortName": "郁南",
+        "titleSuffix": "镇村污水处理设施绩效考核报告",
+        "basis": "依据《PPP项目合同》、补充协议及郁南项目镇村考核报告确定的考核频次、考核对象、评分标准和水质限值执行。",
+        "methods": ["现场检查", "查阅资料", "问卷调查（村级考核有）", "水质检测", "评分复核"],
+        "waterStandard": "镇级污水处理设施出水执行城镇一级A及广东省地方标准较严值；农村生活污水处理设施执行广东省《农村生活污水处理排放标准》（DB44/2208-2019）。",
+        "waterRows": [
+            ["镇级污水厂及管网", "CODCr", "40", "mg/L"],
+            ["镇级污水厂及管网", "NH3-N", "5（8）", "mg/L"],
+            ["镇级污水厂及管网", "TP", "0.5", "mg/L"],
+            ["农村污水处理设施", "CODCr", "60", "mg/L"],
+            ["农村污水处理设施", "NH3-N", "8（15）", "mg/L"],
+            ["农村污水处理设施", "TP", "1", "mg/L"],
+        ],
+        "hasSurvey": True,
+    },
+    "茂南项目": {
+        "shortName": "茂南",
+        "titleSuffix": "城镇设施绩效考核报告",
+        "basis": "依据茂南区水质净化处理设施全区捆绑PPP项目城镇设施绩效考核报告口径，对水质净化厂及配套管网分别开展周期绩效考核。",
+        "methods": ["现场检查", "查阅资料", "水质检测", "评分复核"],
+        "waterStandard": "城镇污水处理设施出水执行《城镇污水处理厂污染物排放标准》一级A标准及广东省《水污染物排放限值》较严值。",
+        "waterRows": [
+            ["城镇污水处理设施", "CODCr", "40", "mg/L"],
+            ["城镇污水处理设施", "NH3-N", "5（8）", "mg/L"],
+            ["城镇污水处理设施", "TP", "0.5", "mg/L"],
+        ],
+        "hasSurvey": False,
+    },
+}
+
+
+def _set_cell_text(cell, value: Any, *, bold: bool = False) -> None:
+    from docx.shared import Pt
+
+    text = "" if value is None else str(value)
+    cell.text = text
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            run.font.name = "宋体"
+            run.font.size = Pt(9)
+            run.bold = bold
+
+
+def _prepare_document(title: str):
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
+
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Cm(2.5)
+    section.bottom_margin = Cm(2.5)
+    section.left_margin = Cm(2.6)
+    section.right_margin = Cm(2.4)
+    normal = document.styles["Normal"]
+    normal.font.name = "宋体"
+    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    normal.font.size = Pt(10.5)
+    heading = document.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = heading.add_run(title)
+    run.bold = True
+    run.font.name = "黑体"
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
+    run.font.size = Pt(18)
+    return document
+
+
+def _add_assessment_object(document, town_data: dict[str, Any], records: list[dict[str, Any]]) -> None:
+    section_code = (town_data.get("reportTemplate") or {}).get("assessmentObjectSection") or town_data.get("chapterCode") or "1"
+    document.add_heading(f"{section_code} 考核对象", level=1)
+    objects = town_data.get("assessmentObject") or {}
+    for facility_type in town_data.get("assessmentTargets") or []:
+        item = objects.get(facility_type) or {}
+        document.add_heading(item.get("title") or REPORT_TYPE_LABELS.get(facility_type, facility_type), level=2)
+        document.add_paragraph(item.get("description") or "本次考核对象以系统项目目录及经复核的现场资料为准。")
+
+    villages: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if record.get("villageId"):
+            villages[record["villageId"]] = record
+    if villages:
+        document.add_heading("农村设施点清单", level=2)
+        table = document.add_table(rows=1, cols=5)
+        table.style = "Table Grid"
+        for cell, value in zip(table.rows[0].cells, ["序号", "行政村", "设施点", "章节号", "考核对象"]):
+            _set_cell_text(cell, value, bold=True)
+        for index, record in enumerate(sorted(villages.values(), key=lambda item: (item.get("villageChapterCode") or "", item.get("village") or "")), 1):
+            row = table.add_row().cells
+            obj = record.get("villageAssessmentObject") or {}
+            for cell, value in zip(row, [index, record.get("administrativeVillage"), record.get("village"), record.get("villageChapterCode"), obj.get("title") or obj.get("description")]):
+                _set_cell_text(cell, value)
+
+
+def _add_paragraph(document, text: str, *, bold_prefix: str | None = None) -> None:
+    from docx.shared import Pt
+
+    paragraph = document.add_paragraph()
+    if bold_prefix and text.startswith(bold_prefix):
+        run = paragraph.add_run(bold_prefix)
+        run.bold = True
+        run.font.name = "宋体"
+        run.font.size = Pt(10.5)
+        text = text[len(bold_prefix):]
+    run = paragraph.add_run(text)
+    run.font.name = "宋体"
+    run.font.size = Pt(10.5)
+
+
+def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
+    table = document.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    for cell, value in zip(table.rows[0].cells, headers):
+        _set_cell_text(cell, value, bold=True)
+    for row_values in rows:
+        row = table.add_row().cells
+        for cell, value in zip(row, row_values):
+            _set_cell_text(cell, value)
+
+
+def _facility_types(records: list[dict[str, Any]]) -> list[str]:
+    order = ["town_plant", "town_network", "rural_treatment"]
+    present = {record.get("facilityType") or record.get("rawFacilityType") for record in records}
+    return [item for item in order if item in present]
+
+
+def _record_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for index, record in enumerate(records, 1):
+        raw_type = record.get("facilityType") or record.get("rawFacilityType")
+        rows.append([
+            index,
+            REPORT_TYPE_LABELS.get(raw_type, raw_type or "-"),
+            record.get("administrativeVillage") or "-",
+            record.get("village") or record.get("town") or "-",
+            STATUS_LABELS.get(record.get("status"), record.get("status") or "-"),
+            f"{float(record.get('totalScore') or 0):.2f}",
+        ])
+    return rows
+
+
+def _deduction_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        for score in record.get("scores") or []:
+            if float(score.get("deduction") or 0) <= 0:
+                continue
+            rows.append([
+                len(rows) + 1,
+                record.get("village") or record.get("town") or "-",
+                score.get("indicatorName") or "-",
+                score.get("indicatorFullScore") or "-",
+                score.get("deduction") or "0",
+                score.get("reason") or score.get("deductionOptionName") or "-",
+            ])
+    return rows
+
+
+def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        for item in record.get("waterQuality") or []:
+            payload = item.get("payload") or {}
+            rows.append([
+                len(rows) + 1,
+                record.get("village") or record.get("town") or "-",
+                payload.get("sampleTime") or item.get("sampledAt") or "-",
+                payload.get("codValue") or "-",
+                payload.get("codLimit") or "-",
+                payload.get("nh3nValue") or "-",
+                payload.get("nh3nLimit") or "-",
+                payload.get("tpValue") or "-",
+                payload.get("tpLimit") or "-",
+                "达标" if (item.get("conclusion") or payload.get("conclusion")) == "qualified" else "不达标" if (item.get("conclusion") or payload.get("conclusion")) == "unqualified" else "待判定",
+            ])
+    return rows
+
+
+def _survey_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        for item in record.get("surveys") or []:
+            rows.append([
+                len(rows) + 1,
+                record.get("village") or "-",
+                item.get("surveyType") or "-",
+                item.get("respondent") or "-",
+                item.get("score") if item.get("score") is not None else "-",
+            ])
+    return rows
+
+
+def _attachment_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        for item in record.get("attachments") or []:
+            rows.append([
+                len(rows) + 1,
+                record.get("village") or record.get("town") or "-",
+                item.get("filename") or "-",
+                item.get("scoreId") or "-",
+                item.get("deductionOptionId") or "-",
+                item.get("size") or 0,
+            ])
+    return rows
+
+
+def _accepted_agent_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        for item in record.get("agentRuns") or []:
+            output = item.get("output") or {}
+            rows.append([
+                len(rows) + 1,
+                record.get("village") or record.get("town") or "-",
+                item.get("capability") or "-",
+                f"{float(item.get('confidence') or 0):.2f}",
+                output.get("summary") or "-",
+            ])
+    return rows
+
+
+def _add_title_and_preface(document, *, title: str, project_name: str, cycle_name: str, town_name: str, profile: dict[str, Any]) -> None:
+    _add_paragraph(document, f"项目名称：{project_name}")
+    _add_paragraph(document, f"考核周期：{cycle_name}")
+    _add_paragraph(document, f"考核镇街：{town_name}")
+    _add_paragraph(document, f"报告类型：{profile['titleSuffix']}")
+    document.add_paragraph("")
+    document.add_heading("一、考核概况", level=1)
+    _add_paragraph(document, profile["basis"])
+    _add_paragraph(document, f"本报告根据系统采集、后台复核和锁定后的数据生成，标题、章节和表格结构参照{profile['shortName']}示例报告整理。")
+    document.add_heading("1.1 考核方法", level=2)
+    _add_simple_table(document, ["序号", "工作内容"], [[index, item] for index, item in enumerate(profile["methods"], 1)])
+
+
+def _add_project_assessment_object(document, town_data: dict[str, Any], records: list[dict[str, Any]], *, heading_prefix: str) -> None:
+    section_code = (town_data.get("reportTemplate") or {}).get("assessmentObjectSection") or town_data.get("chapterCode") or heading_prefix
+    document.add_heading(f"{section_code} 考核对象", level=1)
+    objects = town_data.get("assessmentObject") or {}
+    facility_rows = []
+    targets = town_data.get("assessmentTargets") or _facility_types(records)
+    for index, facility_type in enumerate(targets, 1):
+        item = objects.get(facility_type) or {}
+        facility_rows.append([
+            index,
+            REPORT_TYPE_LABELS.get(facility_type, facility_type),
+            item.get("title") or REPORT_TYPE_LABELS.get(facility_type, facility_type),
+            item.get("description") or "以系统项目目录及经复核的现场资料为准。",
+        ])
+    _add_simple_table(document, ["序号", "类别", "考核对象", "基本情况"], facility_rows)
+
+    village_records = [record for record in records if record.get("villageId")]
+    if village_records:
+        rows = []
+        for index, record in enumerate(sorted(village_records, key=lambda item: (item.get("villageChapterCode") or "", item.get("village") or "")), 1):
+            obj = record.get("villageAssessmentObject") or {}
+            rows.append([
+                index,
+                record.get("administrativeVillage") or "-",
+                record.get("village") or "-",
+                record.get("villageChapterCode") or "-",
+                obj.get("title") or obj.get("description") or "-",
+            ])
+        document.add_heading("农村设施点清单", level=2)
+        _add_simple_table(document, ["序号", "行政村", "自然村/设施点", "章节号", "考核对象"], rows)
+
+
+def _add_project_results(document, records: list[dict[str, Any]], profile: dict[str, Any]) -> None:
+    document.add_heading("三、考核结果", level=1)
+    _add_simple_table(document, ["序号", "考核类型", "行政村", "设施点", "状态", "得分"], _record_score_rows(records))
+
+    document.add_heading("3.1 扣分明细", level=2)
+    deductions = _deduction_rows(records)
+    if deductions:
+        _add_simple_table(document, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"], deductions)
+    else:
+        _add_paragraph(document, "本次已复核数据未记录扣分项。")
+
+    if profile.get("hasSurvey"):
+        document.add_heading("3.2 公众调查情况", level=2)
+        rows = _survey_rows(records)
+        if rows:
+            _add_simple_table(document, ["序号", "设施点", "调查类型", "对象", "得分"], rows)
+        else:
+            _add_paragraph(document, "本次系统数据未记录公众调查表；农村设施正式报告可在补充问卷后自动纳入。")
+
+    document.add_heading("3.3 水质抽检情况", level=2)
+    rows = _water_quality_rows(records)
+    if rows:
+        _add_simple_table(document, ["序号", "设施点", "取样时间", "CODCr实测", "CODCr限值", "NH3-N实测", "NH3-N限值", "TP实测", "TP限值", "结论"], rows)
+    else:
+        _add_paragraph(document, "本次系统数据未记录水质抽检实测值；报告附录仍列示对应项目水质限值。")
+
+    document.add_heading("3.4 证据附件目录", level=2)
+    attachment_rows = _attachment_rows(records)
+    if attachment_rows:
+        _add_simple_table(document, ["序号", "设施点", "文件名", "评分记录", "扣分项", "大小"], attachment_rows)
+    else:
+        _add_paragraph(document, "本次系统数据未记录现场照片或附件。")
+
+    document.add_heading("3.5 Agent辅助校验", level=2)
+    agent_rows = _accepted_agent_rows(records)
+    if agent_rows:
+        _add_simple_table(document, ["序号", "设施点", "能力", "置信度", "已确认摘要"], agent_rows)
+    else:
+        _add_paragraph(document, "本次报告未采用已确认的 Agent 辅助段落；分数、扣分和结论均来自后台确定性数据。")
+
+
+def _add_project_conclusion_and_appendix(document, records: list[dict[str, Any]], profile: dict[str, Any]) -> None:
+    scores = [float(item.get("totalScore") or 0) for item in records]
+    average = sum(scores) / len(scores) if scores else 0
+    document.add_heading("四、结论与建议", level=1)
+    _add_paragraph(document, f"本次纳入报告的复核记录共{len(records)}条，平均得分为{average:.2f}分。最终结论以主管部门复核确认结果为准。")
+    deductions = _deduction_rows(records)
+    if deductions:
+        _add_paragraph(document, f"本期共形成{len(deductions)}条扣分明细，建议后续整改台账按评分条目、现场佐证和复核意见逐项闭环。")
+    else:
+        _add_paragraph(document, "本期未形成扣分明细，建议继续保持运行维护资料、现场巡查和水质检测记录完整归档。")
+
+    document.add_heading("附录A 水质评价限值", level=1)
+    _add_paragraph(document, profile["waterStandard"])
+    _add_simple_table(document, ["序号", "对象", "指标", "限值", "单位"], [[index, *row] for index, row in enumerate(profile["waterRows"], 1)])
+
+
+def _generate_town_document(project_name: str, cycle_name: str, town_data: dict[str, Any], records: list[dict[str, Any]]):
+    profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
+    town_name = town_data["town"]
+    title = f"{project_name}{town_name}{cycle_name}{profile['titleSuffix']}"
+    document = _prepare_document(title)
+    _add_title_and_preface(document, title=title, project_name=project_name, cycle_name=cycle_name, town_name=town_name, profile=profile)
+    _add_project_assessment_object(document, town_data, records, heading_prefix="二")
+    _add_project_results(document, records, profile)
+    _add_project_conclusion_and_appendix(document, records, profile)
+    return document
+
+
+def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dict[str, Any]):
+    profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
+    document = _prepare_document(f"{project_name}{cycle_name}{profile['titleSuffix']}汇总报告")
+    _add_paragraph(document, f"项目名称：{project_name}")
+    _add_paragraph(document, f"考核周期：{cycle_name}")
+    document.add_heading("一、考核范围", level=1)
+    _add_paragraph(document, profile["basis"])
+    document.add_heading("二、考核对象与结果汇总", level=1)
+    rows = []
+    for index, town in enumerate(snapshot.get("towns") or [], 1):
+        records = [item for item in snapshot.get("records") or [] if item.get("town") == town["town"]]
+        scores = [float(item.get("totalScore") or 0) for item in records]
+        types = "、".join(REPORT_TYPE_LABELS.get(item, item) for item in (town.get("assessmentTargets") or _facility_types(records)))
+        rows.append([index, town["town"], town.get("chapterCode") or "-", types, len(records), f"{(sum(scores) / len(scores) if scores else 0):.2f}"])
+    _add_simple_table(document, ["序号", "镇街", "章节号", "考核对象", "记录数", "平均得分"], rows)
+    document.add_heading("附录A 水质评价限值", level=1)
+    _add_paragraph(document, profile["waterStandard"])
+    _add_simple_table(document, ["序号", "对象", "指标", "限值", "单位"], [[index, *row] for index, row in enumerate(profile["waterRows"], 1)])
+    return document
+
+
+def _add_record_results(document, records: list[dict[str, Any]]) -> None:
+    document.add_heading("考核结果", level=1)
+    summary = document.add_table(rows=1, cols=6)
+    summary.style = "Table Grid"
+    for cell, value in zip(summary.rows[0].cells, ["序号", "考核类型", "行政村", "设施点", "状态", "得分"]):
+        _set_cell_text(cell, value, bold=True)
+    for index, record in enumerate(records, 1):
+        raw_type = record.get("facilityType") or record.get("rawFacilityType")
+        row = summary.add_row().cells
+        for cell, value in zip(row, [index, REPORT_TYPE_LABELS.get(raw_type, raw_type or "-"), record.get("administrativeVillage") or "-", record.get("village") or "-", record.get("status"), f"{float(record.get('totalScore') or 0):.2f}"]):
+            _set_cell_text(cell, value)
+
+    deductions = []
+    for record in records:
+        for score in record.get("scores") or []:
+            if float(score.get("deduction") or 0) > 0:
+                deductions.append((record, score))
+    document.add_heading("扣分明细", level=2)
+    if not deductions:
+        document.add_paragraph("本次已复核数据未记录扣分项。")
+        return
+    table = document.add_table(rows=1, cols=6)
+    table.style = "Table Grid"
+    for cell, value in zip(table.rows[0].cells, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"]):
+        _set_cell_text(cell, value, bold=True)
+    for index, (record, score) in enumerate(deductions, 1):
+        row = table.add_row().cells
+        for cell, value in zip(row, [index, record.get("village") or record.get("town"), score.get("indicatorName"), score.get("indicatorFullScore"), score.get("deduction"), score.get("reason") or score.get("deductionOptionName")]):
+            _set_cell_text(cell, value)
+
+
+def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Path:
+    output_dir = _storage_root() / "generated_reports" / "working" / task.id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    project_name = snapshot.get("projectName") or "项目"
+    cycle_name = snapshot.get("cycleName") or task.payload.get("period") or "本期"
+    for town_data in snapshot.get("towns") or []:
+        town_name = town_data["town"]
+        records = [item for item in snapshot.get("records") or [] if item.get("town") == town_name]
+        profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
+        document = _generate_town_document(project_name, cycle_name, town_data, records)
+        document.save(output_dir / f"{town_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}（正文）.docx")
+
+    if "summary" in task.payload.get("outputs", []):
+        profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
+        document = _generate_summary_document(project_name, cycle_name, snapshot)
+        document.save(output_dir / f"{project_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}汇总报告.docx")
+    return output_dir
 
 
 def _append_database_summary(session: Session, paths: list[Path], records: list[AssessmentRecord]) -> None:
@@ -67,8 +490,6 @@ def _versioned_report_path(task_id: str, version: int, source: Path) -> Path:
 
 
 def run_report_task(task_id: str) -> None:
-    from app.services.reporting import generate_official_reports
-
     with SessionLocal() as session:
         task = session.get(ReportTask, task_id)
         if task is None:
@@ -77,48 +498,55 @@ def run_report_task(task_id: str) -> None:
         session.commit()
         try:
             town_names = set(task.payload.get("townNames", []))
+            project_id = task.payload.get("projectId")
             cycle = session.get(AssessmentCycle, task.cycle_id) if task.cycle_id else None
             record_query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
+            if project_id:
+                record_query = record_query.where(AssessmentRecord.city_id == project_id)
             if task.cycle_id:
                 record_query = record_query.where(AssessmentRecord.cycle_id == task.cycle_id)
             records = list(session.scalars(record_query))
             if town_names:
                 records = [record for record in records if record.town.name in town_names]
-            snapshot = build_report_dataset(session, cycle=cycle, town_names=town_names or None)
+            snapshot = build_report_dataset(session, cycle=cycle, town_names=town_names or None, city_id=project_id)
             if task.payload.get("source") == "dashboard":
                 validate_report_dataset(snapshot)
             task.data_snapshot = snapshot
             task.dataset_hash = snapshot.get("hash")
             session.commit()
             include_summary = "summary" in task.payload.get("outputs", [])
-            output_dir = generate_official_reports(town_names=town_names or None, include_summary=include_summary)
+            output_dir = _generate_project_reports(task, snapshot)
             task.progress = 80
             names = town_names
             output_paths = []
             for path in output_dir.glob("*.docx"):
-                report_town = path.name.split("2023")[0]
-                is_summary = report_town in {"台山市", "项目"}
+                report_town = path.stem.split("-", 1)[0]
+                is_summary = path.stem.endswith("汇总报告")
                 if names and report_town not in names and not (include_summary and is_summary):
                     continue
                 output_paths.append(path)
             if not output_paths:
                 raise RuntimeError("Official report generator did not produce any matching DOCX files.")
-            _append_database_summary(session, output_paths, records)
             task.progress = 90
             for path in output_paths:
-                report_town = path.name.split("2023")[0]
-                town = session.scalar(select(Town).where(Town.name == report_town))
+                report_town = path.stem.split("-", 1)[0]
+                town_query = select(Town).where(Town.name == report_town)
+                if project_id:
+                    town_query = town_query.where(Town.city_id == project_id)
+                town = session.scalar(town_query)
                 town_id = town.id if town else None
                 version = _next_report_version(session, name=path.name, cycle_id=task.cycle_id, town_id=town_id)
                 final_path = _versioned_report_path(task.id, version, path)
                 shutil.copy2(path, final_path)
                 town_records = [item for item in snapshot.get("records", []) if item.get("town") == report_town]
-                if report_town in {"台山市", "项目"}:
+                if path.stem.endswith("汇总报告"):
                     town_records = snapshot.get("records", [])
                 report_snapshot = {
                     "hash": task.dataset_hash,
                     "cycleId": snapshot.get("cycleId"),
                     "cycleName": snapshot.get("cycleName"),
+                    "projectId": snapshot.get("projectId"),
+                    "projectName": snapshot.get("projectName"),
                     "town": report_town,
                     "recordIds": [item["id"] for item in town_records],
                     "indicatorVersionIds": sorted({item["indicatorVersionId"] for item in town_records if item.get("indicatorVersionId")}),

@@ -1,38 +1,24 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion, ScoreSourceMapping, Town, User, Village
+from app.services.project_catalog import PROJECT_CATALOG
 from app.services.standard_catalog import item_score_total, load_standard_groups
-
-
-PROJECTS = [
-    {
-        "name": "郁南项目",
-        "cycle": "2026年第2季度",
-        "standard": "郁南项目农村生活污水绩效考核标准",
-        "towns": {
-            "都城镇": ["富窝村", "承平村", "夏袭村"],
-            "平台镇": ["古同村", "大地村", "平台村"],
-            "桂圩镇": ["桂圩村", "罗顺村", "勿坦村"],
-        },
-    },
-    {
-        "name": "茂南项目",
-        "cycle": "2026年第2季度",
-        "standard": "茂南项目农村生活污水绩效考核标准",
-        "towns": {
-            "金塘镇": ["牙象村", "丰田村", "白土村"],
-            "鳌头镇": ["文运村", "彰教山村", "飞马村"],
-            "镇盛镇": ["荷榭村", "联唐村", "斜岭村"],
-        },
-    },
-]
 
 
 def _option_value(option: dict) -> float:
     if option.get("type") == "range":
         return float(option.get("max") or option.get("min") or 0)
     return float(option.get("value") or option.get("max") or option.get("min") or 0)
+
+
+def _option_meta(option: dict) -> dict:
+    meta = {}
+    if option.get("unit"):
+        meta["unit"] = option["unit"]
+    if option.get("maxInstances"):
+        meta["maxInstances"] = option["maxInstances"]
+    return meta
 
 
 def _clean_standard_text(*values: str | None, fallback: str = "扣分项") -> str:
@@ -66,25 +52,97 @@ def _survey_mapping_for(level2_name: str, item_name: str) -> tuple[str, dict] | 
     return None
 
 
-def _seed_standard_groups(session: Session, version: IndicatorVersion) -> None:
-    enabled_level3_count = len(
-        list(
-            session.scalars(
-                select(Indicator).where(Indicator.version_id == version.id, Indicator.level == 3, Indicator.enabled.is_(True))
-            )
+def _seed_standard_groups(session: Session, version: IndicatorVersion, project_key: str) -> None:
+    standards = load_standard_groups(project_key)
+    expected_option_counts = {
+        facility_type: sum(
+            len(item.get("options", []))
+            for level1 in groups
+            for level2 in level1.get("children", [])
+            for item in level2.get("items", [])
         )
+        for facility_type, groups in standards.items()
+    }
+    expected_unit_counts = {
+        facility_type: sum(
+            1
+            for level1 in groups
+            for level2 in level1.get("children", [])
+            for item in level2.get("items", [])
+            for option in item.get("options", [])
+            if option.get("unit")
+        )
+        for facility_type, groups in standards.items()
+    }
+    expected_totals = {facility_type: round(item_score_total(groups), 2) for facility_type, groups in standards.items()}
+    existing_types = set(
+        session.scalars(
+            select(Indicator.facility_type).where(
+                Indicator.version_id == version.id,
+                Indicator.level == 3,
+                Indicator.enabled.is_(True),
+            )
+        ).all()
     )
-    if enabled_level3_count >= 40:
-        return
+    if existing_types == set(standards):
+        totals = {
+            facility_type: sum(
+                float(item.full_score or 0)
+                for item in session.scalars(
+                    select(Indicator).where(
+                        Indicator.version_id == version.id,
+                        Indicator.level == 3,
+                        Indicator.facility_type == facility_type,
+                        Indicator.enabled.is_(True),
+                    )
+                ).all()
+            )
+            for facility_type in existing_types
+        }
+        totals = {facility_type: round(total, 2) for facility_type, total in totals.items()}
+        actual_option_counts = {
+            facility_type: int(
+                session.scalar(
+                    select(func.count(DeductionOption.id))
+                    .join(Indicator, DeductionOption.indicator_id == Indicator.id)
+                    .where(
+                        Indicator.version_id == version.id,
+                        Indicator.level == 3,
+                        Indicator.facility_type == facility_type,
+                        Indicator.enabled.is_(True),
+                    )
+                )
+                or 0
+            )
+            for facility_type in existing_types
+        }
+        actual_unit_counts = {
+            facility_type: sum(
+                1
+                for item in session.scalars(
+                    select(DeductionOption)
+                    .join(Indicator, DeductionOption.indicator_id == Indicator.id)
+                    .where(
+                        Indicator.version_id == version.id,
+                        Indicator.level == 3,
+                        Indicator.facility_type == facility_type,
+                        Indicator.enabled.is_(True),
+                    )
+                ).all()
+                if isinstance(item.meta, dict) and item.meta.get("unit")
+            )
+            for facility_type in existing_types
+        }
+        if totals == expected_totals and actual_option_counts == expected_option_counts and actual_unit_counts == expected_unit_counts:
+            return
 
     for indicator in session.scalars(select(Indicator).where(Indicator.version_id == version.id)).all():
         indicator.enabled = False
     session.flush()
 
-    standards = load_standard_groups()
+    if not standards:
+        return
     for facility_type, groups in standards.items():
-        if round(item_score_total(groups), 2) != 100:
-            raise RuntimeError(f"{facility_type} scoring standard total must be 100")
         for level1_index, level1 in enumerate(groups, 1):
             level1_score = sum(float(item.get("maxScore") or 0) for level2 in level1.get("children", []) for item in level2.get("items", []))
             l1 = Indicator(
@@ -138,6 +196,7 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion) -> None:
                                 deduction_type=option.get("type") or "fixed",
                                 deduction_value=_option_value(option),
                                 requires_photo=_requires_photo(item),
+                                meta=_option_meta(option),
                             )
                         )
                     mapping = _survey_mapping_for(level2["name"], item["name"])
@@ -173,21 +232,54 @@ def _seed_project(session: Session, project: dict) -> None:
         version = IndicatorVersion(city_id=city.id, cycle_id=cycle.id, name=project["standard"])
         session.add(version)
         session.flush()
-    _seed_standard_groups(session, version)
+    for old_version in session.scalars(
+        select(IndicatorVersion).where(
+            IndicatorVersion.city_id == city.id,
+            IndicatorVersion.id != version.id,
+            IndicatorVersion.status == "published",
+        )
+    ).all():
+        old_version.status = "archived"
+    version.status = "published"
+    _seed_standard_groups(session, version, project["key"])
 
-    for town_name, villages in project["towns"].items():
+    active_town_names = {item["name"] for item in project["towns"]}
+    for stale_town in session.scalars(select(Town).where(Town.city_id == city.id, Town.name.not_in(active_town_names))).all():
+        stale_town.is_active = False
+
+    for town_index, town_data in enumerate(project["towns"], 1):
+        town_name = town_data["name"]
         town = session.scalar(select(Town).where(Town.city_id == city.id, Town.name == town_name))
         if town is None:
             town = Town(city_id=city.id, name=town_name)
             session.add(town)
             session.flush()
-        for village_name in villages:
-            if session.scalar(select(Village).where(Village.town_id == town.id, Village.name == village_name)) is None:
-                session.add(Village(town_id=town.id, name=village_name))
+        town.chapter_code = town_data.get("chapterCode")
+        town.assessment_targets = town_data.get("assessmentTargets", [])
+        town.assessment_object = town_data.get("assessmentObject", {})
+        town.report_template = town_data.get("reportTemplate", {})
+        town.sort_order = town_index
+        town.is_active = True
+
+        active_village_names = {item["name"] for item in town_data.get("villages", [])}
+        for stale_village in session.scalars(select(Village).where(Village.town_id == town.id, Village.name.not_in(active_village_names))).all():
+            stale_village.is_active = False
+        for village_index, village_data in enumerate(town_data.get("villages", []), 1):
+            village_name = village_data["name"]
+            village = session.scalar(select(Village).where(Village.town_id == town.id, Village.name == village_name))
+            if village is None:
+                village = Village(town_id=town.id, name=village_name)
+                session.add(village)
+            village.administrative_village = village_data.get("administrativeVillage")
+            village.chapter_code = village_data.get("chapterCode")
+            village.assessment_object = village_data.get("assessmentObject", {})
+            village.report_template = village_data.get("reportTemplate", {})
+            village.sort_order = village_index
+            village.is_active = True
 
 
 def seed_database(session: Session) -> None:
-    for project in PROJECTS:
+    for project in PROJECT_CATALOG:
         _seed_project(session, project)
 
     if session.scalar(select(User).where(User.username == "admin")) is None:

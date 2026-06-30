@@ -260,6 +260,15 @@ def main() -> None:
         all(item.get("version", 0) >= 1 and item.get("datasetHash") == task.get("datasetHash") and item.get("recordIds") for item in task.get("reports", [])),
         task.get("reports", []),
     )
+    task_agent = client.post(f"/api/agent/report-tasks/{task['id']}/analysis", headers=admin_headers)
+    require(cases, "Agent 报告语义校验结构化输出", task_agent.status_code == 200 and bool(task_agent.json()["output"].get("semanticChecks")), task_agent.text)
+    task_agent_payload = task_agent.json()
+    require(
+        cases,
+        "Agent 不参与分数金额主链路",
+        "不决定分数" in task_agent_payload["output"].get("boundaries", []) and "不决定金额" in task_agent_payload["output"].get("boundaries", []),
+        task_agent_payload,
+    )
     download_ok = 0
     for report in task.get("reports", []):
         response = client.get(f"/api/reports/{report['id']}/download")

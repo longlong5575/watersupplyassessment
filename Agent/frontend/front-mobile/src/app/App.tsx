@@ -22,7 +22,16 @@ type EntryStatus = "pending" | "no_deduction" | "has_deduction" | "incomplete";
 type SelectionType = "no_deduction" | "standard" | "custom";
 
 type CityOption = { id?: string; name: string; sub: string };
-type CycleOption = { id: string; name: string; status: string };
+type CycleOption = { id: string; name: string; status: string; backendId?: string };
+type AssessmentObjectInfo = { sectionCode?: string; title?: string; description?: string };
+type TownOption = {
+  id: string;
+  name: string;
+  chapterCode?: string;
+  assessmentTargets: PrimaryFacilityType[];
+  assessmentObject: Partial<Record<PrimaryFacilityType, AssessmentObjectInfo>>;
+};
+type VillageOption = { id: string; name: string; administrativeVillage?: string; chapterCode?: string; assessmentObject?: AssessmentObjectInfo };
 
 type AuthState = {
   token: string;
@@ -268,7 +277,7 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
 let TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
 let NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
 
-function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType }> }>) {
+function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType; unit?: string; maxInstances?: number }> }>) {
   const l1 = items.filter(item => item.level === 1);
   const l2 = items.filter(item => item.level === 2);
   const l3 = items.filter(item => item.level === 3);
@@ -292,7 +301,8 @@ function applyBackendStandards(type: "treatment" | "network", items: Array<{ id:
           value: option.deduction,
           min: option.type === "range" ? 0 : undefined,
           max: option.type === "range" ? option.deduction : undefined,
-          maxInstances: 1,
+          unit: option.unit || undefined,
+          maxInstances: option.maxInstances || undefined,
         })),
       })),
     })),
@@ -543,11 +553,10 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
 }
 
 function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
-  const [val, setVal] = useState("");
-  const [err, setErr] = useState("");
+  const [selectedId, setSelectedId] = useState("");
   const [cities, setCities] = useState<CityOption[]>([
-    { name: "郁南项目", sub: "郁南考核标准" },
-    { name: "茂南项目", sub: "茂南考核标准" },
+    { id: "yunan", name: "郁南项目", sub: "郁南考核标准" },
+    { id: "maonan", name: "茂南项目", sub: "茂南考核标准" },
   ]);
   useEffect(() => {
     fetch(`${API_BASE_URL}/mobile/projects`)
@@ -559,9 +568,7 @@ function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
       })
       .catch(() => undefined);
   }, []);
-  const filtered = val.trim()
-    ? cities.filter(c => c.name.includes(val.trim()))
-    : cities;
+  const selected = cities.find(city => city.id === selectedId);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -574,69 +581,37 @@ function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
         <p className="text-xs text-primary-foreground/55 mt-1">郁南和茂南分别使用各自的考核标准</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto px-4 py-5">
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">项目名称</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              value={val}
-              onChange={e => { setVal(e.target.value); setErr(""); }}
-              placeholder="请输入项目名称"
-              className="w-full pl-9 pr-9 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-            {val && (
-              <button onClick={() => setVal("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-          {err && (
-            <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />{err}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-            {val.trim() ? "搜索结果" : "当前项目"}
-          </p>
-          {filtered.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">未找到匹配项目</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {filtered.map(c => (
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">当前项目</p>
+          <div className="grid grid-cols-2 gap-2">
+              {cities.map(c => (
                 <button
-                  key={c.name}
-                  onClick={() => setVal(c.name)}
+                  key={c.id ?? c.name}
+                  onClick={() => setSelectedId(c.id ?? c.name)}
                   className={`flex items-center gap-3 px-3 py-3 rounded-lg border transition-colors text-left ${
-                    val === c.name ? "bg-primary/5 border-primary" : "bg-white border-border"
+                    selectedId === (c.id ?? c.name) ? "bg-primary/5 border-primary" : "bg-white border-border"
                   }`}
                 >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${val === c.name ? "bg-primary" : "bg-muted"}`}>
-                    <MapPin className={`w-4 h-4 ${val === c.name ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${selectedId === (c.id ?? c.name) ? "bg-primary" : "bg-muted"}`}>
+                    <MapPin className={`w-4 h-4 ${selectedId === (c.id ?? c.name) ? "text-primary-foreground" : "text-muted-foreground"}`} />
                   </div>
                   <div className="min-w-0">
-                    <div className={`text-sm font-medium truncate ${val === c.name ? "text-primary" : "text-foreground"}`}>{c.name}</div>
+                    <div className={`text-sm font-medium truncate ${selectedId === (c.id ?? c.name) ? "text-primary" : "text-foreground"}`}>{c.name}</div>
                     <div className="text-xs text-muted-foreground">{c.sub}</div>
                   </div>
+                  {selectedId === (c.id ?? c.name) && <Check className="w-4 h-4 text-primary shrink-0 ml-auto" />}
                 </button>
               ))}
             </div>
-          )}
         </div>
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
         <button
-          onClick={() => {
-            const name = val.trim();
-            if (!name) { setErr("请先选择项目"); return; }
-            const matched = cities.find(item => item.name === name);
-            onNext(matched ?? { name, sub: "手动输入" });
-          }}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+          onClick={() => selected && onNext(selected)}
+          disabled={!selected}
+          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
         >
           下一步 <ChevronRight className="w-4 h-4" />
         </button>
@@ -652,14 +627,50 @@ function formatCycleName(name: string): string {
   return legacyAnnual ? `${legacyAnnual[1]}年第2季度` : name;
 }
 
+function fixedCycleOptions(): CycleOption[] {
+  return [2024, 2025, 2026, 2027, 2028, 2029, 2030].flatMap(itemYear => [
+    { id: `fixed-${itemYear}-q1`, name: `${itemYear}年第1季度`, status: "固定选项" },
+    { id: `fixed-${itemYear}-q2`, name: `${itemYear}年第2季度`, status: "固定选项" },
+    { id: `fixed-${itemYear}-q3`, name: `${itemYear}年第3季度`, status: "固定选项" },
+    { id: `fixed-${itemYear}-q4`, name: `${itemYear}年第4季度`, status: "固定选项" },
+    { id: `fixed-${itemYear}-h1`, name: `${itemYear}年上半年度`, status: "固定选项" },
+    { id: `fixed-${itemYear}-h2`, name: `${itemYear}年下半年度`, status: "固定选项" },
+  ]);
+}
+
+const CYCLE_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
+const CYCLE_PERIODS = [
+  { id: "q1", label: "第1季度", suffix: "第1季度" },
+  { id: "q2", label: "第2季度", suffix: "第2季度" },
+  { id: "q3", label: "第3季度", suffix: "第3季度" },
+  { id: "q4", label: "第4季度", suffix: "第4季度" },
+  { id: "h1", label: "上半年度", suffix: "上半年度" },
+  { id: "h2", label: "下半年度", suffix: "下半年度" },
+];
+
+function cycleNameFromParts(year: number, periodId: string): string {
+  const period = CYCLE_PERIODS.find(item => item.id === periodId) ?? CYCLE_PERIODS[1];
+  return `${year}年${period.suffix}`;
+}
+
+function parseCycleNameParts(name: string): { year: number; periodId: string } | null {
+  const matched = name.match(/^(202[4-9]|2030)年(第[1-4]季度|上半年度|下半年度)$/);
+  if (!matched) return null;
+  const period = CYCLE_PERIODS.find(item => item.suffix === matched[2]);
+  return period ? { year: Number(matched[1]), periodId: period.id } : null;
+}
+
 function P0Cycle({ cityId, cityName, onBack, onNext }: {
   cityId?: string;
   cityName: string;
   onBack: () => void;
   onNext: (cycle: CycleOption) => void;
 }) {
-  const [cycles, setCycles] = useState<CycleOption[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const defaultCycles = fixedCycleOptions();
+  const [cycles, setCycles] = useState<CycleOption[]>(defaultCycles);
+  const initialYear = CYCLE_YEARS.includes(new Date().getFullYear()) ? new Date().getFullYear() : 2026;
+  const [selectedYear, setSelectedYear] = useState(initialYear);
+  const [selectedPeriodId, setSelectedPeriodId] = useState("q2");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -670,23 +681,39 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
     fetch(`${API_BASE_URL}/mobile/assessment-cycles${params}`)
       .then(response => response.ok ? response.json() : null)
       .then(data => {
-        const items = Array.isArray(data?.items) ? data.items : [];
-        const mapped = items.map((item: { id: string; name: string; status: string }) => ({
-          id: item.id,
-          name: formatCycleName(item.name),
-          status: item.status,
-        }));
+        const items: Array<{ id: string; name: string; status: string }> = Array.isArray(data?.items) ? data.items : [];
+        const backendByName = new Map(items.map((item: { id: string; name: string; status: string }) => [formatCycleName(item.name), item]));
+        const mapped = fixedCycleOptions().map(item => {
+          const backend = backendByName.get(item.name);
+          return backend
+            ? { ...item, status: backend.status === "active" ? "active" : backend.status, backendId: backend.id }
+            : item;
+        });
         setCycles(mapped);
-        setSelectedId(mapped[0]?.id ?? "");
+        const active = mapped.find(item => item.status === "active");
+        const target = active ?? mapped.find(item => item.name === `${initialYear}年第2季度`) ?? mapped[0];
+        const parsed = target ? parseCycleNameParts(target.name) : null;
+        if (parsed) {
+          setSelectedYear(parsed.year);
+          setSelectedPeriodId(parsed.periodId);
+        }
       })
       .catch(() => {
-        setError("批次加载失败，可稍后重试");
-        setCycles([]);
+        const fallback = fixedCycleOptions();
+        setError("后端暂时未连接，仍可先选择固定批次");
+        setCycles(fallback);
+        setSelectedYear(initialYear);
+        setSelectedPeriodId("q2");
       })
       .finally(() => setLoading(false));
-  }, [cityId]);
+  }, [cityId, initialYear]);
 
-  const selected = cycles.find(item => item.id === selectedId);
+  const selectedName = cycleNameFromParts(selectedYear, selectedPeriodId);
+  const selected = cycles.find(item => item.name === selectedName) ?? {
+    id: `fixed-${selectedYear}-${selectedPeriodId}`,
+    name: selectedName,
+    status: "固定选项",
+  };
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -696,32 +723,53 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
         </button>
         <div className="text-xs text-primary-foreground/55 mb-1">{cityName}</div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核季度</h1>
-        <p className="text-xs text-primary-foreground/55 mt-1">季度决定本次填报使用的评分标准版本</p>
+        <p className="text-xs text-primary-foreground/55 mt-1">选择年份季度或上/下半年度</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-        {loading && <div className="py-10 text-center text-sm text-muted-foreground">正在加载季度...</div>}
-        {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {!loading && !error && cycles.length === 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            当前项目暂无已配置季度，请先在后台配置季度。
+        {loading && <div className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-muted-foreground">正在同步后台批次...</div>}
+        {!loading && error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>}
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">年度</p>
+          <div className="grid grid-cols-4 gap-2">
+            {CYCLE_YEARS.map(year => (
+              <button
+                key={year}
+                onClick={() => setSelectedYear(year)}
+                className={`h-11 rounded-lg border text-sm font-semibold ${
+                  selectedYear === year ? "bg-primary/5 border-primary text-primary" : "bg-white border-border text-foreground"
+                }`}
+              >
+                {year}
+              </button>
+            ))}
           </div>
-        )}
-        {cycles.map(item => (
-          <button
-            key={item.id}
-            onClick={() => setSelectedId(item.id)}
-            className={`w-full px-4 py-4 rounded-xl border text-left flex items-center justify-between ${
-              selectedId === item.id ? "bg-primary/5 border-primary" : "bg-white border-border"
-            }`}
-          >
-            <div>
-              <div className={`text-sm font-semibold ${selectedId === item.id ? "text-primary" : "text-foreground"}`}>{item.name}</div>
-              <div className="text-xs text-muted-foreground mt-1">状态：{item.status}</div>
-            </div>
-            {selectedId === item.id && <CheckCircle className="w-5 h-5 text-primary" />}
-          </button>
-        ))}
+        </div>
+
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">季度</p>
+          <div className="grid grid-cols-2 gap-2">
+            {CYCLE_PERIODS.map(period => (
+              <button
+                key={period.id}
+                onClick={() => setSelectedPeriodId(period.id)}
+                className={`h-12 rounded-lg border text-sm font-semibold ${
+                  selectedPeriodId === period.id ? "bg-primary/5 border-primary text-primary" : "bg-white border-border text-foreground"
+                }`}
+              >
+                {period.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-white px-4 py-3 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold text-foreground">{selected.name}</div>
+            <div className="text-xs text-muted-foreground mt-1">{selected.backendId ? `后台批次：${selected.status}` : selected.status}</div>
+          </div>
+          <CheckCircle className="w-5 h-5 text-primary" />
+        </div>
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
@@ -743,23 +791,23 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubm
   cityId?: string;
   projectName: string;
   onBack: () => void;
-  onNext: (t: string) => void;
+  onNext: (t: TownOption) => void;
   submittedData: Record<string, VillageRecord[]>;
   onViewSubmitted: () => void;
 }) {
-  const [val, setVal] = useState("");
-  const [err, setErr] = useState("");
-  const [towns, setTowns] = useState(["北陡镇", "白沙镇", "大江镇", "赤溪镇", "那琴镇", "沙塘镇"]);
+  const [selectedId, setSelectedId] = useState("");
+  const [towns, setTowns] = useState<TownOption[]>([]);
 
   useEffect(() => {
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
     fetch(`${API_BASE_URL}/mobile/towns${params}`)
       .then(response => response.ok ? response.json() : null)
       .then(data => {
-        if (Array.isArray(data?.items) && data.items.length) setTowns(data.items.map((item: { name: string }) => item.name));
+        if (Array.isArray(data?.items)) setTowns(data.items);
       })
       .catch(() => undefined);
   }, [cityId]);
+  const selected = towns.find(town => town.id === selectedId);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -776,48 +824,28 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubm
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核镇街</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto px-4 py-5">
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">镇街名称</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              value={val}
-              onChange={e => { setVal(e.target.value); setErr(""); }}
-              placeholder="请输入镇街名称"
-              className="w-full pl-9 pr-9 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-            {val && (
-              <button onClick={() => setVal("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-          {err && (
-            <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />{err}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">最近使用镇街</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">项目镇街清单</p>
           <div className="space-y-2">
             {towns.map(t => (
               <button
-                key={t}
-                onClick={() => { setVal(t); setErr(""); }}
+                key={t.id}
+                onClick={() => setSelectedId(t.id)}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
-                  val === t ? "bg-primary/5 border-primary" : "bg-white border-border"
+                  selectedId === t.id ? "bg-primary/5 border-primary" : "bg-white border-border"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${val === t ? "bg-primary" : "bg-muted"}`}>
-                    <MapPin className={`w-4 h-4 ${val === t ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedId === t.id ? "bg-primary" : "bg-muted"}`}>
+                    <MapPin className={`w-4 h-4 ${selectedId === t.id ? "text-primary-foreground" : "text-muted-foreground"}`} />
                   </div>
-                  <span className={`text-sm font-medium ${val === t ? "text-primary" : "text-foreground"}`}>{t}</span>
+                  <div className="text-left">
+                    <span className={`text-sm font-medium ${selectedId === t.id ? "text-primary" : "text-foreground"}`}>{t.name}</span>
+                    <div className="text-xs text-muted-foreground mt-0.5">{t.assessmentTargets.length}类考核对象</div>
+                  </div>
                 </div>
-                {val === t && <Check className="w-4 h-4 text-primary shrink-0" />}
+                {selectedId === t.id && <Check className="w-4 h-4 text-primary shrink-0" />}
               </button>
             ))}
           </div>
@@ -826,8 +854,9 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubm
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0 space-y-2">
         <button
-          onClick={() => { if (!val.trim()) { setErr("请先选择镇街"); return; } onNext(val.trim()); }}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+          onClick={() => selected && onNext(selected)}
+          disabled={!selected}
+          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
         >
           下一步 <ChevronRight className="w-4 h-4" />
         </button>
@@ -856,19 +885,19 @@ function P2Village({ town, cityId, onBack, onNext }: {
   onBack: () => void;
   onNext: (v: string) => void;
 }) {
-  const [val, setVal] = useState("");
-  const [err, setErr] = useState("");
-  const [villages, setVillages] = useState(["大步头村", "禾塘村", "合益村", "那廖村", "那黎村", "滘尾村"]);
+  const [selectedId, setSelectedId] = useState("");
+  const [villages, setVillages] = useState<VillageOption[]>([]);
 
   useEffect(() => {
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
     fetch(`${API_BASE_URL}/mobile/towns/${encodeURIComponent(town)}/villages${params}`)
       .then(response => response.ok ? response.json() : null)
       .then(data => {
-        if (Array.isArray(data?.items) && data.items.length) setVillages(data.items.map((item: { name: string }) => item.name));
+        if (Array.isArray(data?.items)) setVillages(data.items);
       })
       .catch(() => undefined);
   }, [town, cityId]);
+  const selected = villages.find(village => village.id === selectedId);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -883,48 +912,28 @@ function P2Village({ town, cityId, onBack, onNext }: {
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核村点</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto px-4 py-5">
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">村点名称</label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              value={val}
-              onChange={e => { setVal(e.target.value); setErr(""); }}
-              placeholder="请输入村名或设施点名称"
-              className="w-full pl-9 pr-9 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-            />
-            {val && (
-              <button onClick={() => setVal("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-          {err && (
-            <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />{err}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">最近录入村点</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">设施点清单</p>
           <div className="space-y-2">
             {villages.map(v => (
               <button
-                key={v}
-                onClick={() => { setVal(v); setErr(""); }}
+                key={v.id}
+                onClick={() => setSelectedId(v.id)}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
-                  val === v ? "bg-primary/5 border-primary" : "bg-white border-border"
+                  selectedId === v.id ? "bg-primary/5 border-primary" : "bg-white border-border"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${val === v ? "bg-primary" : "bg-muted"}`}>
-                    <Building2 className={`w-4 h-4 ${val === v ? "text-primary-foreground" : "text-muted-foreground"}`} />
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedId === v.id ? "bg-primary" : "bg-muted"}`}>
+                    <Building2 className={`w-4 h-4 ${selectedId === v.id ? "text-primary-foreground" : "text-muted-foreground"}`} />
                   </div>
-                  <span className={`text-sm font-medium ${val === v ? "text-primary" : "text-foreground"}`}>{v}</span>
+                  <div className="text-left">
+                    <span className={`text-sm font-medium ${selectedId === v.id ? "text-primary" : "text-foreground"}`}>{v.name}</span>
+                    <div className="text-xs text-muted-foreground mt-0.5">{v.administrativeVillage || "行政村待核"} · {v.chapterCode}</div>
+                  </div>
                 </div>
-                {val === v && <Check className="w-4 h-4 text-primary shrink-0" />}
+                {selectedId === v.id && <Check className="w-4 h-4 text-primary shrink-0" />}
               </button>
             ))}
           </div>
@@ -933,8 +942,9 @@ function P2Village({ town, cityId, onBack, onNext }: {
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
         <button
-          onClick={() => { if (!val.trim()) { setErr("请先输入村名或设施点名称"); return; } onNext(val.trim()); }}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+          onClick={() => selected && onNext(selected.name)}
+          disabled={!selected}
+          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
         >
           下一步 <ChevronRight className="w-4 h-4" />
         </button>
@@ -966,8 +976,9 @@ const PRIMARY_FACILITY_TYPE_INFO: Record<PrimaryFacilityType, { label: string; s
   rural_treatment: { label: "农村污水处理设施", sub: "进入后继续选择村点", icon: "🏘️" },
 };
 
-function P2bFacilityChoice({ town, onBack, onSelect }: {
+function P2bFacilityChoice({ town, allowedTargets, onBack, onSelect }: {
   town: string;
+  allowedTargets: PrimaryFacilityType[];
   onBack: () => void;
   onSelect: (type: PrimaryFacilityType) => void;
 }) {
@@ -979,11 +990,10 @@ function P2bFacilityChoice({ town, onBack, onSelect }: {
         </button>
         <div className="text-xs text-primary-foreground/55 mb-1">{town}</div>
         <h1 className="text-xl font-semibold text-primary-foreground">选择考核对象</h1>
-        <p className="text-xs text-primary-foreground/55 mt-1">镇街对象直接填报，农村设施需继续选择村</p>
       </div>
 
       <div className="flex-1 px-4 py-5 space-y-3">
-        {PRIMARY_FACILITY_TYPES.map(type => {
+        {PRIMARY_FACILITY_TYPES.filter(type => allowedTargets.includes(type)).map(type => {
           const info = PRIMARY_FACILITY_TYPE_INFO[type];
           return (
             <button
@@ -1018,7 +1028,9 @@ function P2bFacilityType({ town, village, primaryFacilityType, typeProgress, onB
 }) {
   const mainFacilityType = standardTypeForPrimary(primaryFacilityType);
   const primaryInfo = PRIMARY_FACILITY_TYPE_INFO[primaryFacilityType];
-  const availableTypes: FacilityType[] = [mainFacilityType, "survey", "water_quality"];
+  const availableTypes: FacilityType[] = primaryFacilityType === "rural_treatment"
+    ? [mainFacilityType, "survey", "water_quality"]
+    : [mainFacilityType, "water_quality"];
   const doneCount = availableTypes.filter(t => typeProgress[t]).length;
   const allDone = doneCount === availableTypes.length;
   const scopeText = primaryFacilityType === "rural_treatment" ? `${town} · ${village}` : `${town} · ${primaryInfo.label}`;
@@ -1153,22 +1165,46 @@ function emptySurveyForm(): SurveyFormEntry {
   return { score: 0, comment: "", completed: false };
 }
 
-function emptyWaterQualityEntry(): WaterQualityEntry {
+const WATER_QUALITY_LIMITS: Record<PrimaryFacilityType, Pick<WaterQualityEntry, "dischargeStandard" | "hasTpLimit" | "codLimit" | "nh3nLimit" | "tpLimit">> = {
+  town_plant: {
+    dischargeStandard: "城镇污水处理厂污染物排放标准一级A及广东省水污染物排放限值较严值",
+    hasTpLimit: true,
+    codLimit: "40",
+    nh3nLimit: "5（8）",
+    tpLimit: "0.5",
+  },
+  town_network: {
+    dischargeStandard: "城镇污水处理厂污染物排放标准一级A及广东省水污染物排放限值较严值",
+    hasTpLimit: true,
+    codLimit: "40",
+    nh3nLimit: "5（8）",
+    tpLimit: "0.5",
+  },
+  rural_treatment: {
+    dischargeStandard: "广东省《农村生活污水处理排放标准》（DB44/2208-2019）一级标准",
+    hasTpLimit: true,
+    codLimit: "60",
+    nh3nLimit: "8（15）",
+    tpLimit: "1",
+  },
+};
+
+function applyFixedWaterQualityLimits(entry: WaterQualityEntry, primaryFacilityType: PrimaryFacilityType): WaterQualityEntry {
+  return { ...entry, ...WATER_QUALITY_LIMITS[primaryFacilityType] };
+}
+
+function emptyWaterQualityEntry(primaryFacilityType: PrimaryFacilityType = "rural_treatment"): WaterQualityEntry {
   return {
     sampleTime: "",
-    dischargeStandard: "",
     processType: "",
     designScale: "",
-    hasTpLimit: true,
     codValue: "",
-    codLimit: "",
     nh3nValue: "",
-    nh3nLimit: "",
     tpValue: "",
-    tpLimit: "",
     conclusion: "pending",
     note: "",
     completed: false,
+    ...WATER_QUALITY_LIMITS[primaryFacilityType],
   };
 }
 
@@ -1344,14 +1380,18 @@ function PSurveyForm({ category, respondent, entry, onBack, onSave }: {
 
 // ==================== PAGE W1: WATER QUALITY ====================
 
-function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
+function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, onSave }: {
   town: string;
   village: string;
+  primaryFacilityType: PrimaryFacilityType;
   entry: WaterQualityEntry;
   onBack: () => void;
   onSave: (entry: WaterQualityEntry) => void;
 }) {
-  const [form, setForm] = useState<WaterQualityEntry>({ ...entry });
+  const [form, setForm] = useState<WaterQualityEntry>(() => applyFixedWaterQualityLimits(entry, primaryFacilityType));
+  useEffect(() => {
+    setForm(prev => applyFixedWaterQualityLimits(prev, primaryFacilityType));
+  }, [primaryFacilityType]);
   const update = (patch: Partial<WaterQualityEntry>) => setForm(prev => ({ ...prev, ...patch }));
   const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale && form.conclusion !== "pending";
 
@@ -1373,6 +1413,15 @@ function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
     </label>
   );
 
+  const FixedField = ({ label, value }: { label: string; value: string }) => (
+    <div>
+      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
+      <div className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-muted/45 text-foreground min-h-[38px] flex items-center">
+        {value}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
@@ -1387,36 +1436,27 @@ function PWaterQualityForm({ town, village, entry, onBack, onSave }: {
         <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5 flex gap-2">
           <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
           <p className="text-xs text-blue-700 leading-relaxed">
-            根据考核标准，出水水质按 CODCr、NH3-N、TP（如执行标准明确总磷限值）等抽检数据判断。
+            排放标准和限值已按项目报告附录固定带出，现场只需填写抽检实测数据。
           </p>
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-3">
           <Field label="取样时间" value={form.sampleTime} placeholder="如：2023-12-10 09:30" onChange={sampleTime => update({ sampleTime })} />
-          <Field label="排放标准" value={form.dischargeStandard} placeholder="如：广东省农村生活污水处理排放标准二级" onChange={dischargeStandard => update({ dischargeStandard })} />
+          <FixedField label="排放标准" value={form.dischargeStandard} />
           <Field label="工艺类型" value={form.processType} placeholder="如：A/O + 人工湿地" onChange={processType => update({ processType })} />
           <Field label="规模（m3/d）" value={form.designScale} placeholder="如：50" onChange={designScale => update({ designScale })} />
-          <label className="flex items-center justify-between gap-3 py-1">
-            <span className="text-sm text-foreground">执行标准明确 TP 限值</span>
-            <input
-              type="checkbox"
-              checked={form.hasTpLimit}
-              onChange={e => update({ hasTpLimit: e.target.checked })}
-              className="w-4 h-4 accent-primary"
-            />
-          </label>
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="CODCr 实测值" value={form.codValue} placeholder="mg/L" onChange={codValue => update({ codValue })} />
-            <Field label="CODCr 限值" value={form.codLimit} placeholder="mg/L" onChange={codLimit => update({ codLimit })} />
+            <FixedField label="CODCr 限值（mg/L）" value={form.codLimit} />
             <Field label="NH3-N 实测值" value={form.nh3nValue} placeholder="mg/L" onChange={nh3nValue => update({ nh3nValue })} />
-            <Field label="NH3-N 限值" value={form.nh3nLimit} placeholder="mg/L" onChange={nh3nLimit => update({ nh3nLimit })} />
+            <FixedField label="NH3-N 限值（mg/L）" value={form.nh3nLimit} />
             {form.hasTpLimit && (
               <>
                 <Field label="TP 实测值" value={form.tpValue} placeholder="mg/L" onChange={tpValue => update({ tpValue })} />
-                <Field label="TP 限值" value={form.tpLimit} placeholder="mg/L" onChange={tpLimit => update({ tpLimit })} />
+                <FixedField label="TP 限值（mg/L）" value={form.tpLimit} />
               </>
             )}
           </div>
@@ -1826,7 +1866,7 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                             </button>
                             <span className="text-xl font-bold text-slate-800 w-8 text-center">{oe.instances}</span>
                             <button
-                              onClick={() => updateOpt(oi, { instances: oe.instances + 1 })}
+                              onClick={() => updateOpt(oi, { instances: Math.min(oe.instances + 1, opt.maxInstances ?? 999) })}
                               className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center"
                             >
                               <Plus className="w-3.5 h-3.5 text-slate-600" />
@@ -2711,6 +2751,7 @@ export default function App() {
   const [cycleId, setCycleId] = useState("");
   const [cycleName, setCycleName] = useState("");
   const [town, setTown] = useState("");
+  const [selectedTown, setSelectedTown] = useState<TownOption | null>(null);
   const [village, setVillage] = useState("");
   const [ftype, setFtype] = useState<FacilityType>("treatment");
   const [primaryFacilityType, setPrimaryFacilityType] = useState<PrimaryFacilityType>("rural_treatment");
@@ -2748,13 +2789,12 @@ export default function App() {
 
     async function loadStandards() {
       try {
-        const pairs: Array<["treatment" | "network", string]> = [["treatment", "facility"], ["network", "network"]];
-        for (const [type, facilityType] of pairs) {
-          const params = new URLSearchParams({ facility_type: facilityType });
-          if (cityId) params.set("city_id", cityId);
-          if (cycleId) params.set("cycle_id", cycleId);
-          const response = await fetch(`${API_BASE_URL}/mobile/indicator-standards?${params.toString()}`);
-          if (!response.ok) continue;
+        const type = standardTypeForPrimary(primaryFacilityType);
+        const params = new URLSearchParams({ facility_type: primaryFacilityType });
+        if (cityId) params.set("city_id", cityId);
+        if (cycleId) params.set("cycle_id", cycleId);
+        const response = await fetch(`${API_BASE_URL}/mobile/indicator-standards?${params.toString()}`);
+        if (response.ok) {
           const data = await response.json();
           if (cancelled) return;
           if (Array.isArray(data?.items) && data.items.length) {
@@ -2770,7 +2810,7 @@ export default function App() {
 
     loadStandards();
     return () => { cancelled = true; };
-  }, [cityId, cycleId]);
+  }, [cityId, cycleId, primaryFacilityType]);
   useEffect(() => {
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(completedVillages));
   }, [completedVillages]);
@@ -2834,7 +2874,7 @@ export default function App() {
   const handleNextVillage = () => {
     setVillage(""); setEntries({}); setDetailId("");
     setFtype("treatment"); setPrimaryFacilityType("rural_treatment"); setSurveyEntries({}); setSurveyTarget(null);
-    setWaterQuality(emptyWaterQualityEntry());
+    setWaterQuality(emptyWaterQualityEntry(primaryFacilityType));
     setTypeProgress({}); setScoreByType({});
     setPage(primaryFacilityType === "rural_treatment" ? "village" : "facility_choice");
   };
@@ -2934,7 +2974,7 @@ export default function App() {
             cityName={city}
             onBack={() => setPage("city")}
             onNext={cycle => {
-              setCycleId(cycle.id);
+              setCycleId(cycle.backendId ?? "");
               setCycleName(cycle.name);
               setTown("");
               setCompletedVillages([]);
@@ -2948,7 +2988,7 @@ export default function App() {
             cityId={cityId || undefined}
             projectName={city}
             onBack={() => setPage("cycle")}
-            onNext={t => { setTown(t); setVillage(""); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry()); setTypeProgress({}); setScoreByType({}); setPage("facility_choice"); }}
+            onNext={t => { setTown(t.name); setSelectedTown(t); setVillage(""); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry(primaryFacilityType)); setTypeProgress({}); setScoreByType({}); setPage("facility_choice"); }}
             submittedData={submittedData}
             onViewSubmitted={() => setPage("submitted_data")}
           />
@@ -2959,20 +2999,21 @@ export default function App() {
             town={town}
             cityId={cityId || undefined}
             onBack={() => setPage("facility_choice")}
-            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry()); setPage("facilitytype"); }}
+            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry(primaryFacilityType)); setPage("facilitytype"); }}
           />
         );
       case "facility_choice":
         return (
           <P2bFacilityChoice
             town={town}
+            allowedTargets={selectedTown?.assessmentTargets ?? []}
             onBack={() => setPage("town")}
             onSelect={type => {
               setPrimaryFacilityType(type);
               setFtype(standardTypeForPrimary(type));
               setEntries({});
               setSurveyEntries({});
-              setWaterQuality(emptyWaterQualityEntry());
+              setWaterQuality(emptyWaterQualityEntry(type));
               setTypeProgress({});
               setScoreByType({});
               if (type === "rural_treatment") {
@@ -3065,7 +3106,7 @@ export default function App() {
                 setFtype("treatment"); setEntries({});
                 setPrimaryFacilityType("rural_treatment");
                 setDetailId(""); setCompletedVillages([]);
-                setWaterQuality(emptyWaterQualityEntry());
+                setWaterQuality(emptyWaterQualityEntry("rural_treatment"));
                 setTypeProgress({}); setScoreByType({});
                 setShowToast(true);
                 setTimeout(() => setShowToast(false), 3000);
@@ -3108,6 +3149,7 @@ export default function App() {
           <PWaterQualityForm
             town={town}
             village={village}
+            primaryFacilityType={primaryFacilityType}
             entry={waterQuality}
             onBack={() => setPage("facilitytype")}
             onSave={entry => {

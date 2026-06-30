@@ -17,6 +17,7 @@ from app.services.assessment_ingest import (
     sync_water_quality,
     unwrap_payload,
 )
+from app.services.project_catalog import PROJECT_CATALOG, project_by_name
 
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
@@ -48,7 +49,34 @@ def cities(session: Session = Depends(get_session)):
 @router.get("/projects")
 def projects(session: Session = Depends(get_session)):
     statement = select(City).where(City.name.in_(PROJECT_NAMES)).order_by(City.name)
-    return {"items": [{"id": city.id, "name": city.name, "standardScope": city.name} for city in session.scalars(statement).all()]}
+    items = []
+    for city in session.scalars(statement).all():
+        catalog = project_by_name(city.name) or {}
+        items.append({
+            "id": city.id,
+            "name": city.name,
+            "fullName": catalog.get("fullName", city.name),
+            "standardScope": catalog.get("standard", city.name),
+            "sourceReport": catalog.get("sourceReport"),
+        })
+    return {"items": items}
+
+
+@router.get("/projects/{city_id}/report-template")
+def project_report_template(city_id: str, session: Session = Depends(get_session)):
+    city = session.get(City, city_id)
+    if city is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    catalog = project_by_name(city.name)
+    if catalog is None:
+        raise HTTPException(status_code=404, detail="Project template not found")
+    return {
+        "projectId": city.id,
+        "projectName": city.name,
+        "fullName": catalog["fullName"],
+        "sourceReport": catalog["sourceReport"],
+        "towns": catalog["towns"],
+    }
 
 
 @router.get("/assessment-cycles")
@@ -61,10 +89,17 @@ def cycles(city_id: str | None = None, session: Session = Depends(get_session)):
 
 @router.get("/towns")
 def towns(city_id: str | None = None, session: Session = Depends(get_session)):
-    statement = select(Town)
+    statement = select(Town).where(Town.is_active.is_(True))
     if city_id:
         statement = statement.where(Town.city_id == city_id)
-    return {"items": [{"id": town.id, "name": town.name} for town in session.scalars(statement.order_by(Town.name)).all()]}
+    return {"items": [{
+        "id": town.id,
+        "name": town.name,
+        "chapterCode": town.chapter_code,
+        "assessmentTargets": town.assessment_targets or [],
+        "assessmentObject": town.assessment_object or {},
+        "reportTemplate": town.report_template or {},
+    } for town in session.scalars(statement.order_by(Town.sort_order, Town.name)).all()]}
 
 
 @router.get("/towns/{town_id}/villages")
@@ -76,7 +111,15 @@ def villages(town_id: str, city_id: str | None = None, session: Session = Depend
             statement = statement.where(Town.city_id == city_id)
         town = session.scalar(statement)
     if town is None: raise HTTPException(status_code=404, detail="Town not found")
-    return {"items": [{"id": village.id, "name": village.name} for village in session.scalars(select(Village).where(Village.town_id == town.id)).all()]}
+    statement = select(Village).where(Village.town_id == town.id, Village.is_active.is_(True)).order_by(Village.sort_order, Village.name)
+    return {"items": [{
+        "id": village.id,
+        "name": village.name,
+        "administrativeVillage": village.administrative_village,
+        "chapterCode": village.chapter_code,
+        "assessmentObject": village.assessment_object or {},
+        "reportTemplate": village.report_template or {},
+    } for village in session.scalars(statement).all()]}
 
 
 @router.get("/indicator-standards")
@@ -84,12 +127,23 @@ def indicator_standards(city_id: str | None = None, cycle_id: str | None = None,
     version_query = select(IndicatorVersion).where(IndicatorVersion.status == "published")
     if city_id: version_query = version_query.where(IndicatorVersion.city_id == city_id)
     if cycle_id: version_query = version_query.where(IndicatorVersion.cycle_id == cycle_id)
-    version = session.scalar(version_query)
+    version = session.scalar(version_query.order_by(IndicatorVersion.created_at.desc()))
     if version is None: return {"version": None, "items": []}
     indicators = list(session.scalars(select(Indicator).where(Indicator.version_id == version.id, Indicator.enabled.is_(True)).order_by(Indicator.sort_order)))
     option_map = {item.id: [] for item in indicators}
     for option in session.scalars(select(DeductionOption).where(DeductionOption.indicator_id.in_(option_map))).all():
-        option_map[option.indicator_id].append({"id": option.id, "name": option.name, "deduction": option.deduction_value, "type": option.deduction_type, "requiresPhoto": option.requires_photo})
+        meta = option.meta if isinstance(option.meta, dict) else {}
+        option_map[option.indicator_id].append(
+            {
+                "id": option.id,
+                "name": option.name,
+                "deduction": option.deduction_value,
+                "type": option.deduction_type,
+                "requiresPhoto": option.requires_photo,
+                "unit": meta.get("unit"),
+                "maxInstances": meta.get("maxInstances"),
+            }
+        )
     items = [{"id": item.id, "parentId": item.parent_id, "code": item.code, "name": item.name, "level": item.level, "fullScore": item.full_score, "facilityType": item.facility_type, "deductionOptions": option_map[item.id]} for item in indicators if not facility_type or not item.facility_type or item.facility_type == facility_type]
     return {"version": {"id": version.id, "name": version.name}, "items": items}
 
@@ -171,6 +225,9 @@ def submit_record(record_id: str, session: Session = Depends(get_session), user:
     record = session.get(AssessmentRecord, record_id)
     if record is None: raise HTTPException(status_code=404, detail="Record not found")
     if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
-    mark_record_submitted(session, record)
+    try:
+        mark_record_submitted(session, record)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.commit()
     return _record_payload(record)
