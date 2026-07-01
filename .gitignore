@@ -6,6 +6,8 @@ node_modules/
 dist/
 .vite/
 *.log
+.DS_Store
+**/.DS_Store
 
 # Backend local runtime files
 .venv/

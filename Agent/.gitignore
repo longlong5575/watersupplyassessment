@@ -5,5 +5,7 @@
 **/__pycache__/
 *.pyc
 *.pyo
+.DS_Store
+**/.DS_Store
 startup.log
 .env.local

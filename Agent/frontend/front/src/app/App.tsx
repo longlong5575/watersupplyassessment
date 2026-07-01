@@ -3572,6 +3572,8 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
   const methodFileRef = useRef<HTMLInputElement>(null);
 
   const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
+  const visibleTownNames = visibleTowns.map(t => t.name);
+  const visibleTownKey = visibleTownNames.join("|");
   const canProceed = Boolean(projectId) && visibleTowns.length > 0 && reportPeriod.trim().length > 0 && !precheckLoading && precheck?.ok !== false;
   useEffect(() => {
     if (!projectId || !reportPeriod.trim() || visibleTowns.length === 0) {
@@ -3587,7 +3589,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
         source: "dashboard",
         projectId,
         period: reportPeriod,
-        townNames: visibleTowns.map(t => t.name),
+        townNames: visibleTownNames,
         outputs: ["separate", "summary"],
       }),
     })
@@ -3605,7 +3607,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
       })
       .finally(() => { if (!cancelled) setPrecheckLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, reportPeriod, visibleTowns.map(t => t.name).join("|")]);
+  }, [projectId, reportPeriod, visibleTownKey]);
 
 
   return (

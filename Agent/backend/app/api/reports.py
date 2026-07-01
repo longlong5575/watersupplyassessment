@@ -114,10 +114,15 @@ def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tupl
     return project, cycle, task_payload
 
 
+def build_task_snapshot(session: Session, project: City | None, cycle: AssessmentCycle | None, task_payload: dict) -> dict:
+    town_names = set(task_payload.get("townNames", []) or []) or None
+    return build_report_dataset(session, cycle=cycle, town_names=town_names, city_id=project.id if project else None)
+
+
 @router.post("/api/report-tasks/precheck")
 def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
     project, cycle, task_payload = resolve_report_request(payload, session)
-    snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
+    snapshot = build_task_snapshot(session, project, cycle, task_payload)
     errors: list[str] = []
     warnings: list[str] = []
     try:
@@ -157,14 +162,12 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
 @router.post("/api/report-tasks")
 def create_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
     project, cycle, task_payload = resolve_report_request(payload, session)
+    snapshot = build_task_snapshot(session, project, cycle, task_payload)
     if task_payload.get("source") == "dashboard":
         try:
-            snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
             validate_report_dataset(snapshot)
         except RuntimeError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-    else:
-        snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
     task = ReportTask(
         cycle_id=cycle.id if cycle else None,
         created_by_id=user.id,
