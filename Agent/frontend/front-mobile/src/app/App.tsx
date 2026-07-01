@@ -930,7 +930,7 @@ function P2Village({ town, cityId, onBack, onNext }: {
                   </div>
                   <div className="text-left">
                     <span className={`text-sm font-medium ${selectedId === v.id ? "text-primary" : "text-foreground"}`}>{v.name}</span>
-                    <div className="text-xs text-muted-foreground mt-0.5">{v.administrativeVillage || "行政村待核"} · {v.chapterCode}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{v.administrativeVillage || "行政村待核"}</div>
                   </div>
                 </div>
                 {selectedId === v.id && <Check className="w-4 h-4 text-primary shrink-0" />}
