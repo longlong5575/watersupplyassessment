@@ -86,6 +86,22 @@ type DashboardOverview = {
   pendingVillageCount: number;
 };
 
+type ReportPrecheck = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  summary: {
+    projectName?: string | null;
+    cycleName?: string | null;
+    requestedTownCount: number;
+    availableTownCount: number;
+    recordCount: number;
+    recordIds: string[];
+    indicatorVersionIds: string[];
+    datasetHash?: string | null;
+  };
+};
+
 const SURVEY_LABELS = ["污水处理设施", "管网设施", "调查问卷", "水质抽检情况"];
 
 type ReportStatus = "completed" | "processing" | "pending" | "error";
@@ -2167,6 +2183,7 @@ function StandardsPage() {
   const [selected, setSelected] = useState<IndicatorVersionDetail | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
 
   const loadVersions = async () => {
     const response = await fetch(`${API_BASE_URL}/indicator-versions`);
@@ -2184,24 +2201,30 @@ function StandardsPage() {
   useEffect(() => { loadVersions(); }, []);
 
   const operate = async (id: string, action: "clone" | "publish" | "lock") => {
+    const actionText = action === "clone" ? "Clone draft" : action === "publish" ? "Publish standard" : "Lock standard";
+    if (action !== "clone" && !window.confirm(`Confirm ${actionText}? This affects mobile scoring standards.`)) return;
     setBusy(`${action}:${id}`);
     try {
       const response = await fetch(`${API_BASE_URL}/indicator-versions/${id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: action === "clone" ? JSON.stringify({ name: cloneName.trim() || `${versions.find(item => item.id === id)?.name ?? "标准"}副本` }) : undefined,
+        body: action === "clone" ? JSON.stringify({ name: cloneName.trim() || `${versions.find(item => item.id === id)?.name ?? "standard"} copy` }) : undefined,
       });
       if (!response.ok) throw new Error("standard operation failed");
+      setNotice(`${actionText} completed.`);
       setCloneName("");
       await loadVersions();
       const result = await response.json().catch(() => null);
       await loadDetail(result?.id ?? id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : `${actionText} failed.`);
     } finally {
       setBusy("");
     }
   };
 
-  const level1Items = selected?.items.filter(item => item.level === 1) ?? [];
+  const level1Items
+ = selected?.items.filter(item => item.level === 1) ?? [];
   const childrenByParent = new Map<string, IndicatorVersionDetail["items"]>();
   for (const item of selected?.items ?? []) {
     if (!item.parentId) continue;
@@ -2212,6 +2235,7 @@ function StandardsPage() {
     <div className="flex-1 overflow-y-auto">
       <TopBar title="评分标准管理" subtitle="按城市和批次维护评分标准版本" breadcrumbs={["标准管理"]} />
       <div className="px-8 py-6 grid grid-cols-[320px_1fr] gap-5 max-w-6xl">
+        {notice && <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">{notice}</div>}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">标准版本</h3>
@@ -2329,6 +2353,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   const [busy, setBusy] = useState<string | null>(null);
   const [savingScores, setSavingScores] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
+  const [notice, setNotice] = useState("");
 
   const load = () => {
     const params = new URLSearchParams();
@@ -2409,20 +2434,27 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   };
 
   const action = async (id: string, name: "review" | "return" | "lock") => {
+    const actionText = name === "review" ? "Review" : name === "return" ? "Return" : "Lock";
+    if (!window.confirm(`Confirm ${actionText}? This operation will be recorded.`)) return;
     setBusy(id);
     try {
-      await fetch(`${API_BASE_URL}/records/${id}/${name}`, {
+      const response = await fetch(`${API_BASE_URL}/records/${id}/${name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: name === "return" ? JSON.stringify({ reason: returnReasons[id]?.trim() || "需要补充现场资料" }) : undefined,
+        body: name === "return" ? JSON.stringify({ reason: returnReasons[id]?.trim() || "Need additional field evidence" }) : undefined,
       });
+      if (!response.ok) throw new Error(`${actionText} failed`);
+      setNotice(`${actionText} completed and logged.`);
       if (name === "return") setReturnReasons(prev => ({ ...prev, [id]: "" }));
       load();
       if (selected?.id === id) view(id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : `${actionText} failed`);
     } finally { setBusy(null); }
   };
 
-  const updateScoreDraft = (id: string, patch: Partial<ScoreDraft>) => {
+  const updateScoreDraft
+ = (id: string, patch: Partial<ScoreDraft>) => {
     setScoreDrafts(prev => ({ ...prev, [id]: { score: "", deduction: "0", reason: "", ...prev[id], ...patch } }));
   };
 
@@ -3535,10 +3567,46 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
   const [methodOpen, setMethodOpen] = useState(false);
   const [removedTowns, setRemovedTowns] = useState<Set<string>>(new Set());
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
+  const [precheck, setPrecheck] = useState<ReportPrecheck | null>(null);
+  const [precheckLoading, setPrecheckLoading] = useState(false);
   const methodFileRef = useRef<HTMLInputElement>(null);
 
   const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
-  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && reportPeriod.trim().length > 0;
+  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && reportPeriod.trim().length > 0 && !precheckLoading && precheck?.ok !== false;
+  useEffect(() => {
+    if (!projectId || !reportPeriod.trim() || visibleTowns.length === 0) {
+      setPrecheck(null);
+      return;
+    }
+    let cancelled = false;
+    setPrecheckLoading(true);
+    fetch(`${API_BASE_URL}/report-tasks/precheck`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        source: "dashboard",
+        projectId,
+        period: reportPeriod,
+        townNames: visibleTowns.map(t => t.name),
+        outputs: ["separate", "summary"],
+      }),
+    })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("precheck failed")))
+      .then(data => { if (!cancelled) setPrecheck(data); })
+      .catch(error => {
+        if (!cancelled) {
+          setPrecheck({
+            ok: false,
+            errors: [error instanceof Error ? error.message : "precheck failed"],
+            warnings: [],
+            summary: { requestedTownCount: visibleTowns.length, availableTownCount: 0, recordCount: 0, recordIds: [], indicatorVersionIds: [] },
+          });
+        }
+      })
+      .finally(() => { if (!cancelled) setPrecheckLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, reportPeriod, visibleTowns.map(t => t.name).join("|")]);
+
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -3611,6 +3679,25 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           </table>
         </div>
 
+        {/* Data readiness check */}
+        <div className="bg-card border border-border rounded-lg px-6 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Data readiness check</h3>
+              <p className="text-xs text-muted-foreground mt-1">Runs before report generation and blocks missing data.</p>
+            </div>
+            <span className={`rounded px-2 py-1 text-xs ${precheck?.ok ? "bg-green-50 text-green-700" : precheckLoading ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
+              {precheckLoading ? "Checking" : precheck?.ok ? "Ready" : "Needs data"}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Selected towns</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.requestedTownCount ?? visibleTowns.length}</div></div>
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Ready towns</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.availableTownCount ?? 0}</div></div>
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Ready records</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.recordCount ?? 0}</div></div>
+          </div>
+          {!!precheck?.errors.length && <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{precheck.errors.slice(0, 4).map(item => <p key={item}>{item}</p>)}</div>}
+          {!!precheck?.warnings.length && <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{precheck.warnings.slice(0, 4).map(item => <p key={item}>{item}</p>)}</div>}
+        </div>
         {/* Report period */}
         <div className="bg-card border border-border rounded-lg">
           <div className="px-6 py-4 border-b border-border">

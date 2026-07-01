@@ -88,8 +88,7 @@ def docx_preview(path: Path) -> dict:
     }
 
 
-@router.post("/api/report-tasks")
-def create_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
+def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tuple[City | None, AssessmentCycle | None, dict]:
     project = session.get(City, payload.projectId) if payload.projectId else None
     cycle_query = select(AssessmentCycle).where(AssessmentCycle.name == payload.period)
     if project is not None:
@@ -112,6 +111,52 @@ def create_task(payload: ReportTaskRequest, session: Session = Depends(get_sessi
         valid_names = set(session.scalars(select(Town.name).where(Town.city_id == project.id, Town.name.in_(payload.townNames))).all())
         if valid_names != set(payload.townNames):
             raise HTTPException(status_code=422, detail="Selected towns do not belong to the project")
+    return project, cycle, task_payload
+
+
+@router.post("/api/report-tasks/precheck")
+def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
+    project, cycle, task_payload = resolve_report_request(payload, session)
+    snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)
+    errors: list[str] = []
+    warnings: list[str] = []
+    try:
+        validate_report_dataset(snapshot)
+    except RuntimeError as exc:
+        errors.append(str(exc))
+    requested = set(task_payload.get("townNames", []) or [])
+    available = {item.get("town") for item in snapshot.get("towns", [])}
+    missing = sorted(name for name in requested if name not in available)
+    if missing:
+        errors.append("No reviewed or locked data for: " + ", ".join(missing))
+    for town in snapshot.get("towns", []):
+        if town.get("waterQualityCount", 0) <= 0:
+            warnings.append(f"{town.get('town')} has no water quality record.")
+        if town.get("surveyCount", 0) <= 0:
+            warnings.append(f"{town.get('town')} has no survey record.")
+        if town.get("attachmentCount", 0) <= 0:
+            warnings.append(f"{town.get('town')} has no attachment.")
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "summary": {
+            "projectName": snapshot.get("projectName"),
+            "cycleName": snapshot.get("cycleName"),
+            "requestedTownCount": len(requested),
+            "availableTownCount": len(snapshot.get("towns", [])),
+            "recordCount": len(snapshot.get("records", [])),
+            "recordIds": snapshot.get("recordIds", []),
+            "indicatorVersionIds": snapshot.get("indicatorVersionIds", []),
+            "datasetHash": snapshot.get("hash"),
+        },
+        "towns": snapshot.get("towns", []),
+    }
+
+
+@router.post("/api/report-tasks")
+def create_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
+    project, cycle, task_payload = resolve_report_request(payload, session)
     if task_payload.get("source") == "dashboard":
         try:
             snapshot = build_report_dataset(session, cycle=cycle, town_names=set(task_payload.get("townNames", [])) or None, city_id=project.id if project else None)

@@ -787,13 +787,15 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubmitted }: {
+function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue, onViewSubmitted, onRetrySync }: {
   cityId?: string;
   projectName: string;
   onBack: () => void;
   onNext: (t: TownOption) => void;
   submittedData: Record<string, VillageRecord[]>;
+  syncQueue: SyncQueueItem[];
   onViewSubmitted: () => void;
+  onRetrySync: () => void;
 }) {
   const [selectedId, setSelectedId] = useState("");
   const [towns, setTowns] = useState<TownOption[]>([]);
@@ -808,6 +810,8 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubm
       .catch(() => undefined);
   }, [cityId]);
   const selected = towns.find(town => town.id === selectedId);
+  const failedSyncCount = syncQueue.filter(item => item.syncStatus === "sync_failed").length;
+  const pendingSyncCount = syncQueue.filter(item => item.syncStatus === "pending_sync").length;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -853,6 +857,14 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, onViewSubm
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0 space-y-2">
+        {(failedSyncCount > 0 || pendingSyncCount > 0) && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="flex items-center justify-between gap-3">
+              <span>{failedSyncCount > 0 ? `${failedSyncCount} 个数据包同步失败` : `${pendingSyncCount} 个数据包等待同步`}</span>
+              <button onClick={onRetrySync} className="font-semibold underline">立即重试</button>
+            </div>
+          </div>
+        )}
         <button
           onClick={() => selected && onNext(selected)}
           disabled={!selected}
@@ -2638,9 +2650,11 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
 
 // ==================== SUBMITTED DATA VIEW ====================
 
-function PSubmittedData({ submittedData, onBack }: {
+function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync }: {
   submittedData: Record<string, VillageRecord[]>;
+  syncQueue: SyncQueueItem[];
   onBack: () => void;
+  onRetrySync: () => void;
 }) {
   const [expandedTown, setExpandedTown] = useState<string | null>(null);
   const towns = Object.keys(submittedData);
@@ -2652,10 +2666,26 @@ function PSubmittedData({ submittedData, onBack }: {
           <ChevronLeft className="w-4 h-4" />返回
         </button>
         <h1 className="text-xl font-semibold text-primary-foreground mb-0.5">已提交镇街数据</h1>
-        <p className="text-xs text-primary-foreground/55">共 {towns.length} 个镇街</p>
+        <p className="text-xs text-primary-foreground/55">共 {towns.length} 个镇街 · 待同步 {syncQueue.filter(item => item.syncStatus !== "synced").length} 个</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {syncQueue.filter(item => item.syncStatus !== "synced").length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">还有数据包未同步到后台</p>
+                <p className="mt-1">{syncQueue.filter(item => item.syncStatus === "sync_failed").length} 个失败，{syncQueue.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
+              </div>
+              <button onClick={onRetrySync} className="rounded-lg bg-amber-600 px-3 py-1.5 text-white">重试</button>
+            </div>
+          </div>
+        )}
+        {syncQueue.filter(item => item.syncStatus === "synced").slice(0, 3).map(item => (
+          <div key={item.localId} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">
+            {item.town} 已同步 · {item.syncedAt ?? item.createdAt}
+          </div>
+        ))}
         {towns.length === 0 && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <BarChart3 className="w-12 h-12 text-muted-foreground/40 mb-3" />
@@ -2930,9 +2960,26 @@ export default function App() {
     });
   };
 
-  useEffect(() => {
+  const retryPendingSync = async () => {
     if (!auth?.token) return;
     const pending = syncQueue.filter(item => item.syncStatus !== "synced");
+    if (!pending.length) return;
+    setSubmitError("");
+    for (const item of pending) {
+      setSyncQueue(prev => prev.map(current => current.localId === item.localId ? { ...current, syncStatus: "pending_sync", lastError: undefined } : current));
+      try {
+        await submitTownPackageToBackend(item.pkg, auth.token);
+        markPackageSynced(item.pkg);
+      } catch (error) {
+        queuePackage(item.pkg, error);
+        setSubmitError("仍有数据包同步失败，稍后可继续重试。");
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!auth?.token) return;
+    const pending = syncQueue.filter(item => item.syncStatus === "pending_sync");
     if (!pending.length) return;
     let cancelled = false;
     async function syncPending() {
@@ -2949,7 +2996,13 @@ export default function App() {
     }
     syncPending();
     return () => { cancelled = true; };
-  }, [auth?.token]);
+  }, [auth?.token, syncQueue.length]);
+
+  useEffect(() => {
+    const retry = () => { void retryPendingSync(); };
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  }, [auth?.token, syncQueue.length]);
 
   const renderFieldPage = () => {
     switch (page) {
@@ -2990,7 +3043,9 @@ export default function App() {
             onBack={() => setPage("cycle")}
             onNext={t => { setTown(t.name); setSelectedTown(t); setVillage(""); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry(primaryFacilityType)); setTypeProgress({}); setScoreByType({}); setPage("facility_choice"); }}
             submittedData={submittedData}
+            syncQueue={syncQueue}
             onViewSubmitted={() => setPage("submitted_data")}
+            onRetrySync={retryPendingSync}
           />
         );
       case "village":
@@ -3164,7 +3219,9 @@ export default function App() {
         return (
           <PSubmittedData
             submittedData={submittedData}
+            syncQueue={syncQueue}
             onBack={() => setPage("town")}
+            onRetrySync={retryPendingSync}
           />
         );
       default:

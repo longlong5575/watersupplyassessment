@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import sys
@@ -220,6 +220,11 @@ def main():
             assert confirmed["accepted"] is True
 
         for project, cycle, town in [(yunan, yunan_cycle, "桂圩镇"), (maonan, maonan_cycle, "金塘镇")]:
+            precheck = assert_ok(client.post("/api/report-tasks/precheck", headers=admin, json={
+                "source": "dashboard", "projectId": project["id"], "period": cycle["name"], "townNames": [town], "outputs": ["separate", "summary"]
+            }), f"report precheck {town}")
+            assert precheck["ok"] is True
+            assert precheck["summary"]["recordCount"] >= 1
             task = assert_ok(client.post("/api/report-tasks", headers=admin, json={
                 "source": "dashboard", "projectId": project["id"], "period": cycle["name"], "townNames": [town], "outputs": ["separate", "summary"]
             }), f"report {town}")
