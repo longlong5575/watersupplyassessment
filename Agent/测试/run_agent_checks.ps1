@@ -1,17 +1,23 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $agentRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$workspaceRoot = if ((Split-Path -Leaf (Split-Path -Parent $agentRoot)) -eq "watersupplyassessment") { Split-Path -Parent (Split-Path -Parent $agentRoot) } else { Split-Path -Parent $agentRoot }
+$runScriptsName = -join ([char[]](0x8fd0, 0x884c, 0x811a, 0x672c))
+$runtimeRoot = if ($env:WATERSUPPLY_RUNTIME_DIR) { $env:WATERSUPPLY_RUNTIME_DIR } else { Join-Path (Join-Path $workspaceRoot $runScriptsName) "watersupply-agent-runtime" }
 $backend = Join-Path $agentRoot "backend"
 $front = Join-Path (Join-Path $agentRoot "frontend") "front"
 $mobile = Join-Path (Join-Path $agentRoot "frontend") "front-mobile"
-$resultDir = Join-Path $PSScriptRoot "结果"
+$resultDir = Join-Path $runtimeRoot "test-results"
 New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
 $pnpm = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd"
 if (-not (Test-Path -LiteralPath $pnpm)) { $pnpm = "pnpm" }
-$pythonExe = Join-Path $backend ".venv\Scripts\python.exe"
+$pythonExe = Join-Path (Join-Path (Join-Path $runtimeRoot "backend") ".venv") "Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonExe)) {
-  throw "Backend Python environment is missing. Run Agent startup first."
+  & (Join-Path (Join-Path $agentRoot "内部脚本") "init-recipient.ps1")
+}
+if (-not (Test-Path -LiteralPath $pythonExe)) {
+  throw "Backend Python environment is missing after initialization."
 }
 
 function Invoke-Checked {

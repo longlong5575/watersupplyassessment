@@ -409,6 +409,47 @@ function mapBackendReports(rows: BackendReportRow[]): Report[] {
   }));
 }
 
+function downloadReports(reports: Report[]) {
+  reports.filter(report => report.downloadUrl).forEach((report, index) => {
+    window.setTimeout(() => {
+      const link = document.createElement("a");
+      link.href = report.downloadUrl!;
+      link.download = report.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }, index * 250);
+  });
+}
+
+async function openReportFolder(report: Report) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/reports/${report.id}/open-folder`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(await response.text());
+  } catch (error) {
+    console.warn("打开报告目录失败", error);
+    window.alert("打开报告目录失败，请确认后端正在运行且报告文件存在。");
+  }
+}
+
+function localizeBackendMessage(message: string): string {
+  const text = message || "";
+  if (text.includes("No reviewed or locked assessment records are available")) return "没有可用于生成报告的已复核或已锁定考核记录。";
+  if (text.includes("No reviewed or locked data for:")) return text.replace("No reviewed or locked data for:", "以下镇街缺少已复核或已锁定数据：");
+  if (text.includes("has no water quality record")) return text.replace("has no water quality record.", "缺少水质抽检记录。");
+  if (text.includes("has no survey record")) return text.replace("has no survey record.", "缺少问卷调查记录。");
+  if (text.includes("has no attachment")) return text.replace("has no attachment.", "缺少附件。");
+  if (text.includes("Report task failed")) return "报告任务提交失败，请确认后端服务已启动。";
+  if (text.includes("Report task polling failed")) return "报告任务状态查询失败，请确认后端服务已启动。";
+  if (text.includes("Report generation failed")) return "报告生成失败，请检查数据和后端日志。";
+  if (text.includes("Project not found")) return "未找到所选项目。";
+  if (text.includes("Selected towns do not belong to the project")) return "所选镇街不属于当前项目。";
+  return text;
+}
+
 function mapBackendTownRows(rows: BackendTownRow[], current: TownSurvey[]): TownSurvey[] {
   const existingByName = new Map(current.map(town => [town.name, town]));
   return rows.map(row => {
@@ -776,7 +817,7 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim() }),
       });
-      if (!response.ok) throw new Error("login failed");
+      if (!response.ok) throw new Error("登录失败");
       const auth = await response.json();
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
@@ -1559,27 +1600,27 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
         });
         if (!response.ok) {
           const detail = await response.json().catch(() => null);
-          throw new Error(detail?.detail ?? `Report task failed: ${response.status}`);
+          throw new Error(localizeBackendMessage(detail?.detail ?? `Report task failed: ${response.status}`));
         }
         const task = await response.json();
         const pollTask = async () => {
           if (cancelled) return;
           const statusResponse = await fetch(`${API_BASE_URL}/report-tasks/${task.id}`);
-          if (!statusResponse.ok) throw new Error(`Report task polling failed: ${statusResponse.status}`);
+          if (!statusResponse.ok) throw new Error(localizeBackendMessage(`Report task polling failed: ${statusResponse.status}`));
           const latest = await statusResponse.json();
           if (latest.status === "completed") {
             onReportsReady(mapBackendReports(latest.reports ?? []));
             setBackendDone(true);
             return;
           }
-          if (latest.status === "failed") throw new Error(latest.error ?? "Report generation failed");
+          if (latest.status === "failed") throw new Error(localizeBackendMessage(latest.error ?? "Report generation failed"));
           window.setTimeout(() => { void pollTask(); }, 1500);
         };
         await pollTask();
       } catch (error) {
         console.error(error);
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : "报告任务提交失败，请确认后端服务已启动。";
+          const message = error instanceof Error ? localizeBackendMessage(error.message) : "报告任务提交失败，请确认后端服务已启动。";
           setBackendError(message);
           setLogs(prev => [...prev, message]);
         }
@@ -1676,8 +1717,8 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
               </div>
               <div className="px-4 py-4 space-y-3">
                 <div>
-                  <p className="text-xs text-muted-foreground mb-1">当前 Agent</p>
-                  <p className="text-sm font-mono font-medium text-foreground">ReportGeneratorAgent</p>
+                  <p className="text-xs text-muted-foreground mb-1">当前处理助手</p>
+                  <p className="text-sm font-medium text-foreground">报告生成助手</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">当前动作</p>
@@ -1808,7 +1849,10 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
                 <p className="text-sm font-semibold text-foreground">全部报告生成完毕</p>
                 <p className="text-xs text-muted-foreground mt-0.5">共生成 {reports.length} 份报告 · 耗时 {elapsedSeconds !== null ? formatElapsed(elapsedSeconds) : "—"}</p>
               </div>
-              <button className="ml-auto inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              <button
+                onClick={() => downloadReports(reports)}
+                disabled={!reports.some(report => report.downloadUrl)}
+                className={`ml-auto inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold text-white transition-opacity ${reports.some(report => report.downloadUrl) ? "hover:opacity-90" : "opacity-50 cursor-not-allowed"}`}
                 style={{ background: "var(--status-success)" }}>
                 <Download size={15} />
                 下载全部
@@ -1852,6 +1896,13 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
                           </a>
                           <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                             <Eye size={12} /> 预览
+                          </button>
+                          <button
+                            onClick={() => openReportFolder(r)}
+                            disabled={!r.downloadUrl}
+                            className={`text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}
+                          >
+                            <FolderOpen size={12} /> 目录
                           </button>
                         </div>
                       </td>
@@ -1988,6 +2039,13 @@ function HistoryPage({ onNav, reports, onPreviewReport }: { onNav: (p: Page) => 
                       </a>
                       <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                         <Eye size={12} /> 预览
+                      </button>
+                      <button
+                        onClick={() => openReportFolder(r)}
+                        disabled={!r.downloadUrl}
+                        className={`text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}
+                      >
+                        <FolderOpen size={12} /> 目录
                       </button>
                     </div>
                   </td>
@@ -3681,24 +3739,24 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           </table>
         </div>
 
-        {/* Data readiness check */}
+        {/* 生成前数据检查 */}
         <div className="bg-card border border-border rounded-lg px-6 py-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Data readiness check</h3>
-              <p className="text-xs text-muted-foreground mt-1">Runs before report generation and blocks missing data.</p>
+              <h3 className="text-sm font-semibold text-foreground">生成前数据检查</h3>
+              <p className="text-xs text-muted-foreground mt-1">生成报告前自动检查已复核数据，缺少关键数据时会阻止继续生成。</p>
             </div>
             <span className={`rounded px-2 py-1 text-xs ${precheck?.ok ? "bg-green-50 text-green-700" : precheckLoading ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
-              {precheckLoading ? "Checking" : precheck?.ok ? "Ready" : "Needs data"}
+              {precheckLoading ? "检查中" : precheck?.ok ? "可生成" : "需补数据"}
             </span>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Selected towns</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.requestedTownCount ?? visibleTowns.length}</div></div>
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Ready towns</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.availableTownCount ?? 0}</div></div>
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">Ready records</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.recordCount ?? 0}</div></div>
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">已选镇街</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.requestedTownCount ?? visibleTowns.length}</div></div>
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">可生成镇街</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.availableTownCount ?? 0}</div></div>
+            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">可用记录</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.recordCount ?? 0}</div></div>
           </div>
-          {!!precheck?.errors.length && <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{precheck.errors.slice(0, 4).map(item => <p key={item}>{item}</p>)}</div>}
-          {!!precheck?.warnings.length && <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{precheck.warnings.slice(0, 4).map(item => <p key={item}>{item}</p>)}</div>}
+          {!!precheck?.errors.length && <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{precheck.errors.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
+          {!!precheck?.warnings.length && <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{precheck.warnings.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
         </div>
         {/* Report period */}
         <div className="bg-card border border-border rounded-lg">
@@ -3842,7 +3900,7 @@ export default function App() {
         const data = await response.json();
         if (!cancelled && Array.isArray(data.items)) setHistoryReports(mapBackendReports(data.items));
       } catch (error) {
-        console.warn("Report history sync failed", error);
+        console.warn("报告历史同步失败", error);
       }
     }
 
@@ -3853,7 +3911,7 @@ export default function App() {
         if (!cancelled && Array.isArray(data.items)) setCities(data.items);
         if (!cancelled && Array.isArray(data.items) && data.items.length) setReportProjectId(current => current || data.items[0].id);
       } catch (error) {
-        console.warn("City sync failed", error);
+        console.warn("项目列表同步失败", error);
       }
     }
 
@@ -3871,7 +3929,7 @@ export default function App() {
           setDashboardOverview(data.overview ?? null);
         }
       } catch (error) {
-        console.warn("Dashboard sync failed", error);
+        console.warn("数据看板同步失败", error);
       }
     }
 

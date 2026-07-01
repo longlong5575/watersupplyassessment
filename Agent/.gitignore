@@ -3,8 +3,11 @@
 **/dist/
 **/storage/
 **/__pycache__/
+**/test-results/
 *.pyc
 *.pyo
+*.pid
+*.log
 .DS_Store
 **/.DS_Store
 startup.log

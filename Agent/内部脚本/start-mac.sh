@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-AGENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+AGENT_PARENT="$(dirname "$AGENT_ROOT")"
+if [[ "$(basename "$AGENT_PARENT")" == "watersupplyassessment" ]]; then
+  WORKSPACE_ROOT="$(dirname "$AGENT_PARENT")"
+else
+  WORKSPACE_ROOT="$AGENT_PARENT"
+fi
+RUNTIME_ROOT="${WATERSUPPLY_RUNTIME_DIR:-$WORKSPACE_ROOT/运行脚本/watersupply-agent-runtime}"
 BACKEND="$AGENT_ROOT/backend"
 FRONT="$AGENT_ROOT/frontend/front"
 MOBILE="$AGENT_ROOT/frontend/front-mobile"
-LOG="$AGENT_ROOT/startup-mac.log"
+RUNTIME_BACKEND="$RUNTIME_ROOT/backend"
+RUNTIME_FRONT="$RUNTIME_ROOT/frontend/front"
+RUNTIME_MOBILE="$RUNTIME_ROOT/frontend/front-mobile"
+STORAGE_DIR="$RUNTIME_ROOT/storage"
+LOG_DIR="$RUNTIME_ROOT/logs"
+LOG="$LOG_DIR/startup-mac.log"
 
 BACKEND_PID=""
 FRONT_PID=""
@@ -46,6 +59,7 @@ wait_for_url() {
 
 trap cleanup INT TERM
 
+mkdir -p "$LOG_DIR" "$RUNTIME_BACKEND" "$STORAGE_DIR"
 : > "$LOG"
 log "Starting Agent services for macOS..."
 
@@ -59,16 +73,27 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -d "$BACKEND/.venv" ]]; then
+if [[ ! -d "$RUNTIME_BACKEND/.venv" ]]; then
   log "Creating backend virtual environment..."
-  python3 -m venv "$BACKEND/.venv"
+  python3 -m venv "$RUNTIME_BACKEND/.venv"
 fi
 
 log "Installing backend dependencies..."
-"$BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1 || \
-  "$BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1
+"$RUNTIME_BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1 || \
+  "$RUNTIME_BACKEND/.venv/bin/python" -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r "$BACKEND/requirements.txt" >>"$LOG" 2>&1
 
-for app_dir in "$FRONT" "$MOBILE"; do
+sync_frontend() {
+  local source_dir="$1"
+  local target_dir="$2"
+  mkdir -p "$(dirname "$target_dir")"
+  mkdir -p "$target_dir"
+  rsync -a --delete --exclude node_modules --exclude dist --exclude .vite --exclude .env.local --exclude '*.log' --exclude '*.pid' "$source_dir/" "$target_dir/"
+}
+
+sync_frontend "$FRONT" "$RUNTIME_FRONT"
+sync_frontend "$MOBILE" "$RUNTIME_MOBILE"
+
+for app_dir in "$RUNTIME_FRONT" "$RUNTIME_MOBILE"; do
   if [[ -f "$app_dir/.env.example" && ! -f "$app_dir/.env.local" ]]; then
     cp "$app_dir/.env.example" "$app_dir/.env.local"
   fi
@@ -82,18 +107,16 @@ for app_dir in "$FRONT" "$MOBILE"; do
   fi
 done
 
-mkdir -p "$BACKEND/storage"
-
 log "Starting backend: http://127.0.0.1:8000"
-(cd "$BACKEND" && DISABLE_SQLALCHEMY_CEXT_RUNTIME=1 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --loop asyncio --http h11 --ws none) >>"$LOG" 2>&1 &
+(cd "$BACKEND" && DISABLE_SQLALCHEMY_CEXT_RUNTIME=1 WATERSUPPLY_RUNTIME_DIR="$RUNTIME_ROOT" DATABASE_URL="sqlite:///$STORAGE_DIR/assessment.db" STORAGE_DIR="$STORAGE_DIR" CELERY_TASK_ALWAYS_EAGER=true "$RUNTIME_BACKEND/.venv/bin/python" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --loop asyncio --http h11 --ws none) >>"$LOG" 2>&1 &
 BACKEND_PID="$!"
 
 log "Starting PC frontend: http://127.0.0.1:5173"
-(cd "$FRONT" && run_frontend_dev) >>"$LOG" 2>&1 &
+(cd "$RUNTIME_FRONT" && run_frontend_dev) >>"$LOG" 2>&1 &
 FRONT_PID="$!"
 
 log "Starting mobile frontend: http://127.0.0.1:5174"
-(cd "$MOBILE" && run_frontend_dev) >>"$LOG" 2>&1 &
+(cd "$RUNTIME_MOBILE" && run_frontend_dev) >>"$LOG" 2>&1 &
 MOBILE_PID="$!"
 
 for _ in {1..80}; do

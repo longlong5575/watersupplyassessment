@@ -6,6 +6,8 @@ node_modules/
 dist/
 .vite/
 *.log
+/运行脚本/watersupply-agent-runtime/
+../运行脚本/watersupply-agent-runtime/
 .DS_Store
 **/.DS_Store
 

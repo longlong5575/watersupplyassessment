@@ -173,7 +173,7 @@ async function submitTownPackageToBackend(pkg: TownPackage, token: string) {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(pkg),
   });
-  if (!createResponse.ok) throw new Error(`Create record failed: ${createResponse.status}`);
+  if (!createResponse.ok) throw new Error(`创建考核记录失败：${createResponse.status}`);
 
   const record = await createResponse.json();
   const recordIds = Array.isArray(record.recordIds) && record.recordIds.length ? record.recordIds : [record.id];
@@ -183,7 +183,7 @@ async function submitTownPackageToBackend(pkg: TownPackage, token: string) {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!submitResponse.ok) throw new Error(`Submit record failed: ${submitResponse.status}`);
+    if (!submitResponse.ok) throw new Error(`提交考核记录失败：${submitResponse.status}`);
     submitted.push(await submitResponse.json());
   }
   return submitted;
@@ -509,7 +509,7 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim() }),
       });
-      if (!response.ok) throw new Error("login failed");
+      if (!response.ok) throw new Error("登录失败");
       const auth = await response.json();
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
@@ -660,6 +660,13 @@ function parseCycleNameParts(name: string): { year: number; periodId: string } |
   return period ? { year: Number(matched[1]), periodId: period.id } : null;
 }
 
+function cycleStatusLabel(status: string): string {
+  if (status === "active") return "当前启用";
+  if (status === "closed") return "已关闭";
+  if (status === "draft") return "草稿";
+  return status || "固定选项";
+}
+
 function P0Cycle({ cityId, cityName, onBack, onNext }: {
   cityId?: string;
   cityName: string;
@@ -766,7 +773,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
         <div className="rounded-xl border border-border bg-white px-4 py-3 flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold text-foreground">{selected.name}</div>
-            <div className="text-xs text-muted-foreground mt-1">{selected.backendId ? `后台批次：${selected.status}` : selected.status}</div>
+            <div className="text-xs text-muted-foreground mt-1">{selected.backendId ? `后台批次：${cycleStatusLabel(selected.status)}` : cycleStatusLabel(selected.status)}</div>
           </div>
           <CheckCircle className="w-5 h-5 text-primary" />
         </div>
@@ -2941,7 +2948,7 @@ export default function App() {
   };
 
   const queuePackage = (pkg: TownPackage, error: unknown) => {
-    const message = error instanceof Error ? error.message : "sync failed";
+    const message = error instanceof Error ? error.message : "同步失败";
     setSyncQueue(prev => {
       const existing = prev.find(item => item.pkg.exportedAt === pkg.exportedAt);
       if (existing) {
@@ -3153,7 +3160,7 @@ export default function App() {
               setSubmitError("");
               const pkg = buildPackage();
               try {
-                if (!auth?.token) throw new Error("missing auth");
+                if (!auth?.token) throw new Error("登录状态已失效，请重新登录");
                 stagePackageForSync(pkg);
                 await submitTownPackageToBackend(pkg, auth.token);
                 markPackageSynced(pkg);

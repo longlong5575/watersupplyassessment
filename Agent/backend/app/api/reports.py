@@ -1,4 +1,7 @@
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -230,3 +233,22 @@ def preview(report_id: str, session: Session = Depends(get_session)):
     if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
     if path.suffix.lower() != ".docx": raise HTTPException(status_code=415, detail="Only DOCX reports can be previewed")
     return {"report": serialize_report(report), "content": docx_preview(path)}
+
+
+@router.post("/api/reports/{report_id}/open-folder")
+def open_report_folder(report_id: str, session: Session = Depends(get_session)):
+    report = session.get(Report, report_id)
+    if report is None: raise HTTPException(status_code=404, detail="Report not found")
+    path = Path(report.storage_key)
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
+    folder = path.parent
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(folder))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Report folder could not be opened") from exc
+    return {"ok": True, "folder": str(folder)}

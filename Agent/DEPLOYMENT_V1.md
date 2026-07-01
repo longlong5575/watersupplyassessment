@@ -86,9 +86,10 @@ GET /api/dashboard/towns
 测试工程师复验：
 
 ```powershell
-Agent\backend\.venv\Scripts\python.exe Agent\测试\test_project_pipeline.py
-Agent\backend\.venv\Scripts\python.exe Agent\测试\check_report_quality.py
+powershell -ExecutionPolicy Bypass -File .\Agent\测试\run_agent_checks.ps1
 ```
+
+测试结果保存在 `排水\运行脚本\watersupply-agent-runtime\test-results`。
 
 验收重点：
 

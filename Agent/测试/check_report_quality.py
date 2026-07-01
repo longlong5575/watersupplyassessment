@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -78,13 +79,17 @@ def inspect_report(path: Path) -> dict[str, object]:
 
 def main() -> None:
     root = Path(__file__).resolve().parent
-    report_root = root / "结果" / "storage" / "generated_reports"
+    agent_root = root.parent
+    base = agent_root.parent.parent if agent_root.parent.name.lower() == "watersupplyassessment" else agent_root.parent
+    runtime_root = Path(os.environ.get("WATERSUPPLY_RUNTIME_DIR") or base / "运行脚本" / "watersupply-agent-runtime")
+    result_root = runtime_root / "test-results"
+    report_root = result_root / "project-pipeline" / "storage" / "generated_reports"
     reports = latest_reports(report_root)
     if len(reports) < 2:
         raise FileNotFoundError(f"未找到郁南和茂南两类最新版报告：{report_root}")
     items = [inspect_report(path) for path in reports]
     result = {"passed": all(item["passed"] for item in items), "items": items}
-    output = root / "结果" / "report-quality-summary.json"
+    output = result_root / "report-quality-summary.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))

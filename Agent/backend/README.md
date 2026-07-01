@@ -1,62 +1,56 @@
 # 排水绩效考核后端
 
-这是 Agent 交付副本中的后端，配合 `Agent/frontend/front` 和 `Agent/frontend/front-mobile` 使用。
+这是 `Agent` 交付目录中的后端，配合：
 
-## 收件人怎么运行
+- `Agent/frontend/front` 平台端
+- `Agent/frontend/front-mobile` 移动端
 
-### Windows
+## 收件人运行方式
 
 回到 `Agent` 文件夹，双击：
 
 ```text
-start.vbs
+点我启动.vbs
 ```
 
-### macOS
+脚本会静默准备后端、两个前端和运行目录，然后打开：
 
-在终端进入 `Agent` 文件夹，执行：
+- 平台端：默认 http://127.0.0.1:5173
+- 移动端：默认 http://127.0.0.1:5174
+- 后端接口：默认 http://127.0.0.1:8000
 
-```bash
-chmod +x ./start-mac.sh
-./start-mac.sh
+如果默认端口被占用，启动脚本会自动换到可用端口，并把当前地址写入 `排水\运行脚本\watersupply-agent-runtime\logs\startup-status.json`。
+
+运行生成物统一放在：
+
+```text
+排水\运行脚本\watersupply-agent-runtime
 ```
 
-首次运行会自动准备后端环境、安装前端依赖、写入本地接口配置，然后静默启动：
+## 测试工程师复验
 
-- PC 后台：`http://127.0.0.1:5173`
-- 移动端：`http://127.0.0.1:5174`
-- 后端接口：`http://127.0.0.1:8000`
-
-启动过程不弹出命令行黑框。启动失败时查看 `Agent/startup.log`。
-
-## 测试工程师怎么复验
-
-在 `Agent/tests` 里运行：
+在 `watersupplyassessment` 目录运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run_agent_checks.ps1
+powershell -ExecutionPolicy Bypass -File .\Agent\测试\run_agent_checks.ps1
 ```
 
-报告任务单独复验：
+复验会覆盖：
 
-```powershell
-..\backend\.venv\Scripts\python.exe .\run_report_task_check.py
-..\backend\.venv\Scripts\python.exe .\check_report_quality.py
+- 后端语法编译
+- 移动端提交到平台端看板
+- 复核、锁定、生成 DOCX 报告
+- 报告内容质量检查
+- 平台端和移动端类型检查、正式构建
+
+测试结果会写到：
+
+```text
+排水\运行脚本\watersupply-agent-runtime\test-results
 ```
 
-复验结果保存在 `Agent/测试/结果`，正式验证报告为 `Agent/测试/Agent前后端联调测试验证报告.docx`。
+发给别人之前也可以双击 `交付前检查.vbs`，它会自动运行同一套复验并检查源码目录是否残留运行生成物。
 
-## 已验证链路
+## 目录原则
 
-- 移动端读取镇街、周期、标准并提交考核记录。
-- PC 后台看板实时读取提交记录。
-- 后台完成复核、锁定。
-- 报告任务生成正式 DOCX。
-- 郁南、茂南会分别生成对应项目结构的 DOCX 正文和汇总报告。
-- 正式报告会检查附件目录、Agent 已确认摘要、水质限值、表格序号、异常英文状态和乱码。
-
-## V1 生产化说明
-
-从本地原型部署到内部员工可用环境时，参考 `Agent/DEPLOYMENT_V1.md`。正式环境建议使用 PostgreSQL、Nginx 统一路由、独立文件存储目录和定期备份；本地启动脚本只用于开发或交付演示。
-
-本地运行产物 `.venv`、`node_modules`、`dist`、`storage` 和日志不属于交付源码，收件人首次运行时会自动生成。
+`Agent` 只放源码、锁文件、说明和启动入口；虚拟环境、前端依赖、日志、数据库、上传附件和生成报告都属于运行生成物，不放进交付源码目录。

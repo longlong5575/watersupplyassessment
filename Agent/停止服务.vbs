@@ -3,8 +3,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 
 agentRoot = fso.GetParentFolderName(WScript.ScriptFullName)
 internalDir = agentRoot & "\" & ChrW(&H5185) & ChrW(&H90E8) & ChrW(&H811A) & ChrW(&H672C)
-starter = internalDir & "\start.ps1"
+scriptPath = internalDir & "\stop-services.ps1"
 
 shell.CurrentDirectory = agentRoot
-command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & starter & """"
-shell.Run command, 0, False
+shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & scriptPath & """", 0, False

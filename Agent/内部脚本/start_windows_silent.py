@@ -15,14 +15,42 @@ AGENT_ROOT = SCRIPT_DIR.parent
 BACKEND = AGENT_ROOT / "backend"
 FRONT = AGENT_ROOT / "frontend" / "front"
 MOBILE = AGENT_ROOT / "frontend" / "front-mobile"
-LOG_DIR = AGENT_ROOT / "logs"
+
+
+def default_runtime_root() -> Path:
+    if os.environ.get("WATERSUPPLY_RUNTIME_DIR"):
+        return Path(os.environ["WATERSUPPLY_RUNTIME_DIR"])
+    base = AGENT_ROOT.parent.parent if AGENT_ROOT.parent.name.lower() == "watersupplyassessment" else AGENT_ROOT.parent
+    return base / "运行脚本" / "watersupply-agent-runtime"
+
+
+RUNTIME_ROOT = default_runtime_root()
+LOG_DIR = RUNTIME_ROOT / "logs"
+BACKEND_RUNTIME = RUNTIME_ROOT / "backend"
+FRONT_RUNTIME = RUNTIME_ROOT / "frontend" / "front"
+MOBILE_RUNTIME = RUNTIME_ROOT / "frontend" / "front-mobile"
 STARTUP_LOG = LOG_DIR / "startup.log"
+COPY_IGNORE = shutil.ignore_patterns("node_modules", "dist", ".vite", ".env.local", "*.log", "*.pid", "__pycache__")
 
 
 def log(message: str) -> None:
     LOG_DIR.mkdir(exist_ok=True)
     with STARTUP_LOG.open("a", encoding="utf-8") as handle:
         handle.write(message + "\n")
+
+
+def runtime_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    storage_dir = RUNTIME_ROOT / "storage"
+    env = os.environ.copy()
+    env.update({
+        "WATERSUPPLY_RUNTIME_DIR": str(RUNTIME_ROOT),
+        "DATABASE_URL": f"sqlite:///{(storage_dir / 'assessment.db').as_posix()}",
+        "STORAGE_DIR": str(storage_dir),
+        "CELERY_TASK_ALWAYS_EAGER": "true",
+    })
+    if extra:
+        env.update(extra)
+    return env
 
 
 def run(args: list[str], cwd: Path) -> None:
@@ -35,7 +63,7 @@ def run(args: list[str], cwd: Path) -> None:
             stderr=output,
             stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
-            env=os.environ.copy(),
+            env=runtime_env(),
         )
 
 
@@ -91,19 +119,37 @@ def ensure_env_file(directory: Path) -> None:
 
 
 def ensure_backend(python: Path) -> Path:
-    venv_python = BACKEND / ".venv" / "Scripts" / "python.exe"
+    venv_dir = BACKEND_RUNTIME / ".venv"
+    venv_python = venv_dir / "Scripts" / "python.exe"
+    BACKEND_RUNTIME.mkdir(parents=True, exist_ok=True)
     if not venv_python.exists():
-        run([str(python), "-m", "venv", ".venv"], BACKEND)
+        run([str(python), "-m", "venv", str(venv_dir)], BACKEND)
     run([str(venv_python), "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"], BACKEND)
     return venv_python
 
 
-def ensure_frontend(directory: Path, pnpm: str) -> None:
+def sync_runtime_frontend(source: Path, target: Path) -> Path:
+    target.mkdir(parents=True, exist_ok=True)
+    for stale in ("src", "public"):
+        stale_path = target / stale
+        if stale_path.exists():
+            shutil.rmtree(stale_path)
+    for pattern in ("*.html", "*.json", "*.yaml", "*.yml", "*.mjs", "*.js", "*.ts"):
+        for stale_file in target.glob(pattern):
+            if stale_file.name not in {"package-lock.json"}:
+                stale_file.unlink()
+    shutil.copytree(source, target, ignore=COPY_IGNORE, dirs_exist_ok=True)
+    return target
+
+
+def ensure_frontend(source: Path, target: Path, pnpm: str) -> Path:
+    directory = sync_runtime_frontend(source, target)
     ensure_env_file(directory)
     if Path(pnpm).name.lower().startswith("npx"):
         run([pnpm, "--yes", "pnpm@10.12.1", "install", "--frozen-lockfile"], directory)
     else:
         run([pnpm, "install", "--frozen-lockfile"], directory)
+    return directory
 
 
 def start_detached(args: list[str], cwd: Path, name: str) -> None:
@@ -117,7 +163,7 @@ def start_detached(args: list[str], cwd: Path, name: str) -> None:
             stdout=stdout,
             stderr=stderr,
             creationflags=flags,
-            env={**os.environ.copy(), "BROWSER": "none"},
+            env=runtime_env({"BROWSER": "none"}),
         )
     (LOG_DIR / f"{name}.pid").write_text(str(process.pid), encoding="utf-8")
 
@@ -148,10 +194,12 @@ def main() -> None:
         python = find_python()
         pythonw = find_pythonw(python)
         pnpm = find_pnpm()
+        RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+        (RUNTIME_ROOT / "storage").mkdir(parents=True, exist_ok=True)
 
         backend_python = ensure_backend(python)
-        ensure_frontend(FRONT, pnpm)
-        ensure_frontend(MOBILE, pnpm)
+        front_runtime = ensure_frontend(FRONT, FRONT_RUNTIME, pnpm)
+        mobile_runtime = ensure_frontend(MOBILE, MOBILE_RUNTIME, pnpm)
 
         backend_running = is_available("http://127.0.0.1:8000/health")
         front_running = is_available("http://127.0.0.1:5173")
@@ -164,9 +212,9 @@ def main() -> None:
                 "backend-launcher",
             )
         if not front_running:
-            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(FRONT), "front"], AGENT_ROOT, "front-launcher")
+            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(front_runtime), "front"], AGENT_ROOT, "front-launcher")
         if not mobile_running:
-            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(MOBILE), "front-mobile"], AGENT_ROOT, "front-mobile-launcher")
+            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(mobile_runtime), "front-mobile"], AGENT_ROOT, "front-mobile-launcher")
 
         wait_for("http://127.0.0.1:8000/health")
         wait_for("http://127.0.0.1:5173")

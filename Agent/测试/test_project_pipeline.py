@@ -7,7 +7,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
-RESULTS = Path(__file__).resolve().parent / "结果"
+
+
+def default_runtime_root() -> Path:
+    if os.environ.get("WATERSUPPLY_RUNTIME_DIR"):
+        return Path(os.environ["WATERSUPPLY_RUNTIME_DIR"])
+    base = ROOT.parent.parent if ROOT.parent.name.lower() == "watersupplyassessment" else ROOT.parent
+    return base / "运行脚本" / "watersupply-agent-runtime"
+
+
+RESULTS = default_runtime_root() / "test-results" / "project-pipeline"
 RESULTS.mkdir(parents=True, exist_ok=True)
 DB_PATH = RESULTS / "project-pipeline-test.db"
 if DB_PATH.exists():

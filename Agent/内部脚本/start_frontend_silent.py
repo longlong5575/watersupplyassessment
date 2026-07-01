@@ -9,11 +9,21 @@ from pathlib import Path
 
 
 AGENT_ROOT = Path(__file__).resolve().parent.parent
-LOG_DIR = AGENT_ROOT / "logs"
+
+
+def default_runtime_root() -> Path:
+    if os.environ.get("WATERSUPPLY_RUNTIME_DIR"):
+        return Path(os.environ["WATERSUPPLY_RUNTIME_DIR"])
+    base = AGENT_ROOT.parent.parent if AGENT_ROOT.parent.name.lower() == "watersupplyassessment" else AGENT_ROOT.parent
+    return base / "运行脚本" / "watersupply-agent-runtime"
+
+
+RUNTIME_ROOT = default_runtime_root()
+LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_DIR = AGENT_ROOT / "backend"
 BACKEND_STARTER = BACKEND_DIR / "start_backend_silent.py"
-BACKEND_PYTHONW = BACKEND_DIR / ".venv" / "Scripts" / "pythonw.exe"
-BACKEND_PYTHON = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
+BACKEND_PYTHONW = RUNTIME_ROOT / "backend" / ".venv" / "Scripts" / "pythonw.exe"
+BACKEND_PYTHON = RUNTIME_ROOT / "backend" / ".venv" / "Scripts" / "python.exe"
 PNPM_CANDIDATES = [
     Path(os.environ.get("USERPROFILE", "")) / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "bin" / "pnpm.cmd",
 ]
@@ -42,6 +52,14 @@ def ensure_backend(creationflags: int) -> None:
         return
     LOG_DIR.mkdir(exist_ok=True)
     with (LOG_DIR / "backend-autostart.out.log").open("ab") as stdout, (LOG_DIR / "backend-autostart.err.log").open("ab") as stderr:
+        storage_dir = RUNTIME_ROOT / "storage"
+        env = os.environ.copy()
+        env.update({
+            "WATERSUPPLY_RUNTIME_DIR": str(RUNTIME_ROOT),
+            "DATABASE_URL": f"sqlite:///{(storage_dir / 'assessment.db').as_posix()}",
+            "STORAGE_DIR": str(storage_dir),
+            "CELERY_TASK_ALWAYS_EAGER": "true",
+        })
         subprocess.Popen(
             [str(python), str(BACKEND_STARTER)],
             cwd=str(BACKEND_DIR),
@@ -49,7 +67,7 @@ def ensure_backend(creationflags: int) -> None:
             stdout=stdout,
             stderr=stderr,
             creationflags=creationflags,
-            env=os.environ.copy(),
+            env=env,
         )
     for _ in range(12):
         if backend_is_ready():
@@ -67,6 +85,7 @@ def main() -> None:
 
     env = os.environ.copy()
     env["BROWSER"] = "none"
+    env["WATERSUPPLY_RUNTIME_DIR"] = str(RUNTIME_ROOT)
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
     ensure_backend(creationflags)
 
