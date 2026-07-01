@@ -763,10 +763,6 @@ function Sidebar({ current, onNav, user, onLogout }: { current: Page; onNav: (p:
           <div className="font-medium opacity-100">{user.name}</div>
           <div className="font-mono mt-0.5">{user.role === "admin" ? "管理员" : "普通用户"}</div>
         </div>
-        <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm opacity-50 hover:opacity-80 transition-colors">
-          <Settings size={16} />
-          系统设置
-        </button>
         <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm opacity-50 hover:opacity-80 transition-colors">
           <LogOut size={16} />
           退出登录
@@ -2862,8 +2858,8 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
   const lowScoreTotal = towns.reduce((sum, town) => sum + (town.lowScoreCount ?? 0), 0);
   const missingPhotoTotal = towns.reduce((sum, town) => sum + (town.missingPhotoCount ?? 0), 0);
   const returnedTotal = towns.reduce((sum, town) => sum + (town.returnedCount ?? 0), 0);
-  const cityTownOptions = selectedCityId ? towns.filter(town => town.cityId === selectedCityId || !town.cityId) : towns;
-  const selectedCityName = cities.find(city => city.id === selectedCityId)?.name ?? "全部城市";
+  const cityTownOptions = selectedCityId ? towns.filter(town => town.cityId === selectedCityId) : towns;
+  const selectedProjectName = cities.find(city => city.id === selectedCityId)?.name ?? "全部项目";
   const cityTownCount = overview?.townCount ?? towns.length;
   const completedTownCount = overview?.completedTownCount ?? completed.length;
   const inprogressTownCount = overview?.inprogressTownCount ?? inprogress.length;
@@ -2943,17 +2939,17 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="数据看板" subtitle="调研进度总览" breadcrumbs={["数据看板"]} />
-      <div className="px-8 py-6 space-y-6 max-w-5xl">
+      <div className="px-8 py-6 space-y-6 w-full">
         <div className="bg-card border border-border rounded-lg px-5 py-4">
           <div className="grid grid-cols-[1fr_1fr_auto] gap-3 items-end">
             <label className="space-y-1">
-              <span className="block text-xs text-muted-foreground">城市</span>
+              <span className="block text-xs text-muted-foreground">项目</span>
               <select
                 value={selectedCityId}
                 onChange={event => { setSelectedCityId(event.target.value); setSelectedTownId(""); }}
                 className="h-9 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
               >
-                <option value="">全部城市</option>
+                <option value="">全部项目</option>
                 {cities.map(city => <option key={city.id} value={city.id}>{city.name}</option>)}
               </select>
             </label>
@@ -2976,14 +2972,14 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
             </button>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            当前统计范围：{selectedCityName}。核心口径为城市下镇街完成情况，再下钻到各镇街村点完成情况。
+            当前统计范围：{selectedProjectName}。核心口径为项目下镇街完成情况，再下钻到各镇街村点完成情况。
           </p>
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: "城市镇街总数", value: cityTownCount, suffix: "个", color: "text-foreground", bg: "bg-card" },
+            { label: "项目镇街总数", value: cityTownCount, suffix: "个", color: "text-foreground", bg: "bg-card" },
             { label: "已完成镇街", value: completedTownCount, suffix: "个", color: "text-[var(--status-success)]", bg: "bg-[var(--status-success-bg)]" },
             { label: "未完成镇街", value: inprogressTownCount + pendingTownCount, suffix: "个", color: "text-blue-600", bg: "bg-blue-50" },
             { label: "村点完成", value: `${completedVillageCount}/${villageCount}`, suffix: "", color: "text-foreground", bg: "bg-muted" },

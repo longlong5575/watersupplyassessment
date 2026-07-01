@@ -94,6 +94,7 @@ def towns(city_id: str | None = None, session: Session = Depends(get_session)):
         statement = statement.where(Town.city_id == city_id)
     return {"items": [{
         "id": town.id,
+        "cityId": town.city_id,
         "name": town.name,
         "chapterCode": town.chapter_code,
         "assessmentTargets": town.assessment_targets or [],

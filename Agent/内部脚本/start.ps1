@@ -10,7 +10,6 @@ $logDir = Join-Path $runtimeRoot "logs"
 $logPath = Join-Path $logDir "startup.log"
 $statusPath = Join-Path $logDir "startup-status.txt"
 $statusJsonPath = Join-Path $logDir "startup-status.json"
-$statusWindowPath = Join-Path $logDir "startup-status.hta"
 $backend = Join-Path $agentRoot "backend"
 $front = Join-Path (Join-Path $runtimeRoot "frontend") "front"
 $mobile = Join-Path (Join-Path $runtimeRoot "frontend") "front-mobile"
@@ -45,73 +44,6 @@ function Write-StartupStatus([string]$Stage, [string]$Message, [hashtable]$Extra
   $payload = [ordered]@{ generatedAt = $timestamp; stage = $Stage; message = $Message; runtimeRoot = $runtimeRoot; logPath = $logPath }
   foreach ($key in $Extra.Keys) { $payload[$key] = $Extra[$key] }
   $payload | ConvertTo-Json -Depth 8 | Out-File -LiteralPath $statusJsonPath -Encoding utf8
-}
-
-function Start-StatusWindow {
-  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-  $statusFile = $statusJsonPath.Replace("\", "\\")
-  $title = $Text.Title
-  $html = @"
-<html>
-<head>
-<title>$title</title>
-<hta:application id="app" applicationname="$title" border="thin" caption="yes" maximizebutton="no" minimizebutton="yes" showintaskbar="yes" singleinstance="yes" sysmenu="yes" windowstate="normal" />
-<style>
-body { font-family: "Microsoft YaHei", Segoe UI, sans-serif; margin: 0; background: #f6f8fb; color: #172033; }
-.wrap { padding: 18px; }
-.title { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
-.stage { font-size: 14px; font-weight: 700; margin: 8px 0; }
-.msg { font-size: 12px; color: #5c6678; line-height: 1.6; }
-.bar { height: 8px; background: #dce4ef; border-radius: 999px; overflow: hidden; margin: 14px 0; }
-.fill { width: 45%; height: 100%; background: #1d5f99; animation: pulse 1.2s infinite alternate; }
-.links { font-size: 12px; color: #1d5f99; line-height: 1.7; margin-top: 8px; }
-@keyframes pulse { from { opacity: .45; width: 35%; } to { opacity: 1; width: 88%; } }
-</style>
-<script language="javascript">
-var statusFile = "$statusFile";
-function readStatus() {
-  try {
-    var fso = new ActiveXObject("Scripting.FileSystemObject");
-    if (!fso.FileExists(statusFile)) return;
-    var file = fso.OpenTextFile(statusFile, 1, false, -1);
-    var text = file.ReadAll();
-    file.Close();
-    var data = JSON.parse(text);
-    document.getElementById("stage").innerText = data.stage || "";
-    document.getElementById("message").innerText = data.message || "";
-    document.getElementById("links").innerHTML =
-      (data.platformUrl ? "平台端：" + data.platformUrl + "<br>" : "") +
-      (data.mobileUrl ? "移动端：" + data.mobileUrl + "<br>" : "") +
-      (data.backendUrl ? "后端：" + data.backendUrl : "");
-    if (data.stage === "$($Text.Ready)") {
-      document.getElementById("bar").style.display = "none";
-      window.setTimeout(function(){ window.close(); }, 1800);
-    }
-    if (data.stage === "$($Text.Failed)") {
-      document.getElementById("bar").style.display = "none";
-      document.body.style.background = "#fff5f5";
-    }
-  } catch (e) {}
-}
-window.resizeTo(420, 260);
-window.onload = function() { readStatus(); window.setInterval(readStatus, 800); };
-</script>
-</head>
-<body>
-  <div class="wrap">
-    <div class="title">$title</div>
-    <div id="bar" class="bar"><div class="fill"></div></div>
-    <div id="stage" class="stage"></div>
-    <div id="message" class="msg"></div>
-    <div id="links" class="links"></div>
-  </div>
-</body>
-</html>
-"@
-  $html | Out-File -LiteralPath $statusWindowPath -Encoding utf8
-  if (Get-Command "mshta.exe" -ErrorAction SilentlyContinue) {
-    Start-Process "mshta.exe" -ArgumentList "`"$statusWindowPath`""
-  }
 }
 
 function Show-StartupFailure([string]$Message) {
@@ -194,7 +126,6 @@ function Set-FrontendEnv([string]$directory, [int]$BackendPort) {
 try {
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
   Write-StartupStatus $Text.Preparing $Text.PreparingMsg
-  Start-StatusWindow
   Start-Transcript -LiteralPath $logPath -Append | Out-Null
   $backendPort = Get-FreePort 8000 8100 8199
   $frontPort = Get-FreePort 5173 5200 5299

@@ -26,6 +26,7 @@ type CycleOption = { id: string; name: string; status: string; backendId?: strin
 type AssessmentObjectInfo = { sectionCode?: string; title?: string; description?: string };
 type TownOption = {
   id: string;
+  cityId?: string;
   name: string;
   chapterCode?: string;
   assessmentTargets: PrimaryFacilityType[];
@@ -808,11 +809,15 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
   const [towns, setTowns] = useState<TownOption[]>([]);
 
   useEffect(() => {
+    setSelectedId("");
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
     fetch(`${API_BASE_URL}/mobile/towns${params}`)
       .then(response => response.ok ? response.json() : null)
       .then(data => {
-        if (Array.isArray(data?.items)) setTowns(data.items);
+        if (Array.isArray(data?.items)) {
+          const projectTowns = cityId ? data.items.filter((town: TownOption) => !town.cityId || town.cityId === cityId) : data.items;
+          setTowns(projectTowns);
+        }
       })
       .catch(() => undefined);
   }, [cityId]);
@@ -859,6 +864,11 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
                 {selectedId === t.id && <Check className="w-4 h-4 text-primary shrink-0" />}
               </button>
             ))}
+            {towns.length === 0 && (
+              <div className="rounded-lg border border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+                当前项目暂无可选镇街
+              </div>
+            )}
           </div>
         </div>
       </div>
