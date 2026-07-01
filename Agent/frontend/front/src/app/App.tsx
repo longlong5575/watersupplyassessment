@@ -3746,6 +3746,17 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    async function loadReports() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/reports`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && Array.isArray(data.items)) setHistoryReports(mapBackendReports(data.items));
+      } catch (error) {
+        console.warn("Report history sync failed", error);
+      }
+    }
+
     async function loadCities() {
       try {
         const response = await fetch(`${API_BASE_URL}/mobile/projects`);
@@ -3776,6 +3787,7 @@ export default function App() {
     }
 
     loadCities();
+    loadReports();
     loadDashboardTowns();
     const timer = window.setInterval(loadDashboardTowns, 3000);
     return () => {
