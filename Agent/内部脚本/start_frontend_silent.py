@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 
 
-AGENT_ROOT = Path(__file__).resolve().parent
+AGENT_ROOT = Path(__file__).resolve().parent.parent
 LOG_DIR = AGENT_ROOT / "logs"
 BACKEND_DIR = AGENT_ROOT / "backend"
 BACKEND_STARTER = BACKEND_DIR / "start_backend_silent.py"

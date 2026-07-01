@@ -7,7 +7,7 @@ If Not fso.FileExists(pythonw) Then
   pythonw = shell.ExpandEnvironmentStrings("%USERPROFILE%") & "\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\pythonw.exe"
 End If
 If fso.FileExists(pythonw) Then
-  shell.Run """" & pythonw & """ """ & agentRoot & "\start_windows_silent.py""", 0, False
+  shell.Run """" & pythonw & """ """ & agentRoot & "\内部脚本\start_windows_silent.py""", 0, False
 Else
-  shell.Run "pyw.exe -3.12 """ & agentRoot & "\start_windows_silent.py""", 0, False
+  shell.Run "pyw.exe -3.12 """ & agentRoot & "\内部脚本\start_windows_silent.py""", 0, False
 End If

@@ -10,7 +10,8 @@ import webbrowser
 from pathlib import Path
 
 
-AGENT_ROOT = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+AGENT_ROOT = SCRIPT_DIR.parent
 BACKEND = AGENT_ROOT / "backend"
 FRONT = AGENT_ROOT / "frontend" / "front"
 MOBILE = AGENT_ROOT / "frontend" / "front-mobile"
@@ -163,9 +164,9 @@ def main() -> None:
                 "backend-launcher",
             )
         if not front_running:
-            start_detached([str(pythonw), str(AGENT_ROOT / "start_frontend_silent.py"), str(FRONT), "front"], AGENT_ROOT, "front-launcher")
+            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(FRONT), "front"], AGENT_ROOT, "front-launcher")
         if not mobile_running:
-            start_detached([str(pythonw), str(AGENT_ROOT / "start_frontend_silent.py"), str(MOBILE), "front-mobile"], AGENT_ROOT, "front-mobile-launcher")
+            start_detached([str(pythonw), str(SCRIPT_DIR / "start_frontend_silent.py"), str(MOBILE), "front-mobile"], AGENT_ROOT, "front-mobile-launcher")
 
         wait_for("http://127.0.0.1:8000/health")
         wait_for("http://127.0.0.1:5173")
