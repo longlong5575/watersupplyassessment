@@ -1,4 +1,0 @@
-interface:
-  display_name: "报告"
-  short_description: "按当前资料生成正式PPP绩效考核DOCX报告，原正文只作模板参考。"
-  default_prompt: "使用报告、规范和金额，根据资料收集中的当前材料生成正式正文报告；原正文只作为模板和格式参考，金额用通用基数或新材料基数重新计算。"

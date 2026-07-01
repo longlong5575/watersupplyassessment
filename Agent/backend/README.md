@@ -49,8 +49,6 @@ powershell -ExecutionPolicy Bypass -File .\Agent\测试\run_agent_checks.ps1
 排水\运行脚本\watersupply-agent-runtime\test-results
 ```
 
-发给别人之前也可以双击 `交付前检查.vbs`，它会自动运行同一套复验并检查源码目录是否残留运行生成物。
-
 ## 目录原则
 
 `Agent` 只放源码、锁文件、说明和启动入口；虚拟环境、前端依赖、日志、数据库、上传附件和生成报告都属于运行生成物，不放进交付源码目录。

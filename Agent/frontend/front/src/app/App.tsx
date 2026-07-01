@@ -1342,8 +1342,9 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
         <div className="flex items-center justify-between pt-1">
           <button
             onClick={() => onNav("dataupload")}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors"
           >
+            <ChevronRight size={16} className="rotate-180" />
             返回选择
           </button>
           <button
@@ -1452,33 +1453,37 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
               </div>
             } />
             <Row label="报告周期" value={reportPeriod} mono />
-            <div className="h-px bg-border" />
-            <Row
-              label="新的金额计算方法"
-              value={hasMethod ? "已提供" : "未提供"}
-              valueClass={hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}
-            />
-            {hasMethod ? (
-              <div className="space-y-1">
-                {methodFiles.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-                    <FileText size={12} className="text-primary shrink-0" />
-                    {f.name}
+            {dataSource === "upload" && (
+              <>
+                <div className="h-px bg-border" />
+                <Row
+                  label="新的金额计算方法"
+                  value={hasMethod ? "已提供" : "未提供"}
+                  valueClass={hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}
+                />
+                {hasMethod ? (
+                  <div className="space-y-1">
+                    {methodFiles.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                        <FileText size={12} className="text-primary shrink-0" />
+                        {f.name}
+                      </div>
+                    ))}
+                    {methodText.trim() && (
+                      <div className="text-xs text-muted-foreground bg-muted rounded px-3 py-2 leading-relaxed">
+                        {methodText.trim()}
+                      </div>
+                    )}
                   </div>
-                ))}
-                {methodText.trim() && (
-                  <div className="text-xs text-muted-foreground bg-muted rounded px-3 py-2 leading-relaxed">
-                    {methodText.trim()}
+                ) : (
+                  <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
+                    <AlertCircle size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
+                    <p className="text-xs text-muted-foreground">
+                      未提供新的金额计算方法，系统将使用 <DefaultMethodLink /> 继续生成报告。
+                    </p>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
-                <AlertCircle size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
-                <p className="text-xs text-muted-foreground">
-                  未提供新的金额计算方法，系统将使用 <DefaultMethodLink /> 继续生成报告。
-                </p>
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -1558,8 +1563,8 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
   projectId: string;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
-  const calcMethodLabel = hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法";
   const isMobile = dataSource === "mobile";
+  const calcMethodLabel = isMobile ? "使用数据看板数据，无需选择金额计算方法" : (hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法");
 
   const steps = PROGRESS_STEPS.map(s => s.id === 1
     ? { ...s, label: isMobile ? "读取数据看板数据" : "读取资料包", desc: isMobile ? "载入看板已完成调研数据" : "解压并索引全部附件" }
@@ -1572,9 +1577,11 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
   useEffect(() => { onStart(); }, []);
   const [logs, setLogs] = useState<string[]>(() => [
     "任务初始化完成",
-    hasMethod
-      ? "已读取提供的金额计算方法。"
-      : "未提供新的金额计算方法，已使用默认金额计算方法。",
+    isMobile
+      ? "使用数据看板数据，无需选择金额计算方法。"
+      : hasMethod
+        ? "已读取提供的金额计算方法。"
+        : "未提供新的金额计算方法，已使用默认金额计算方法。",
   ]);
 
   useEffect(() => {
@@ -2221,7 +2228,7 @@ type IndicatorVersionDetail = IndicatorVersionRow & {
     level: number;
     fullScore: number;
     facilityType?: string | null;
-    options?: Array<{ id: string; name: string; deductionValue: number; requiresPhoto: boolean }>;
+    options?: Array<{ id: string; name: string; deductionType?: string; deductionValue: number; requiresPhoto: boolean }>;
   }>;
 };
 
@@ -2232,10 +2239,20 @@ function standardStatusLabel(status: string, locked: boolean): string {
   return status;
 }
 
+function cleanStandardName(name: string): string {
+  return name
+    .replace(/[（(][^（）()]*?(?:第[^（）()]*?版|报告版|周期报告版)[^（）()]*?[）)]/g, "")
+    .replace(/第[一二三四五六七八九十、\d]+(?:周期|期)?(?:报告)?版/g, "")
+    .replace(/报告版/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function StandardsPage() {
   const [versions, setVersions] = useState<IndicatorVersionRow[]>([]);
   const [selected, setSelected] = useState<IndicatorVersionDetail | null>(null);
-  const [cloneName, setCloneName] = useState("");
+  const [draft, setDraft] = useState<IndicatorVersionDetail | null>(null);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -2249,51 +2266,90 @@ function StandardsPage() {
 
   const loadDetail = async (id: string) => {
     const response = await fetch(`${API_BASE_URL}/indicator-versions/${id}`);
-    if (response.ok) setSelected(await response.json());
+    if (response.ok) {
+      const detail = await response.json();
+      setSelected(detail);
+      setDraft(null);
+      setEditing(false);
+    }
   };
 
   useEffect(() => { loadVersions(); }, []);
 
-  const operate = async (id: string, action: "clone" | "publish" | "lock") => {
-    const actionText = action === "clone" ? "Clone draft" : action === "publish" ? "Publish standard" : "Lock standard";
-    if (action !== "clone" && !window.confirm(`Confirm ${actionText}? This affects mobile scoring standards.`)) return;
-    setBusy(`${action}:${id}`);
+  function startEdit() {
+    if (!selected) return;
+    setDraft(JSON.parse(JSON.stringify(selected)));
+    setEditing(true);
+    setNotice("");
+  }
+
+  function updateDraftItem(id: string, patch: Partial<IndicatorVersionDetail["items"][number]>) {
+    setDraft(current => current ? { ...current, items: current.items.map(item => item.id === id ? { ...item, ...patch } : item) } : current);
+  }
+
+  function updateDraftOption(indicatorId: string, optionId: string, patch: Partial<NonNullable<IndicatorVersionDetail["items"][number]["options"]>[number]>) {
+    setDraft(current => current ? {
+      ...current,
+      items: current.items.map(item => item.id === indicatorId ? {
+        ...item,
+        options: (item.options ?? []).map(option => option.id === optionId ? { ...option, ...patch } : option),
+      } : item),
+    } : current);
+  }
+
+  const saveStandard = async () => {
+    if (!selected || !draft) return;
+    setBusy("save");
     try {
-      const response = await fetch(`${API_BASE_URL}/indicator-versions/${id}/${action}`, {
-        method: "POST",
+      const response = await fetch(`${API_BASE_URL}/indicator-versions/${selected.id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: action === "clone" ? JSON.stringify({ name: cloneName.trim() || `${versions.find(item => item.id === id)?.name ?? "standard"} copy` }) : undefined,
+        body: JSON.stringify({
+          name: draft.name,
+          items: draft.items.map(item => ({
+            id: item.id,
+            name: item.name,
+            fullScore: item.fullScore,
+            options: (item.options ?? []).map(option => ({
+              id: option.id,
+              name: option.name,
+              deductionValue: option.deductionValue,
+              requiresPhoto: option.requiresPhoto,
+            })),
+          })),
+        }),
       });
-      if (!response.ok) throw new Error("standard operation failed");
-      setNotice(`${actionText} completed.`);
-      setCloneName("");
+      if (!response.ok) throw new Error("标准保存失败");
+      const detail = await response.json();
+      setSelected(detail);
+      setDraft(null);
+      setEditing(false);
+      setNotice("评分标准已保存，移动端重新进入填报时会同步最新标准。");
       await loadVersions();
-      const result = await response.json().catch(() => null);
-      await loadDetail(result?.id ?? id);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : `${actionText} failed.`);
+      setNotice(error instanceof Error ? error.message : "标准保存失败。");
     } finally {
       setBusy("");
     }
   };
 
-  const level1Items
- = selected?.items.filter(item => item.level === 1) ?? [];
+  const display = editing && draft ? draft : selected;
+  const level1Items = display?.items.filter(item => item.level === 1) ?? [];
   const childrenByParent = new Map<string, IndicatorVersionDetail["items"]>();
-  for (const item of selected?.items ?? []) {
+  for (const item of display?.items ?? []) {
     if (!item.parentId) continue;
     childrenByParent.set(item.parentId, [...(childrenByParent.get(item.parentId) ?? []), item]);
   }
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <TopBar title="评分标准管理" subtitle="按城市和批次维护评分标准版本" breadcrumbs={["标准管理"]} />
+      <TopBar title="评分标准管理" subtitle="维护项目评分条目、满分和扣分规则" breadcrumbs={["标准管理"]} />
       <div className="px-8 py-6 grid grid-cols-[320px_1fr] gap-5 max-w-6xl">
         {notice && <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">{notice}</div>}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">标准版本</h3>
-            <p className="text-xs text-muted-foreground mt-1">按“复制旧版本、微调、发布、锁定”管理</p>
+            <h3 className="text-sm font-semibold text-foreground">项目标准</h3>
+            <p className="text-xs text-muted-foreground mt-1">选择要维护的项目标准</p>
           </div>
           <div className="divide-y divide-border">
             {versions.map(version => (
@@ -2304,17 +2360,14 @@ function StandardsPage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-sm font-medium text-foreground">{version.name}</p>
+                    <p className="text-sm font-medium text-foreground">{cleanStandardName(version.name)}</p>
                     <p className="text-xs text-muted-foreground mt-1">{version.cityName || "-"} · {version.cycleName || "-"}</p>
                   </div>
-                  <span className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-                    {standardStatusLabel(version.status, version.locked)}
-                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">三级指标 {version.indicatorCount ?? 0} 项</p>
               </button>
             ))}
-            {!versions.length && <div className="px-4 py-8 text-center text-sm text-muted-foreground">暂无标准版本</div>}
+            {!versions.length && <div className="px-4 py-8 text-center text-sm text-muted-foreground">暂无项目标准</div>}
           </div>
         </div>
 
@@ -2323,47 +2376,119 @@ function StandardsPage() {
             <>
               <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-sm font-semibold text-foreground">{selected.name}</h3>
+                  {editing && draft ? (
+                    <input
+                      value={draft.name}
+                      onChange={event => setDraft(current => current ? { ...current, name: event.target.value } : current)}
+                      className="h-8 w-full rounded border border-border bg-background px-2 text-sm font-semibold text-foreground"
+                    />
+                  ) : (
+                    <h3 className="text-sm font-semibold text-foreground">{cleanStandardName(selected.name)}</h3>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
-                    {standardStatusLabel(selected.status, selected.locked)} · 设施类/管网类标准均在此版本内
+                    保存后移动端重新进入填报时会同步最新标准
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
-                    value={cloneName}
-                    onChange={event => setCloneName(event.target.value)}
-                    placeholder="副本名称"
-                    className="h-8 w-44 rounded border border-border bg-background px-2 text-xs text-foreground"
-                  />
-                  <button disabled={Boolean(busy)} onClick={() => operate(selected.id, "clone")} className="h-8 rounded border border-border px-3 text-xs text-foreground disabled:opacity-40">复制草稿</button>
-                  <button disabled={Boolean(busy) || selected.locked} onClick={() => operate(selected.id, "publish")} className="h-8 rounded bg-primary px-3 text-xs text-primary-foreground disabled:opacity-40">发布</button>
-                  <button disabled={Boolean(busy) || selected.locked} onClick={() => operate(selected.id, "lock")} className="h-8 rounded border border-border px-3 text-xs text-foreground disabled:opacity-40">锁定</button>
+                  <button disabled={Boolean(busy) || editing} onClick={startEdit} className="h-9 rounded border border-primary/40 bg-primary/5 px-4 text-xs font-semibold text-primary disabled:opacity-40">修改</button>
+                  <button disabled={Boolean(busy) || !editing} onClick={saveStandard} className="h-9 rounded bg-primary px-4 text-xs font-semibold text-primary-foreground disabled:opacity-40">保存</button>
                 </div>
               </div>
               <div className="px-5 py-4 space-y-4">
                 {level1Items.map(level1 => (
                   <div key={level1.id} className="rounded-lg border border-border overflow-hidden">
                     <div className="flex items-center justify-between bg-muted/40 px-4 py-2">
-                      <span className="text-sm font-semibold text-foreground">{level1.name}</span>
-                      <span className="text-xs text-muted-foreground">{level1.fullScore} 分</span>
+                      {editing ? (
+                        <input
+                          value={level1.name}
+                          onChange={event => updateDraftItem(level1.id, { name: event.target.value })}
+                          className="h-8 flex-1 rounded border border-border bg-background px-2 text-sm font-semibold text-foreground"
+                        />
+                      ) : (
+                        <span className="text-sm font-semibold text-foreground">{level1.name}</span>
+                      )}
+                      <input
+                        type="number"
+                        min={0}
+                        value={level1.fullScore}
+                        disabled={!editing}
+                        onChange={event => updateDraftItem(level1.id, { fullScore: Number(event.target.value) })}
+                        className="h-8 w-20 rounded border border-border bg-background px-2 text-right text-xs text-muted-foreground disabled:border-transparent disabled:bg-transparent"
+                      />
                     </div>
                     {(childrenByParent.get(level1.id) ?? []).map(level2 => (
                       <div key={level2.id} className="border-t border-border">
                         <div className="flex items-center justify-between px-4 py-2 bg-background">
-                          <span className="text-xs font-medium text-muted-foreground">{level2.name}</span>
-                          <span className="text-xs text-muted-foreground">{level2.fullScore} 分</span>
+                          {editing ? (
+                            <input
+                              value={level2.name}
+                              onChange={event => updateDraftItem(level2.id, { name: event.target.value })}
+                              className="h-8 flex-1 rounded border border-border bg-background px-2 text-xs font-medium text-foreground"
+                            />
+                          ) : (
+                            <span className="text-xs font-medium text-muted-foreground">{level2.name}</span>
+                          )}
+                          <input
+                            type="number"
+                            min={0}
+                            value={level2.fullScore}
+                            disabled={!editing}
+                            onChange={event => updateDraftItem(level2.id, { fullScore: Number(event.target.value) })}
+                            className="h-8 w-20 rounded border border-border bg-background px-2 text-right text-xs text-muted-foreground disabled:border-transparent disabled:bg-transparent"
+                          />
                         </div>
                         <div className="divide-y divide-border">
                           {(childrenByParent.get(level2.id) ?? []).map(level3 => (
                             <div key={level3.id} className="px-4 py-2">
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-xs text-foreground">{level3.name}</span>
-                                <span className="text-xs font-mono text-muted-foreground">{level3.fullScore} 分</span>
+                                {editing ? (
+                                  <input
+                                    value={level3.name}
+                                    onChange={event => updateDraftItem(level3.id, { name: event.target.value })}
+                                    className="h-8 flex-1 rounded border border-border bg-background px-2 text-xs text-foreground"
+                                  />
+                                ) : (
+                                  <span className="text-xs text-foreground">{level3.name}</span>
+                                )}
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={level3.fullScore}
+                                  disabled={!editing}
+                                  onChange={event => updateDraftItem(level3.id, { fullScore: Number(event.target.value) })}
+                                  className="h-8 w-20 rounded border border-border bg-background px-2 text-right text-xs font-mono text-muted-foreground disabled:border-transparent disabled:bg-transparent"
+                                />
                               </div>
                               {!!level3.options?.length && (
-                                <p className="mt-1 text-[11px] text-muted-foreground">
-                                  扣分项 {level3.options.length} 个{level3.options.some(option => option.requiresPhoto) ? " · 需照片佐证" : ""}
-                                </p>
+                                <div className="mt-2 space-y-2">
+                                  {level3.options.map(option => (
+                                    <div key={option.id} className="grid grid-cols-[1fr_90px_86px] gap-2 items-center rounded border border-border bg-muted/20 px-2 py-2">
+                                      <input
+                                        value={option.name}
+                                        disabled={!editing}
+                                        onChange={event => updateDraftOption(level3.id, option.id, { name: event.target.value })}
+                                        className="h-8 rounded border border-border bg-background px-2 text-[11px] text-foreground disabled:border-transparent disabled:bg-transparent"
+                                      />
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        value={option.deductionValue}
+                                        disabled={!editing}
+                                        onChange={event => updateDraftOption(level3.id, option.id, { deductionValue: Number(event.target.value) })}
+                                        className="h-8 rounded border border-border bg-background px-2 text-right text-[11px] text-muted-foreground disabled:border-transparent disabled:bg-transparent"
+                                      />
+                                      <label className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
+                                        <input
+                                          type="checkbox"
+                                          checked={option.requiresPhoto}
+                                          disabled={!editing}
+                                          onChange={event => updateDraftOption(level3.id, option.id, { requiresPhoto: event.target.checked })}
+                                        />
+                                        需照片
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           ))}
@@ -2375,7 +2500,7 @@ function StandardsPage() {
               </div>
             </>
           ) : (
-            <div className="px-5 py-16 text-center text-sm text-muted-foreground">请选择一个评分标准版本</div>
+            <div className="px-5 py-16 text-center text-sm text-muted-foreground">请选择一个项目标准</div>
           )}
         </div>
       </div>
@@ -3604,26 +3729,20 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page: MobileData ─────────────────────────────────────────────────────────
 
-function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSelectedTowns, methodFiles, setMethodFiles, methodText, setMethodText, reportPeriod, setReportPeriod }: {
+function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSelectedTowns, reportPeriod, setReportPeriod }: {
   onNav: (p: Page) => void;
   towns: TownSurvey[];
   cities: CityOption[];
   projectId: string;
   setProjectId: React.Dispatch<React.SetStateAction<string>>;
   setSelectedTowns: React.Dispatch<React.SetStateAction<string[]>>;
-  methodFiles: File[];
-  setMethodFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  methodText: string;
-  setMethodText: React.Dispatch<React.SetStateAction<string>>;
   reportPeriod: string;
   setReportPeriod: React.Dispatch<React.SetStateAction<string>>;
 }) {
-  const [methodOpen, setMethodOpen] = useState(false);
   const [removedTowns, setRemovedTowns] = useState<Set<string>>(new Set());
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const [precheck, setPrecheck] = useState<ReportPrecheck | null>(null);
   const [precheckLoading, setPrecheckLoading] = useState(false);
-  const methodFileRef = useRef<HTMLInputElement>(null);
 
   const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
   const visibleTownNames = visibleTowns.map(t => t.name);
@@ -3771,67 +3890,12 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           </div>
         </div>
 
-        {/* Method — same style as upload page */}
-        <div className="bg-card border border-border rounded-lg">
-          <button
-            onClick={() => setMethodOpen(!methodOpen)}
-            className="w-full flex items-center justify-between px-6 py-4 text-left"
-          >
-            <div>
-              <span className="text-sm font-semibold text-foreground">新的金额计算方法</span>
-              <span className="ml-2 text-xs text-muted-foreground">选填</span>
-            </div>
-            {methodOpen ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
-          </button>
-          {methodOpen && (
-            <div className="px-6 pb-6 border-t border-border pt-4 space-y-4">
-              <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
-                <Info size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  未填写时，系统将使用 <DefaultMethodLink /> 继续生成报告，不影响主流程。
-                </p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-2">上传合同或补充协议（可选）</label>
-                <input ref={methodFileRef} type="file" className="hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx"
-                  onChange={e => { const files = Array.from(e.target.files ?? []); if (files.length) setMethodFiles(prev => [...prev, ...files]); }} />
-                <div
-                  className="border border-dashed border-border rounded p-4 flex items-center gap-3 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors"
-                  onClick={() => methodFileRef.current?.click()}
-                >
-                  <UploadCloud size={16} className="text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">上传合同、补充协议或金额计算表</span>
-                </div>
-                {methodFiles.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {methodFiles.map((f, i) => (
-                      <div key={i} className="flex items-center justify-between bg-muted rounded px-3 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <FileText size={12} className="text-primary shrink-0" />
-                          <span className="text-xs text-foreground truncate max-w-xs">{f.name}</span>
-                        </div>
-                        <button onClick={() => setMethodFiles(prev => prev.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-foreground ml-2">
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-2">或填写说明（可选）</label>
-                <textarea rows={3} value={methodText} onChange={e => setMethodText(e.target.value)}
-                  className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-                  style={{ background: "var(--input-background)" }}
-                  placeholder="例如：本期按合同单价下浮 5% 结算，超期罚款按每日 0.05% 扣减……" />
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
-          <button onClick={() => onNav("dataupload")} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">返回选择</button>
+          <button onClick={() => onNav("dataupload")} className="inline-flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors">
+            <ChevronRight size={16} className="rotate-180" />
+            返回选择
+          </button>
           <div className="flex items-center gap-3">
             <button
               disabled={!canProceed}
@@ -3982,10 +4046,6 @@ export default function App() {
           projectId={reportProjectId}
           setProjectId={setReportProjectId}
           setSelectedTowns={setSelectedTowns}
-          methodFiles={methodFiles}
-          setMethodFiles={setMethodFiles}
-          methodText={methodText}
-          setMethodText={setMethodText}
           reportPeriod={reportPeriod}
           setReportPeriod={setReportPeriod}
         />

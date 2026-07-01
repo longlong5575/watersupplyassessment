@@ -85,6 +85,53 @@ def get_version(version_id: str, session: Session = Depends(get_session)):
     }
 
 
+@router.patch("/{version_id}")
+def update_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
+    version = session.get(IndicatorVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="Indicator version not found")
+    name = str(payload.get("name") or "").strip()
+    if name:
+        version.name = name
+
+    indicators = {
+        item.id: item
+        for item in session.scalars(select(Indicator).where(Indicator.version_id == version.id)).all()
+    }
+    for raw_item in payload.get("items") or []:
+        indicator = indicators.get(raw_item.get("id"))
+        if indicator is None:
+            continue
+        if "name" in raw_item:
+            indicator.name = str(raw_item.get("name") or "").strip() or indicator.name
+        if "fullScore" in raw_item:
+            try:
+                indicator.full_score = max(float(raw_item.get("fullScore") or 0), 0)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Invalid full score")
+
+        options = {
+            option.id: option
+            for option in session.scalars(select(DeductionOption).where(DeductionOption.indicator_id == indicator.id)).all()
+        }
+        for raw_option in raw_item.get("options") or []:
+            option = options.get(raw_option.get("id"))
+            if option is None:
+                continue
+            if "name" in raw_option:
+                option.name = str(raw_option.get("name") or "").strip() or option.name
+            if "deductionValue" in raw_option:
+                try:
+                    option.deduction_value = max(float(raw_option.get("deductionValue") or 0), 0)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail="Invalid deduction value")
+            if "requiresPhoto" in raw_option:
+                option.requires_photo = bool(raw_option.get("requiresPhoto"))
+
+    session.commit()
+    return get_version(version_id, session)
+
+
 @router.post("/{version_id}/clone")
 def clone_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
     source = session.get(IndicatorVersion, version_id)
