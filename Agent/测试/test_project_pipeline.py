@@ -233,6 +233,11 @@ def main():
                 path = Path(session.get(Report, town_report["id"]).storage_key)
             assert path.is_file() and path.stat().st_size > 10000
             check_docx(path, town, project["name"])
+            preview = assert_ok(client.get(f"/api/reports/{town_report['id']}/preview"), f"report preview {town}")
+            assert preview["content"]["paragraphCount"] > 0
+            assert preview["content"]["tableCount"] > 0
+            download = client.get(f"/api/reports/{town_report['id']}/download")
+            assert download.status_code == 200 and len(download.content) > 10000
 
         dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": yunan["id"]}), "dashboard")
         assert any(item["name"] == "桂圩镇" and item["recordCount"] == 1 for item in dashboard["items"])

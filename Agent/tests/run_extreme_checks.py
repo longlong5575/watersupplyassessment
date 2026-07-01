@@ -270,11 +270,18 @@ def main() -> None:
         task_agent_payload,
     )
     download_ok = 0
+    preview_ok = 0
     for report in task.get("reports", []):
         response = client.get(f"/api/reports/{report['id']}/download")
         if response.status_code == 200 and len(response.content) > 1000:
             download_ok += 1
+        preview = client.get(f"/api/reports/{report['id']}/preview")
+        if preview.status_code == 200:
+            content = preview.json().get("content", {})
+            if content.get("paragraphCount", 0) > 0 and content.get("tableCount", 0) > 0:
+                preview_ok += 1
     require(cases, "生成报告均可下载", download_ok == len(task.get("reports", [])), {"downloadOk": download_ok, "reports": len(task.get("reports", []))})
+    require(cases, "reports can be previewed", preview_ok == len(task.get("reports", [])), {"previewOk": preview_ok, "reports": len(task.get("reports", []))})
     task_history = client.get("/api/report-tasks").json()["items"]
     require(cases, "报告任务历史列表可追溯", any(item["id"] == task["id"] and item.get("datasetHash") for item in task_history), task_history)
 

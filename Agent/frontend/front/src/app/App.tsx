@@ -105,6 +105,13 @@ interface Report {
   indicatorVersionIds?: string[];
 }
 
+type ReportPreviewContent = {
+  paragraphs: string[];
+  tables: string[][][];
+  paragraphCount: number;
+  tableCount: number;
+};
+
 type AuthUser = {
   id: string;
   name: string;
@@ -549,6 +556,118 @@ function StatusBadge({ status }: { status: ReportStatus }) {
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
+
+function ReportPreviewModal({ report, onClose }: { report: Report; onClose: () => void }) {
+  const [content, setContent] = useState<ReportPreviewContent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    setContent(null);
+
+    fetch(`${API_BASE_URL}/reports/${report.id}/preview`, { headers: authHeaders() })
+      .then(async response => {
+        if (!response.ok) throw new Error(await response.text());
+        return response.json();
+      })
+      .then(data => {
+        if (!cancelled) setContent(data.content);
+      })
+      .catch(() => {
+        if (!cancelled) setError("报告预览加载失败，请确认后端正在运行且报告文件存在。");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [report.id]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+      <div className="w-full max-w-4xl max-h-[86vh] overflow-hidden rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <FileText size={18} className="text-primary shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">{report.name}</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{report.town} · {report.period || "未记录周期"} · v{report.version ?? 1}</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <a
+              href={report.downloadUrl ?? "#"}
+              className={`inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs text-primary hover:bg-muted/40 ${report.downloadUrl ? "" : "pointer-events-none opacity-50"}`}
+            >
+              <Download size={13} /> 下载
+            </a>
+            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded hover:bg-muted/60" aria-label="关闭预览">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+          {loading && (
+            <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 size={16} className="animate-spin" /> 正在加载报告预览
+            </div>
+          )}
+          {!loading && error && (
+            <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          )}
+          {!loading && content && (
+            <div className="space-y-5">
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="rounded border border-border px-3 py-2">
+                  <div className="text-muted-foreground">正文段落</div>
+                  <div className="mt-1 font-mono text-foreground">{content.paragraphCount}</div>
+                </div>
+                <div className="rounded border border-border px-3 py-2">
+                  <div className="text-muted-foreground">表格数量</div>
+                  <div className="mt-1 font-mono text-foreground">{content.tableCount}</div>
+                </div>
+                <div className="rounded border border-border px-3 py-2">
+                  <div className="text-muted-foreground">文件大小</div>
+                  <div className="mt-1 font-mono text-foreground">{report.size || "-"}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {content.paragraphs.slice(0, 40).map((paragraph, index) => (
+                  <p key={`${index}-${paragraph.slice(0, 12)}`} className="text-sm leading-7 text-foreground">
+                    {paragraph}
+                  </p>
+                ))}
+              </div>
+
+              {content.tables.map((table, tableIndex) => (
+                <div key={tableIndex} className="overflow-x-auto rounded border border-border">
+                  <table className="min-w-full text-xs">
+                    <tbody>
+                      {table.map((row, rowIndex) => (
+                        <tr key={rowIndex} className="border-b border-border last:border-0">
+                          {row.map((cell, cellIndex) => (
+                            <td key={cellIndex} className="max-w-[240px] whitespace-pre-wrap px-3 py-2 align-top text-foreground">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Sidebar({ current, onNav, user, onLogout }: { current: Page; onNav: (p: Page) => void; user: AuthUser; onLogout: () => void }) {
   const items = [
@@ -1625,7 +1744,7 @@ function formatElapsed(s: number): string {
   return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分钟`;
 }
 
-function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports }: {
+function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports, onPreviewReport }: {
   onNav: (p: Page) => void;
   packageFiles: File[];
   methodFiles: File[];
@@ -1636,6 +1755,7 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
   generatedAt: string | null;
   reportPeriod: string;
   generatedReports: Report[];
+  onPreviewReport: (report: Report) => void;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
 
@@ -1714,8 +1834,8 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
                           <a href={r.downloadUrl ?? "#"} className={`text-xs text-primary hover:underline flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}>
                             <Download size={12} /> 下载
                           </a>
-                          <button className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                            <Eye size={12} /> 详情
+                          <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                            <Eye size={12} /> 预览
                           </button>
                         </div>
                       </td>
@@ -1786,7 +1906,7 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
 
 // ─── Page 6: History ─────────────────────────────────────────────────────────
 
-function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Report[] }) {
+function HistoryPage({ onNav, reports, onPreviewReport }: { onNav: (p: Page) => void; reports: Report[]; onPreviewReport: (report: Report) => void }) {
   const [filter, setFilter] = useState<"all" | "completed" | "processing">("all");
   const filtered = reports.filter(r => filter === "all" || r.status === filter);
 
@@ -1850,8 +1970,8 @@ function HistoryPage({ onNav, reports }: { onNav: (p: Page) => void; reports: Re
                       <a href={r.downloadUrl} className="text-xs text-primary hover:underline flex items-center gap-1">
                         <Download size={12} /> 下载
                       </a>
-                      <button className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                        <Eye size={12} /> 详情
+                      <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                        <Eye size={12} /> 预览
                       </button>
                     </div>
                   </td>
@@ -3620,6 +3740,7 @@ export default function App() {
   const [reportPeriod, setReportPeriod] = useState("");
   const [historyReports, setHistoryReports] = useState<Report[]>(HISTORY_REPORTS);
   const [generatedReports, setGeneratedReports] = useState<Report[]>([]);
+  const [previewReport, setPreviewReport] = useState<Report | null>(null);
   const progressStartRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -3786,9 +3907,10 @@ export default function App() {
           generatedAt={generatedAt}
           reportPeriod={reportPeriod}
           generatedReports={generatedReports}
+          onPreviewReport={setPreviewReport}
         />
       );
-      case "history": return <HistoryPage onNav={setPage} reports={historyReports} />;
+      case "history": return <HistoryPage onNav={setPage} reports={historyReports} onPreviewReport={setPreviewReport} />;
     }
   }
 
@@ -3809,6 +3931,7 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         {renderPage()}
       </main>
+      {previewReport && <ReportPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />}
     </div>
   );
 }

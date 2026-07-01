@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from docx import Document
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -61,6 +62,29 @@ def serialize_task(item: ReportTask, reports: list[Report] | None = None) -> dic
             "indicatorVersionIds": item.data_snapshot.get("indicatorVersionIds", []),
         },
         "reports": [serialize_report(report) for report in (reports or [])],
+    }
+
+
+def docx_preview(path: Path) -> dict:
+    try:
+        document = Document(path)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Report preview failed") from exc
+
+    paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    tables = []
+    for table in document.tables[:8]:
+        rows = []
+        for row in table.rows[:12]:
+            rows.append([cell.text.strip() for cell in row.cells[:6]])
+        if rows:
+            tables.append(rows)
+
+    return {
+        "paragraphs": paragraphs[:120],
+        "tables": tables,
+        "paragraphCount": len(paragraphs),
+        "tableCount": len(document.tables),
     }
 
 
@@ -148,3 +172,13 @@ def download(report_id: str, session: Session = Depends(get_session)):
     path = Path(report.storage_key)
     if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
     return FileResponse(path, filename=path.name)
+
+
+@router.get("/api/reports/{report_id}/preview")
+def preview(report_id: str, session: Session = Depends(get_session)):
+    report = session.get(Report, report_id)
+    if report is None: raise HTTPException(status_code=404, detail="Report not found")
+    path = Path(report.storage_key)
+    if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
+    if path.suffix.lower() != ".docx": raise HTTPException(status_code=415, detail="Only DOCX reports can be previewed")
+    return {"report": serialize_report(report), "content": docx_preview(path)}
