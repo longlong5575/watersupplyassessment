@@ -122,7 +122,22 @@ def ensure_backend(python: Path) -> Path:
     venv_dir = BACKEND_RUNTIME / ".venv"
     venv_python = venv_dir / "Scripts" / "python.exe"
     BACKEND_RUNTIME.mkdir(parents=True, exist_ok=True)
-    if not venv_python.exists():
+    valid_venv = venv_python.exists()
+    if valid_venv:
+        try:
+            subprocess.check_call(
+                [str(venv_python), "-c", "import sys"],
+                cwd=str(BACKEND),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            valid_venv = False
+    if not valid_venv:
+        if venv_dir.exists():
+            shutil.rmtree(venv_dir)
         run([str(python), "-m", "venv", str(venv_dir)], BACKEND)
     run([str(venv_python), "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"], BACKEND)
     return venv_python
