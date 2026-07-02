@@ -18,6 +18,7 @@ from app.services.assessment_ingest import (
     unwrap_payload,
 )
 from app.services.project_catalog import PROJECT_CATALOG, project_by_name
+from app.services.standard_names import clean_standard_name
 
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
@@ -56,7 +57,7 @@ def projects(session: Session = Depends(get_session)):
             "id": city.id,
             "name": city.name,
             "fullName": catalog.get("fullName", city.name),
-            "standardScope": catalog.get("standard", city.name),
+            "standardScope": clean_standard_name(catalog.get("standard", city.name)),
             "sourceReport": catalog.get("sourceReport"),
         })
     return {"items": items}
@@ -146,7 +147,7 @@ def indicator_standards(city_id: str | None = None, cycle_id: str | None = None,
             }
         )
     items = [{"id": item.id, "parentId": item.parent_id, "code": item.code, "name": item.name, "level": item.level, "fullScore": item.full_score, "facilityType": item.facility_type, "deductionOptions": option_map[item.id]} for item in indicators if not facility_type or not item.facility_type or item.facility_type == facility_type]
-    return {"version": {"id": version.id, "name": version.name}, "items": items}
+    return {"version": {"id": version.id, "name": clean_standard_name(version.name)}, "items": items}
 
 
 @router.post("/assessment-records")

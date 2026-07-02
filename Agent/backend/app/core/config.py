@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     storage_dir: Path = Path("storage")
     celery_task_always_eager: bool = True
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174"
+    cors_origin_regex: str = r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$"
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -95,6 +95,15 @@ function Wait-ForUrl([string]$url) {
   throw "Service startup timed out: $url ($lastError)"
 }
 
+function Test-UrlReady([string]$url) {
+  try {
+    Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Test-PortAvailable([int]$Port) {
   $client = New-Object System.Net.Sockets.TcpClient
   try {
@@ -127,6 +136,12 @@ try {
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
   Write-StartupStatus $Text.Preparing $Text.PreparingMsg
   Start-Transcript -LiteralPath $logPath -Append | Out-Null
+  if ((Test-UrlReady "http://127.0.0.1:8000/health") -and (Test-UrlReady "http://127.0.0.1:5173") -and (Test-UrlReady "http://127.0.0.1:5174")) {
+    Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:8000"; platformUrl = "http://127.0.0.1:5173"; mobileUrl = "http://127.0.0.1:5174" }
+    Start-Process "http://127.0.0.1:5173"
+    Start-Process "http://127.0.0.1:5174"
+    return
+  }
   $backendPort = Get-FreePort 8000 8100 8199
   $frontPort = Get-FreePort 5173 5200 5299
   $mobilePort = Get-FreePort 5174 5300 5399

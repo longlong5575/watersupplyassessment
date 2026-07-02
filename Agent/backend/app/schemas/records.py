@@ -22,7 +22,7 @@ class ScorePatch(BaseModel):
 
 class ReportTaskRequest(BaseModel):
     source: str = "dashboard"
-    period: str = "2026年第2季度"
+    period: str = ""
     projectId: str | None = None
     townNames: list[str] = Field(default_factory=list)
     townIds: list[str] = Field(default_factory=list)

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_session
 from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion
+from app.services.standard_names import clean_standard_name
 
 
 router = APIRouter(prefix="/api/indicator-versions", tags=["standards"])
@@ -64,7 +65,7 @@ def get_version(version_id: str, session: Session = Depends(get_session)):
             )
     return {
         "id": version.id,
-        "name": version.name,
+        "name": clean_standard_name(version.name),
         "status": version.status,
         "locked": version.locked,
         "cityId": version.city_id,
@@ -171,7 +172,7 @@ def publish_version(version_id: str, session: Session = Depends(get_session)):
     version.status = "published"
     version.locked = False
     session.commit()
-    return {"id": version.id, "name": version.name, "status": version.status, "locked": version.locked}
+    return {"id": version.id, "name": clean_standard_name(version.name), "status": version.status, "locked": version.locked}
 
 
 @router.post("/{version_id}/lock")
@@ -182,4 +183,4 @@ def lock_version(version_id: str, session: Session = Depends(get_session)):
     version.status = "locked"
     version.locked = True
     session.commit()
-    return {"id": version.id, "name": version.name, "status": version.status, "locked": version.locked}
+    return {"id": version.id, "name": clean_standard_name(version.name), "status": version.status, "locked": version.locked}

@@ -32,7 +32,31 @@ import {
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
 const TownCompletionChart = lazy(() => import("./TownCompletionChart"));
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+
+async function probeApiBaseUrl(baseUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 600);
+  try {
+    const healthUrl = `${baseUrl.replace(/\/api\/?$/, "")}/health`;
+    const response = await fetch(healthUrl, { signal: controller.signal, cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function discoverApiBaseUrl(): Promise<string> {
+  const preferred = [...new Set([API_BASE_URL, "http://127.0.0.1:8000/api"])];
+  for (const candidate of preferred) {
+    if (await probeApiBaseUrl(candidate)) return candidate;
+  }
+  const fallback = Array.from({ length: 100 }, (_, index) => `http://127.0.0.1:${8100 + index}/api`);
+  const results = await Promise.all(fallback.map(async candidate => await probeApiBaseUrl(candidate) ? candidate : null));
+  return results.find((candidate): candidate is string => candidate !== null) ?? API_BASE_URL;
+}
 const AUTH_STORAGE_KEY = "assessment-auth-v1";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -2241,9 +2265,8 @@ function standardStatusLabel(status: string, locked: boolean): string {
 
 function cleanStandardName(name: string): string {
   return name
-    .replace(/[（(][^（）()]*?(?:第[^（）()]*?版|报告版|周期报告版)[^（）()]*?[）)]/g, "")
-    .replace(/第[一二三四五六七八九十、\d]+(?:周期|期)?(?:报告)?版/g, "")
-    .replace(/报告版/g, "")
+    .replace(/[（(][^（）()]*?(?:批次|周期|报告版|资料版|第[^（）()]*?(?:版|期))[^（）()]*?[）)]/g, "")
+    .replace(/第[一二三四五六七八九十百零〇、,，\d]+(?:批次|周期|期)(?:报告)?版?|资料报告版|周期报告版|报告版/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -2761,7 +2784,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
             <div className="grid grid-cols-4 gap-3 px-5 py-3 border-b border-border text-xs text-muted-foreground">
               <p>城市：<span className="text-foreground">{selected.cityName || "-"}</span></p>
               <p>批次：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
-              <p>标准：<span className="text-foreground">{selected.indicatorVersionName || "-"}</span></p>
+            <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
               <p>提交：<span className="text-foreground">{selected.submittedAt || "-"}</span></p>
             </div>
             <div className="px-5 py-4 grid grid-cols-2 gap-5">
@@ -3747,10 +3770,11 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
   const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
   const visibleTownNames = visibleTowns.map(t => t.name);
   const visibleTownKey = visibleTownNames.join("|");
-  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && reportPeriod.trim().length > 0 && !precheckLoading && precheck?.ok !== false;
+  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && !precheckLoading && precheck?.ok === true && Boolean(reportPeriod);
   useEffect(() => {
-    if (!projectId || !reportPeriod.trim() || visibleTowns.length === 0) {
+    if (!projectId || visibleTowns.length === 0) {
       setPrecheck(null);
+      setReportPeriod("");
       return;
     }
     let cancelled = false;
@@ -3761,13 +3785,17 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
       body: JSON.stringify({
         source: "dashboard",
         projectId,
-        period: reportPeriod,
         townNames: visibleTownNames,
         outputs: ["separate", "summary"],
       }),
     })
       .then(response => response.ok ? response.json() : Promise.reject(new Error("precheck failed")))
-      .then(data => { if (!cancelled) setPrecheck(data); })
+      .then(data => {
+        if (!cancelled) {
+          setPrecheck(data);
+          setReportPeriod(data.summary?.cycleName ?? "");
+        }
+      })
       .catch(error => {
         if (!cancelled) {
           setPrecheck({
@@ -3780,7 +3808,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
       })
       .finally(() => { if (!cancelled) setPrecheckLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, reportPeriod, visibleTownKey]);
+  }, [projectId, visibleTownKey]);
 
 
   return (
@@ -3790,7 +3818,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
 
         <div className="bg-card border border-border rounded-lg px-6 py-4">
           <label className="block text-sm font-semibold text-foreground mb-2">报告所属项目</label>
-          <select value={projectId} onChange={event => { setProjectId(event.target.value); setRemovedTowns(new Set()); }} className="w-full border border-border rounded px-3 py-2 text-sm bg-background">
+          <select value={projectId} onChange={event => { setProjectId(event.target.value); setReportPeriod(""); setRemovedTowns(new Set()); }} className="w-full border border-border rounded px-3 py-2 text-sm bg-background">
             <option value="">请选择项目</option>
             {cities.map(city => <option key={city.id} value={city.id}>{city.name}</option>)}
           </select>
@@ -3873,23 +3901,6 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           {!!precheck?.errors.length && <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{precheck.errors.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
           {!!precheck?.warnings.length && <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{precheck.warnings.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
         </div>
-        {/* Report period */}
-        <div className="bg-card border border-border rounded-lg">
-          <div className="px-6 py-4 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">报告周期 <span className="text-[var(--status-error)] text-xs ml-1">必填</span></h3>
-          </div>
-          <div className="px-6 py-4">
-            <input
-              type="text"
-              value={reportPeriod}
-              onChange={e => setReportPeriod(e.target.value)}
-              placeholder="例如：2026年第2季度"
-              className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              style={{ background: "var(--input-background)" }}
-            />
-          </div>
-        </div>
-
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
           <button onClick={() => onNav("dataupload")} className="inline-flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors">
@@ -3918,7 +3929,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
 
 // ─── App Shell ────────────────────────────────────────────────────────────────
 
-export default function App() {
+function AssessmentApp() {
   const [auth, setAuth] = useState<AuthState | null>(() => {
     try {
       return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
@@ -4149,4 +4160,23 @@ export default function App() {
       {previewReport && <ReportPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />}
     </div>
   );
+}
+
+export default function App() {
+  const [backendReady, setBackendReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    discoverApiBaseUrl().then(baseUrl => {
+      if (cancelled) return;
+      API_BASE_URL = baseUrl;
+      setBackendReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!backendReady) {
+    return <div className="h-screen w-screen flex items-center justify-center bg-background text-sm text-muted-foreground">正在连接后端服务...</div>;
+  }
+  return <AssessmentApp />;
 }

@@ -23,6 +23,7 @@ from app.models import (
 from app.schemas import RecordPatch, ScorePatch
 from app.services.assessment_ingest import sync_scores, sync_surveys, sync_water_quality
 from app.services.review import review_record
+from app.services.standard_names import clean_standard_name
 
 
 router = APIRouter(tags=["records"])
@@ -88,7 +89,7 @@ def serialize(record: AssessmentRecord, session: Session) -> dict[str, Any]:
         "villageId": record.village_id,
         "villageName": village.name if village else None,
         "indicatorVersionId": record.indicator_version_id,
-        "indicatorVersionName": version.name if version else None,
+        "indicatorVersionName": clean_standard_name(version.name) if version else None,
         "primaryFacilityType": primary_facility_type,
         "standardFacilityType": standard_facility_type,
         "facilityTypeLabel": facility_type_label,

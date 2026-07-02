@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import admin_user
-from app.models import AssessmentCycle, City, Report, ReportTask, Town
+from app.models import AssessmentCycle, AssessmentRecord, City, Report, ReportTask, Town
 from app.schemas import ReportTaskRequest
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
 from app.services.report_tasks import run_report_task
@@ -93,10 +93,27 @@ def docx_preview(path: Path) -> dict:
 
 def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tuple[City | None, AssessmentCycle | None, dict]:
     project = session.get(City, payload.projectId) if payload.projectId else None
-    cycle_query = select(AssessmentCycle).where(AssessmentCycle.name == payload.period)
-    if project is not None:
-        cycle_query = cycle_query.where(AssessmentCycle.city_id == project.id)
-    cycle = session.scalar(cycle_query)
+    cycle = None
+    if payload.source == "dashboard":
+        cycle_query = (
+            select(AssessmentCycle)
+            .join(AssessmentRecord, AssessmentRecord.cycle_id == AssessmentCycle.id)
+            .where(AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]))
+            .order_by(AssessmentRecord.updated_at.desc())
+        )
+        if project is not None:
+            cycle_query = cycle_query.where(AssessmentRecord.city_id == project.id)
+        if payload.townNames:
+            town_ids = select(Town.id).where(Town.name.in_(payload.townNames))
+            if project is not None:
+                town_ids = town_ids.where(Town.city_id == project.id)
+            cycle_query = cycle_query.where(AssessmentRecord.town_id.in_(town_ids))
+        cycle = session.scalar(cycle_query)
+    elif payload.period.strip():
+        cycle_query = select(AssessmentCycle).where(AssessmentCycle.name == payload.period.strip())
+        if project is not None:
+            cycle_query = cycle_query.where(AssessmentCycle.city_id == project.id)
+        cycle = session.scalar(cycle_query)
     if cycle is None:
         fallback_query = select(AssessmentCycle).where(AssessmentCycle.status == "active")
         if project is not None:
@@ -105,6 +122,7 @@ def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tupl
     if payload.projectId and project is None:
         raise HTTPException(status_code=422, detail="Project not found")
     task_payload = payload.model_dump()
+    task_payload["period"] = cycle.name if cycle is not None else payload.period.strip()
     if payload.townIds:
         towns = session.scalars(select(Town).where(Town.id.in_(payload.townIds))).all()
         if project and any(town.city_id != project.id for town in towns):

@@ -63,15 +63,20 @@ def resolve_town(session: Session, raw: dict[str, Any]) -> Town:
     town_id = raw.get("townId") or raw.get("town_id")
     town_name = raw.get("town") or raw.get("townName")
     city_id = raw.get("cityId") or raw.get("city_id")
+    city_name = raw.get("city") or raw.get("cityName")
+    city = session.get(City, city_id) if city_id else None
+    if city is None and city_name:
+        city = session.scalar(select(City).where(City.name == city_name))
+    effective_city_id = city.id if city is not None else city_id
     town = session.get(Town, town_id) if town_id else None
     if town is None and town_name:
         statement = select(Town).where(Town.name == town_name)
-        if city_id:
-            statement = statement.where(Town.city_id == city_id)
+        if effective_city_id:
+            statement = statement.where(Town.city_id == effective_city_id)
         town = session.scalar(statement)
     if town is None or not town.is_active:
         raise ValueError("A valid town is required")
-    if city_id and town.city_id != city_id:
+    if effective_city_id and town.city_id != effective_city_id:
         raise ValueError("Town does not belong to the selected project")
     return town
 

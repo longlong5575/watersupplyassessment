@@ -8,7 +8,31 @@ import {
 } from "lucide-react";
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+
+async function probeApiBaseUrl(baseUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 600);
+  try {
+    const healthUrl = `${baseUrl.replace(/\/api\/?$/, "")}/health`;
+    const response = await fetch(healthUrl, { signal: controller.signal, cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function discoverApiBaseUrl(): Promise<string> {
+  const preferred = [...new Set([API_BASE_URL, "http://127.0.0.1:8000/api"])];
+  for (const candidate of preferred) {
+    if (await probeApiBaseUrl(candidate)) return candidate;
+  }
+  const fallback = Array.from({ length: 100 }, (_, index) => `http://127.0.0.1:${8100 + index}/api`);
+  const results = await Promise.all(fallback.map(async candidate => await probeApiBaseUrl(candidate) ? candidate : null));
+  return results.find((candidate): candidate is string => candidate !== null) ?? API_BASE_URL;
+}
 const DRAFT_STORAGE_KEY = "assessment-mobile-draft-v1";
 const SUBMITTED_STORAGE_KEY = "assessment-mobile-submitted-v1";
 const AUTH_STORAGE_KEY = "assessment-mobile-auth-v1";
@@ -123,6 +147,7 @@ interface WaterQualityEntry {
   tpValue: string;
   tpLimit: string;
   conclusion: "pending" | "qualified" | "unqualified";
+  conclusionOverridden?: boolean;
   note: string;
   completed: boolean;
 }
@@ -553,6 +578,22 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
   );
 }
 
+function cleanStandardName(name: string): string {
+  return name
+    .replace(/[（(][^（）()]*?(?:批次|周期|报告版|资料版|第[^（）()]*?(?:版|期))[^（）()]*?[）)]/g, "")
+    .replace(/第[一二三四五六七八九十百零〇、,，\d]+(?:批次|周期|期)(?:报告)?版?|资料报告版|周期报告版|报告版/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findWaterQualityItem(groups: L1Group[]): L3Item | undefined {
+  return getAllItems(groups).find(item => {
+    const optionText = item.options.map(option => `${option.reason} ${option.sourceText ?? ""}`).join(" ");
+    const text = `${item.name} ${item.evaluationStandard ?? ""} ${item.standardText ?? ""} ${item.dataSource ?? ""} ${optionText}`;
+    return (text.includes("水质") || text.includes("CODCr")) && text.includes("CODCr") && text.includes("NH3-N");
+  });
+}
+
 function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
   const [selectedId, setSelectedId] = useState("");
   const [cities, setCities] = useState<CityOption[]>([
@@ -598,8 +639,8 @@ function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
                     <MapPin className={`w-4 h-4 ${selectedId === (c.id ?? c.name) ? "text-primary-foreground" : "text-muted-foreground"}`} />
                   </div>
                   <div className="min-w-0">
-                    <div className={`text-sm font-medium truncate ${selectedId === (c.id ?? c.name) ? "text-primary" : "text-foreground"}`}>{c.name}</div>
-                    <div className="text-xs text-muted-foreground">{c.sub}</div>
+                    <div className={`text-sm font-medium truncate ${selectedId === (c.id ?? c.name) ? "text-primary" : "text-foreground"}`}>{cleanStandardName(c.name)}</div>
+                    <div className="text-xs text-muted-foreground">{cleanStandardName(c.sub)}</div>
                   </div>
                   {selectedId === (c.id ?? c.name) && <Check className="w-4 h-4 text-primary shrink-0 ml-auto" />}
                 </button>
@@ -795,7 +836,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue, onViewSubmitted, onRetrySync }: {
+function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue, onViewSubmitted, onRetrySync, onDiscardSync }: {
   cityId?: string;
   projectName: string;
   onBack: () => void;
@@ -803,10 +844,12 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
   submittedData: Record<string, VillageRecord[]>;
   syncQueue: SyncQueueItem[];
   onViewSubmitted: () => void;
-  onRetrySync: () => void;
+  onRetrySync: () => Promise<void>;
+  onDiscardSync: () => void;
 }) {
   const [selectedId, setSelectedId] = useState("");
   const [towns, setTowns] = useState<TownOption[]>([]);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     setSelectedId("");
@@ -878,7 +921,16 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <div className="flex items-center justify-between gap-3">
               <span>{failedSyncCount > 0 ? `${failedSyncCount} 个数据包同步失败` : `${pendingSyncCount} 个数据包等待同步`}</span>
-              <button onClick={onRetrySync} className="font-semibold underline">立即重试</button>
+              <div className="flex items-center gap-3 shrink-0">
+                <button onClick={onDiscardSync} disabled={retrying} className="font-semibold underline text-red-600 disabled:opacity-50">放弃</button>
+                <button
+                  onClick={async () => { setRetrying(true); try { await onRetrySync(); } finally { setRetrying(false); } }}
+                  disabled={retrying}
+                  className="font-semibold underline disabled:opacity-50"
+                >
+                  {retrying ? "重试中..." : "立即重试"}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1047,9 +1099,10 @@ function P2bFacilityChoice({ town, allowedTargets, onBack, onSelect }: {
   );
 }
 
-function P2bFacilityType({ town, village, primaryFacilityType, typeProgress, onBack, onEnter, onSubmitVillage }: {
+function P2bFacilityType({ town, village, primaryFacilityType, hasWaterQualityItem, typeProgress, onBack, onEnter, onSubmitVillage }: {
   town: string; village: string;
   primaryFacilityType: PrimaryFacilityType;
+  hasWaterQualityItem: boolean;
   typeProgress: Partial<Record<FacilityType, boolean>>;
   onBack: () => void;
   onEnter: (t: FacilityType) => void;
@@ -1057,9 +1110,11 @@ function P2bFacilityType({ town, village, primaryFacilityType, typeProgress, onB
 }) {
   const mainFacilityType = standardTypeForPrimary(primaryFacilityType);
   const primaryInfo = PRIMARY_FACILITY_TYPE_INFO[primaryFacilityType];
-  const availableTypes: FacilityType[] = primaryFacilityType === "rural_treatment"
-    ? [mainFacilityType, "survey", "water_quality"]
-    : [mainFacilityType, "water_quality"];
+  const availableTypes: FacilityType[] = [
+    mainFacilityType,
+    ...(primaryFacilityType === "rural_treatment" ? ["survey" as const] : []),
+    ...(hasWaterQualityItem ? ["water_quality" as const] : []),
+  ];
   const doneCount = availableTypes.filter(t => typeProgress[t]).length;
   const allDone = doneCount === availableTypes.length;
   const scopeText = primaryFacilityType === "rural_treatment" ? `${town} · ${village}` : `${town} · ${primaryInfo.label}`;
@@ -1237,6 +1292,50 @@ function emptyWaterQualityEntry(primaryFacilityType: PrimaryFacilityType = "rura
   };
 }
 
+function numericWaterQualityValue(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function automaticWaterQualityConclusion(entry: WaterQualityEntry): "pending" | "qualified" | "unqualified" {
+  const pairs: Array<[string, string]> = [
+    [entry.codValue, entry.codLimit],
+    [entry.nh3nValue, entry.nh3nLimit],
+    ...(entry.hasTpLimit ? [[entry.tpValue, entry.tpLimit] as [string, string]] : []),
+  ];
+  const values = pairs.map(([value, limit]) => [numericWaterQualityValue(value), numericWaterQualityValue(limit)] as const);
+  if (values.some(([value, limit]) => value === null || limit === null)) return "pending";
+  return values.some(([value, limit]) => value! > limit!) ? "unqualified" : "qualified";
+}
+
+function waterQualityItemEntry(item: L3Item, waterQuality: WaterQualityEntry): ItemEntry {
+  const automaticConclusion = automaticWaterQualityConclusion(waterQuality);
+  const forceQualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "qualified";
+  const forceUnqualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "unqualified" && automaticConclusion === "qualified";
+  const codFailed = !forceQualified && (forceUnqualified || numericWaterQualityValue(waterQuality.codValue)! > numericWaterQualityValue(waterQuality.codLimit)!);
+  const measuredOtherFailedCount = Number(numericWaterQualityValue(waterQuality.nh3nValue)! > numericWaterQualityValue(waterQuality.nh3nLimit)!)
+    + Number(waterQuality.hasTpLimit && numericWaterQualityValue(waterQuality.tpValue)! > numericWaterQualityValue(waterQuality.tpLimit)!);
+  const otherFailedCount = forceQualified ? 0 : forceUnqualified ? (waterQuality.hasTpLimit ? 2 : 1) : measuredOtherFailedCount;
+  const options = item.options.map(option => {
+    const optionText = `${option.reason} ${option.sourceText ?? ""}`;
+    const isCodOption = optionText.includes("CODCr") && !optionText.includes("NH3-N");
+    const instances = isCodOption ? Number(codFailed) : otherFailedCount;
+    return {
+      ...makeOptionEntry(option.id),
+      selection: instances > 0 ? "standard" as const : "no_deduction" as const,
+      instances: Math.max(1, instances),
+      note: instances > 0 ? `水质抽检自动回填：${option.reason}` : "",
+    };
+  });
+  return {
+    itemId: item.id,
+    options,
+    generalNote: waterQuality.note,
+    done: waterQuality.completed,
+  };
+}
+
 // ==================== PAGE S1: SURVEY LIST ====================
 
 function PSurveyList({ town, village, surveyEntries, onBack, onOpen, onSummary }: {
@@ -1409,6 +1508,40 @@ function PSurveyForm({ category, respondent, entry, onBack, onSave }: {
 
 // ==================== PAGE W1: WATER QUALITY ====================
 
+function WaterQualityField({ label, value, placeholder, numeric = false, onChange }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  numeric?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
+      <input
+        value={value}
+        type={numeric ? "text" : undefined}
+        inputMode={numeric ? "decimal" : undefined}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+        style={{ background: "var(--input-background)" }}
+      />
+    </label>
+  );
+}
+
+function WaterQualityFixedField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
+      <div className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-muted/45 text-foreground min-h-[38px] flex items-center">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, onSave }: {
   town: string;
   village: string;
@@ -1422,34 +1555,15 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
     setForm(prev => applyFixedWaterQualityLimits(prev, primaryFacilityType));
   }, [primaryFacilityType]);
   const update = (patch: Partial<WaterQualityEntry>) => setForm(prev => ({ ...prev, ...patch }));
-  const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale && form.conclusion !== "pending";
-
-  const Field = ({ label, value, placeholder, onChange }: {
-    label: string;
-    value: string;
-    placeholder?: string;
-    onChange: (value: string) => void;
-  }) => (
-    <label className="block">
-      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
-      <input
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-        style={{ background: "var(--input-background)" }}
-      />
-    </label>
-  );
-
-  const FixedField = ({ label, value }: { label: string; value: string }) => (
-    <div>
-      <span className="text-xs text-muted-foreground block mb-1.5">{label}</span>
-      <div className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-muted/45 text-foreground min-h-[38px] flex items-center">
-        {value}
-      </div>
-    </div>
-  );
+  const updateMeasurement = (patch: Partial<WaterQualityEntry>) => setForm(prev => {
+    const next = { ...prev, ...patch };
+    return next.conclusionOverridden ? next : { ...next, conclusion: automaticWaterQualityConclusion(next) };
+  });
+  const automaticConclusion = automaticWaterQualityConclusion(form);
+  const requiredMeasurementsComplete = automaticConclusion !== "pending";
+  const overrideNoteComplete = !form.conclusionOverridden || !!form.note.trim();
+  const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale
+    && requiredMeasurementsComplete && form.conclusion !== "pending" && overrideNoteComplete;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -1470,22 +1584,22 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-3">
-          <Field label="取样时间" value={form.sampleTime} placeholder="如：2023-12-10 09:30" onChange={sampleTime => update({ sampleTime })} />
-          <FixedField label="排放标准" value={form.dischargeStandard} />
-          <Field label="工艺类型" value={form.processType} placeholder="如：A/O + 人工湿地" onChange={processType => update({ processType })} />
-          <Field label="规模（m3/d）" value={form.designScale} placeholder="如：50" onChange={designScale => update({ designScale })} />
+          <WaterQualityField label="取样时间" value={form.sampleTime} placeholder="如：2023-12-10 09:30" onChange={sampleTime => update({ sampleTime })} />
+          <WaterQualityFixedField label="排放标准" value={form.dischargeStandard} />
+          <WaterQualityField label="工艺类型" value={form.processType} placeholder="如：A/O + 人工湿地" onChange={processType => update({ processType })} />
+          <WaterQualityField label="规模（m3/d）" value={form.designScale} placeholder="如：50" numeric onChange={designScale => update({ designScale })} />
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="CODCr 实测值" value={form.codValue} placeholder="mg/L" onChange={codValue => update({ codValue })} />
-            <FixedField label="CODCr 限值（mg/L）" value={form.codLimit} />
-            <Field label="NH3-N 实测值" value={form.nh3nValue} placeholder="mg/L" onChange={nh3nValue => update({ nh3nValue })} />
-            <FixedField label="NH3-N 限值（mg/L）" value={form.nh3nLimit} />
+            <WaterQualityField label="CODCr 实测值" value={form.codValue} placeholder="mg/L" numeric onChange={codValue => updateMeasurement({ codValue })} />
+            <WaterQualityFixedField label="CODCr 限值（mg/L）" value={form.codLimit} />
+            <WaterQualityField label="NH3-N 实测值" value={form.nh3nValue} placeholder="mg/L" numeric onChange={nh3nValue => updateMeasurement({ nh3nValue })} />
+            <WaterQualityFixedField label="NH3-N 限值（mg/L）" value={form.nh3nLimit} />
             {form.hasTpLimit && (
               <>
-                <Field label="TP 实测值" value={form.tpValue} placeholder="mg/L" onChange={tpValue => update({ tpValue })} />
-                <FixedField label="TP 限值（mg/L）" value={form.tpLimit} />
+                <WaterQualityField label="TP 实测值" value={form.tpValue} placeholder="mg/L" numeric onChange={tpValue => updateMeasurement({ tpValue })} />
+                <WaterQualityFixedField label="TP 限值（mg/L）" value={form.tpLimit} />
               </>
             )}
           </div>
@@ -1493,6 +1607,9 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-3">
           <div className="text-xs text-muted-foreground">抽检结论</div>
+          <div className="text-xs text-primary">
+            系统判定：{automaticConclusion === "pending" ? "请完整填写实测值" : automaticConclusion === "qualified" ? "达标" : "不达标"}
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {([
               { value: "qualified" as const, label: "达标" },
@@ -1500,7 +1617,10 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
             ]).map(item => (
               <button
                 key={item.value}
-                onClick={() => update({ conclusion: item.value })}
+                onClick={() => update({
+                  conclusion: item.value,
+                  conclusionOverridden: automaticConclusion !== "pending" && item.value !== automaticConclusion,
+                })}
                 className={`py-3 rounded-lg border text-sm font-medium ${
                   form.conclusion === item.value
                     ? "bg-primary text-primary-foreground border-primary"
@@ -1512,7 +1632,9 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
             ))}
           </div>
           <label className="block">
-            <span className="text-xs text-muted-foreground block mb-1.5">备注</span>
+            <span className="text-xs text-muted-foreground block mb-1.5">
+              备注{form.conclusionOverridden ? "（人工修改结论后必填）" : ""}
+            </span>
             <textarea
               value={form.note}
               onChange={e => update({ note: e.target.value })}
@@ -1522,13 +1644,15 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
               style={{ background: "var(--input-background)" }}
             />
           </label>
+          {form.conclusionOverridden && !form.note.trim() && <p className="text-xs text-red-500">人工修改系统判定后必须填写修改依据。</p>}
         </div>
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
         <button
-          onClick={() => { onSave({ ...form, completed: canComplete }); onBack(); }}
-          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2"
+          onClick={() => { if (canComplete) onSave({ ...form, completed: true }); }}
+          disabled={!canComplete}
+          className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />保存水质抽检情况
         </button>
@@ -1597,7 +1721,7 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
         </span>
         {standardVersionName && (
           <span className="ml-2 inline-block px-2.5 py-1 bg-white/10 rounded-full text-[10px] text-primary-foreground/75">
-            {standardVersionName}
+            {cleanStandardName(standardVersionName)}
           </span>
         )}
       </div>
@@ -2667,13 +2791,15 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
 
 // ==================== SUBMITTED DATA VIEW ====================
 
-function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync }: {
+function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDiscardSync }: {
   submittedData: Record<string, VillageRecord[]>;
   syncQueue: SyncQueueItem[];
   onBack: () => void;
-  onRetrySync: () => void;
+  onRetrySync: () => Promise<void>;
+  onDiscardSync: () => void;
 }) {
   const [expandedTown, setExpandedTown] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const towns = Object.keys(submittedData);
 
   return (
@@ -2694,7 +2820,16 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync }: {
                 <p className="font-semibold">还有数据包未同步到后台</p>
                 <p className="mt-1">{syncQueue.filter(item => item.syncStatus === "sync_failed").length} 个失败，{syncQueue.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
               </div>
-              <button onClick={onRetrySync} className="rounded-lg bg-amber-600 px-3 py-1.5 text-white">重试</button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button onClick={onDiscardSync} disabled={retrying} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-red-600 disabled:opacity-50">放弃</button>
+                <button
+                  onClick={async () => { setRetrying(true); try { await onRetrySync(); } finally { setRetrying(false); } }}
+                  disabled={retrying}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-white disabled:opacity-50"
+                >
+                  {retrying ? "重试中..." : "重试"}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2784,7 +2919,7 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync }: {
 
 type Page = "city" | "cycle" | "town" | "village" | "facility_choice" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
 
-export default function App() {
+function AssessmentApp() {
   const [auth, setAuth] = useState<AuthState | null>(() => {
     try {
       return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
@@ -2830,6 +2965,20 @@ export default function App() {
   const [isTownSubmitting, setIsTownSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [standardVersionName, setStandardVersionName] = useState("");
+
+  useEffect(() => {
+    if (!auth?.token) return;
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
+      .then(response => {
+        if (!cancelled && response.status === 401) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setAuth(null);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [auth?.token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2878,6 +3027,8 @@ export default function App() {
     : ftype === "network"
       ? NETWORK
       : [];
+  const standardGroups = standardTypeForPrimary(primaryFacilityType) === "treatment" ? TREATMENT : NETWORK;
+  const waterQualityScoreItem = findWaterQualityItem(standardGroups);
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
@@ -2988,10 +3139,22 @@ export default function App() {
         await submitTownPackageToBackend(item.pkg, auth.token);
         markPackageSynced(item.pkg);
       } catch (error) {
+        if (error instanceof Error && error.message.includes("401")) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setAuth(null);
+          setSubmitError("登录状态已失效，请重新登录后继续同步。");
+          break;
+        }
         queuePackage(item.pkg, error);
         setSubmitError("仍有数据包同步失败，稍后可继续重试。");
       }
     }
+  };
+
+  const discardPendingSync = () => {
+    if (!window.confirm("确定放弃所有同步失败和等待同步的数据包吗？此操作无法撤销。")) return;
+    setSyncQueue(prev => prev.filter(item => item.syncStatus === "synced"));
+    setSubmitError("");
   };
 
   useEffect(() => {
@@ -3063,6 +3226,7 @@ export default function App() {
             syncQueue={syncQueue}
             onViewSubmitted={() => setPage("submitted_data")}
             onRetrySync={retryPendingSync}
+            onDiscardSync={discardPendingSync}
           />
         );
       case "village":
@@ -3103,6 +3267,7 @@ export default function App() {
           <P2bFacilityType
             town={town} village={village}
             primaryFacilityType={primaryFacilityType}
+            hasWaterQualityItem={!!waterQualityScoreItem}
             typeProgress={typeProgress}
             onBack={() => setPage(primaryFacilityType === "rural_treatment" ? "village" : "facility_choice")}
             onEnter={t => {
@@ -3226,6 +3391,27 @@ export default function App() {
             onBack={() => setPage("facilitytype")}
             onSave={entry => {
               setWaterQuality(entry);
+              if (waterQualityScoreItem) {
+                const updatedEntries = {
+                  ...entries,
+                  [waterQualityScoreItem.id]: waterQualityItemEntry(waterQualityScoreItem, entry),
+                };
+                const standardType = standardTypeForPrimary(primaryFacilityType);
+                const standardMax = totalMaxScore(standardGroups);
+                const standardDeducted = getAllItems(standardGroups).reduce(
+                  (sum, item) => sum + calcEntryDeduction(updatedEntries, standardGroups, item.id, surveyEntries),
+                  0,
+                );
+                setEntries(updatedEntries);
+                setScoreByType(prev => ({
+                  ...prev,
+                  [standardType]: {
+                    maxScore: standardMax,
+                    currentScore: standardMax - standardDeducted,
+                    deductedScore: standardDeducted,
+                  },
+                }));
+              }
               setTypeProgress(prev => ({ ...prev, water_quality: entry.completed }));
               setScoreByType(prev => ({ ...prev, water_quality: { maxScore: 0, currentScore: 0, deductedScore: 0 } }));
               setPage("facilitytype");
@@ -3239,6 +3425,7 @@ export default function App() {
             syncQueue={syncQueue}
             onBack={() => setPage("town")}
             onRetrySync={retryPendingSync}
+            onDiscardSync={discardPendingSync}
           />
         );
       default:
@@ -3276,4 +3463,23 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+export default function App() {
+  const [backendReady, setBackendReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    discoverApiBaseUrl().then(baseUrl => {
+      if (cancelled) return;
+      API_BASE_URL = baseUrl;
+      setBackendReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!backendReady) {
+    return <div className="h-screen w-screen flex items-center justify-center bg-background text-sm text-muted-foreground">正在连接后端服务...</div>;
+  }
+  return <AssessmentApp />;
 }
