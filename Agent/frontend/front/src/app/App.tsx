@@ -433,6 +433,21 @@ function mapBackendReports(rows: BackendReportRow[]): Report[] {
   }));
 }
 
+function formatPlatformTime(value?: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date).replace(/\//g, "-");
+}
+
 function downloadReports(reports: Report[]) {
   reports.filter(report => report.downloadUrl).forEach((report, index) => {
     window.setTimeout(() => {
@@ -2725,7 +2740,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
         </div>
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="px-5 py-3">镇街/村点</th><th className="px-3 py-3">状态</th><th className="px-3 py-3">得分</th><th className="px-3 py-3">扣分项</th><th className="px-3 py-3">更新时间</th><th className="px-3 py-3">操作</th></tr></thead>
+            <thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="px-5 py-3">镇街/项目点</th><th className="px-3 py-3">状态</th><th className="px-3 py-3">得分</th><th className="px-3 py-3">扣分项</th><th className="px-3 py-3">更新时间</th><th className="px-3 py-3">操作</th></tr></thead>
             <tbody>{records.map(record => {
               const deductions = record.scores?.filter(score => score.deduction > 0) ?? [];
               const isLocked = record.status === "locked";
@@ -2733,14 +2748,14 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
                 <tr key={record.id} className="border-b border-border last:border-0">
                   <td className="px-5 py-3">
                     <div className="font-medium text-foreground">{record.town}</div>
-                    <div className="text-xs text-muted-foreground">{record.villageName || record.raw?.village || record.raw?.villageName || "未绑定村点"}</div>
+                    <div className="text-xs text-muted-foreground">{record.villageName || record.raw?.village || record.raw?.villageName || "未绑定项目点"}</div>
                   </td>
                   <td className="px-3 py-3">
                     <span className={`inline-flex h-6 items-center rounded-full border px-2 text-xs ${recordStatusClass(record.status)}`}>{recordStatusLabel(record.status)}</span>
                   </td>
                   <td className="px-3 py-3 font-mono text-xs">{record.totalScore ?? "—"}</td>
                   <td className="px-3 py-3 text-xs text-muted-foreground">{deductions.length} 项 / 扣 {deductions.reduce((sum, item) => sum + item.deduction, 0).toFixed(1)} 分</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{record.updatedAt}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">{formatPlatformTime(record.updatedAt)}</td>
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <button disabled={busy === record.id} onClick={() => view(record.id)} className="text-xs text-foreground disabled:opacity-40">查看</button>
@@ -2769,7 +2784,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
               <div>
                 <h3 className="text-sm font-semibold text-foreground">{selected.town} 数据详情</h3>
                 <div className="mt-1 flex items-center gap-2">
-                  <p className="text-xs text-muted-foreground">{selected.villageName || selected.raw?.village || "未绑定村点"}</p>
+                  <p className="text-xs text-muted-foreground">{selected.villageName || selected.raw?.village || "未绑定项目点"}</p>
                   <span className={`inline-flex h-6 items-center rounded-full border px-2 text-xs ${recordStatusClass(selected.status)}`}>{recordStatusLabel(selected.status)}</span>
                 </div>
               </div>
@@ -2785,7 +2800,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
               <p>城市：<span className="text-foreground">{selected.cityName || "-"}</span></p>
               <p>批次：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
             <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
-              <p>提交：<span className="text-foreground">{selected.submittedAt || "-"}</span></p>
+              <p>提交：<span className="text-foreground">{formatPlatformTime(selected.submittedAt)}</span></p>
             </div>
             <div className="px-5 py-4 grid grid-cols-2 gap-5">
               <div>
@@ -2966,7 +2981,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
               <div className="space-y-1 text-xs text-muted-foreground">
                 {(selected.reviewLogs ?? []).map(log => (
                   <div key={log.id} className="rounded border border-border px-3 py-2">
-                    <p>{reviewActionLabel(log.action)} · {log.reason || "无备注"} · {log.createdAt}</p>
+                    <p>{reviewActionLabel(log.action)} · {log.reason || "无备注"} · {formatPlatformTime(log.createdAt)}</p>
                     {reviewLogSummary(log) && <p className="mt-1 text-foreground">{reviewLogSummary(log)}</p>}
                   </div>
                 ))}
@@ -3120,7 +3135,7 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
             </button>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            当前统计范围：{selectedProjectName}。核心口径为项目下镇街完成情况，再下钻到各镇街村点完成情况。
+            当前统计范围：{selectedProjectName}。核心口径为项目下镇街完成情况，再下钻到各镇街项目点完成情况。
           </p>
         </div>
 
@@ -3130,7 +3145,7 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
             { label: "项目镇街总数", value: cityTownCount, suffix: "个", color: "text-foreground", bg: "bg-card" },
             { label: "已完成镇街", value: completedTownCount, suffix: "个", color: "text-[var(--status-success)]", bg: "bg-[var(--status-success-bg)]" },
             { label: "未完成镇街", value: inprogressTownCount + pendingTownCount, suffix: "个", color: "text-blue-600", bg: "bg-blue-50" },
-            { label: "村点完成", value: `${completedVillageCount}/${villageCount}`, suffix: "", color: "text-foreground", bg: "bg-muted" },
+            { label: "项目点完成", value: `${completedVillageCount}/${villageCount}`, suffix: "", color: "text-foreground", bg: "bg-muted" },
           ].map(({ label, value, color, bg }) => (
             <div key={label} className={`${bg} border border-border rounded-lg px-5 py-4`}>
               <p className="text-xs text-muted-foreground">{label}</p>
@@ -3148,7 +3163,7 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
             <p className="mt-1 text-xl font-semibold font-mono text-muted-foreground">{pendingTownCount}</p>
           </div>
           <div className="rounded-lg border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">未完成村点</p>
+            <p className="text-xs text-muted-foreground">未完成项目点</p>
             <p className="mt-1 text-xl font-semibold font-mono text-amber-700">{pendingVillageCount}</p>
           </div>
         </div>

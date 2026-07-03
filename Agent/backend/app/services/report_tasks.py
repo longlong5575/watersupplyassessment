@@ -50,6 +50,8 @@ PROJECT_REPORT_PROFILES = {
         "waterStandard": "城镇污水处理设施出水执行《城镇污水处理厂污染物排放标准》一级A标准及广东省《水污染物排放限值》较严值。",
         "waterRows": [
             ["城镇污水处理设施", "CODCr", "40", "mg/L"],
+            ["城镇污水处理设施", "BOD5", "10", "mg/L"],
+            ["城镇污水处理设施", "SS", "10", "mg/L"],
             ["城镇污水处理设施", "NH3-N", "5（8）", "mg/L"],
             ["城镇污水处理设施", "TP", "0.5", "mg/L"],
         ],
@@ -138,13 +140,21 @@ def _add_paragraph(document, text: str, *, bold_prefix: str | None = None) -> No
 
 
 def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
+    from docx.oxml import OxmlElement
+
+    def keep_row_together(row) -> None:
+        row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+
     table = document.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
+    table.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
+    keep_row_together(table.rows[0])
     for cell, value in zip(table.rows[0].cells, headers):
         _set_cell_text(cell, value, bold=True)
     for row_values in rows:
-        row = table.add_row().cells
-        for cell, value in zip(row, row_values):
+        table_row = table.add_row()
+        keep_row_together(table_row)
+        for cell, value in zip(table_row.cells, row_values):
             _set_cell_text(cell, value)
 
 
@@ -186,6 +196,26 @@ def _deduction_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
+def _all_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows = []
+    for record in records:
+        point_name = record.get("village") or record.get("town") or "-"
+        for score in record.get("scores") or []:
+            full_score = float(score.get("indicatorFullScore") or 0)
+            deduction = float(score.get("deduction") or 0)
+            rows.append([
+                len(rows) + 1,
+                point_name,
+                score.get("indicatorCode") or "-",
+                score.get("indicatorName") or "-",
+                f"{full_score:.2f}",
+                f"{max(full_score - deduction, 0):.2f}",
+                f"{deduction:.2f}",
+                score.get("reason") or score.get("deductionOptionName") or ("无扣分" if deduction == 0 else "-"),
+            ])
+    return rows
+
+
 def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for record in records:
@@ -197,6 +227,10 @@ def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
                 payload.get("sampleTime") or item.get("sampledAt") or "-",
                 payload.get("codValue") or "-",
                 payload.get("codLimit") or "-",
+                payload.get("bod5Value") or "-",
+                payload.get("bod5Limit") or "-",
+                payload.get("ssValue") or "-",
+                payload.get("ssLimit") or "-",
                 payload.get("nh3nValue") or "-",
                 payload.get("nh3nLimit") or "-",
                 payload.get("tpValue") or "-",
@@ -236,14 +270,19 @@ def _attachment_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
 
 
 def _accepted_agent_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    capability_labels = {
+        "record_review_assist": "复核记录辅助校验",
+        "report_semantic_check": "报告语义一致性校验",
+    }
     rows = []
     for record in records:
         for item in record.get("agentRuns") or []:
             output = item.get("output") or {}
+            capability = item.get("capability") or "-"
             rows.append([
                 len(rows) + 1,
                 record.get("village") or record.get("town") or "-",
-                item.get("capability") or "-",
+                capability_labels.get(capability, capability),
                 f"{float(item.get('confidence') or 0):.2f}",
                 output.get("summary") or "-",
             ])
@@ -299,7 +338,14 @@ def _add_project_results(document, records: list[dict[str, Any]], profile: dict[
     document.add_heading("三、考核结果", level=1)
     _add_simple_table(document, ["序号", "考核类型", "行政村", "设施点", "状态", "得分"], _record_score_rows(records))
 
-    document.add_heading("3.1 扣分明细", level=2)
+    document.add_heading("3.1 评分明细", level=2)
+    score_rows = _all_score_rows(records)
+    if score_rows:
+        _add_simple_table(document, ["序号", "项目点", "指标编号", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows)
+    else:
+        _add_paragraph(document, "本次系统数据未记录完整评分明细。")
+
+    document.add_heading("3.2 扣分问题汇总", level=2)
     deductions = _deduction_rows(records)
     if deductions:
         _add_simple_table(document, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"], deductions)
@@ -307,28 +353,28 @@ def _add_project_results(document, records: list[dict[str, Any]], profile: dict[
         _add_paragraph(document, "本次已复核数据未记录扣分项。")
 
     if profile.get("hasSurvey"):
-        document.add_heading("3.2 公众调查情况", level=2)
+        document.add_heading("3.3 公众调查情况", level=2)
         rows = _survey_rows(records)
         if rows:
             _add_simple_table(document, ["序号", "设施点", "调查类型", "对象", "得分"], rows)
         else:
             _add_paragraph(document, "本次系统数据未记录公众调查表；农村设施正式报告可在补充问卷后自动纳入。")
 
-    document.add_heading("3.3 水质抽检情况", level=2)
+    document.add_heading("3.4 水质抽检情况", level=2)
     rows = _water_quality_rows(records)
     if rows:
-        _add_simple_table(document, ["序号", "设施点", "取样时间", "CODCr实测", "CODCr限值", "NH3-N实测", "NH3-N限值", "TP实测", "TP限值", "结论"], rows)
+        _add_simple_table(document, ["序号", "项目点", "取样时间", "CODCr实测", "CODCr限值", "BOD5实测", "BOD5限值", "SS实测", "SS限值", "NH3-N实测", "NH3-N限值", "TP实测", "TP限值", "结论"], rows)
     else:
         _add_paragraph(document, "本次系统数据未记录水质抽检实测值；报告附录仍列示对应项目水质限值。")
 
-    document.add_heading("3.4 证据附件目录", level=2)
+    document.add_heading("3.5 证据附件目录", level=2)
     attachment_rows = _attachment_rows(records)
     if attachment_rows:
         _add_simple_table(document, ["序号", "设施点", "文件名", "评分记录", "扣分项", "大小"], attachment_rows)
     else:
         _add_paragraph(document, "本次系统数据未记录现场照片或附件。")
 
-    document.add_heading("3.5 Agent辅助校验", level=2)
+    document.add_heading("3.6 Agent辅助校验", level=2)
     agent_rows = _accepted_agent_rows(records)
     if agent_rows:
         _add_simple_table(document, ["序号", "设施点", "能力", "置信度", "已确认摘要"], agent_rows)

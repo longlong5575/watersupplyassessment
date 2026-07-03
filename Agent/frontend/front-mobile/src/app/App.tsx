@@ -142,10 +142,16 @@ interface WaterQualityEntry {
   hasTpLimit: boolean;
   codValue: string;
   codLimit: string;
+  bod5Value?: string;
+  bod5Limit?: string;
+  ssValue?: string;
+  ssLimit?: string;
   nh3nValue: string;
   nh3nLimit: string;
   tpValue: string;
   tpLimit: string;
+  monthlyMissingTest?: boolean;
+  monthlyRegulatorUnqualified?: boolean;
   conclusion: "pending" | "qualified" | "unqualified";
   conclusionOverridden?: boolean;
   note: string;
@@ -630,11 +636,88 @@ function findWaterQualityItem(groups: L1Group[]): L3Item | undefined {
   return getAllItems(groups).find(item => {
     const optionText = item.options.map(option => `${option.reason} ${option.sourceText ?? ""}`).join(" ");
     const text = `${item.name} ${item.evaluationStandard ?? ""} ${item.standardText ?? ""} ${item.dataSource ?? ""} ${optionText}`;
-    return (text.includes("水质") || text.includes("CODCr")) && text.includes("CODCr") && text.includes("NH3-N");
+    const hasMeasuredWaterQuality = (text.includes("水质") || text.includes("CODCr")) && text.includes("CODCr") && text.includes("NH3-N");
+    const hasMonthlyUnqualifiedRule = text.includes("全月不合格") || (text.includes("化验") && text.includes("判定为不合格"));
+    return hasMeasuredWaterQuality || hasMonthlyUnqualifiedRule;
   });
 }
 
-function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
+function PPortal({ onField, onKnowledge }: { onField: () => void; onKnowledge: () => void }) {
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
+        <div className="flex items-center gap-1.5 mb-1 mt-1">
+          <Smartphone className="w-3.5 h-3.5 text-primary-foreground/55" />
+          <span className="text-xs text-primary-foreground/55 tracking-wide">PPP农村污水考核系统</span>
+        </div>
+        <h1 className="text-xl font-semibold text-primary-foreground">选择功能</h1>
+        <p className="text-xs text-primary-foreground/55 mt-1">进入现场填报，或查看项目知识库资料</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
+        <button onClick={onField} className="w-full rounded-xl border-2 border-primary bg-primary/5 p-5 text-left active:bg-primary/10">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shrink-0">
+              <MapPin className="w-6 h-6 text-primary-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-base font-semibold text-foreground">现场考核</div>
+              <p className="text-xs text-muted-foreground mt-1">选择项目、镇街和考核对象，录入现场评分数据</p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-primary shrink-0" />
+          </div>
+        </button>
+
+        <button onClick={onKnowledge} className="w-full rounded-xl border border-border bg-white p-5 text-left active:bg-gray-50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center shrink-0">
+              <Package className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-base font-semibold text-foreground">知识库</div>
+              <p className="text-xs text-muted-foreground mt-1">查看考核标准、项目资料和报告口径</p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PKnowledge({ onBack }: { onBack: () => void }) {
+  const items = [
+    { title: "考核标准", desc: "郁南、茂南项目评分条目与扣分口径" },
+    { title: "项目资料", desc: "镇街、村点、考核对象和报告引用资料" },
+    { title: "报告口径", desc: "最终报告中使用的格式、标题和说明文字" },
+  ];
+  return (
+    <div className="flex flex-col h-full bg-background">
+      <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
+        <h1 className="text-lg font-semibold text-primary-foreground">知识库</h1>
+        <p className="text-xs text-primary-foreground/55 mt-1">现场可快速核对标准和项目资料</p>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
+        {items.map(item => (
+          <div key={item.title} className="rounded-xl border border-border bg-white p-4">
+            <div className="text-sm font-semibold text-foreground">{item.title}</div>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.desc}</p>
+          </div>
+        ))}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-xs text-amber-800 leading-relaxed">
+            知识库入口已预留，后续可继续接入标准全文检索、项目资料附件和报告范例。
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function P0City({ onBack, onNext }: { onBack: () => void; onNext: (c: CityOption) => void }) {
   const [selectedId, setSelectedId] = useState("");
   const [cities, setCities] = useState<CityOption[]>([
     { id: "yunan", name: "郁南项目", sub: "郁南考核标准" },
@@ -655,6 +738,9 @@ function P0City({ onNext }: { onNext: (c: CityOption) => void }) {
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-6 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary-foreground/55 mb-3 text-sm">
+          <ChevronLeft className="w-4 h-4" />返回
+        </button>
         <div className="flex items-center gap-1.5 mb-1 mt-1">
           <MapPin className="w-3.5 h-3.5 text-primary-foreground/55" />
           <span className="text-xs text-primary-foreground/55 tracking-wide">农村污水PPP现场考核</span>
@@ -1366,8 +1452,14 @@ function emptyWaterQualityEntry(primaryFacilityType: PrimaryFacilityType = "rura
     processType: "",
     designScale: "",
     codValue: "",
+    bod5Value: "",
+    bod5Limit: "",
+    ssValue: "",
+    ssLimit: "",
     nh3nValue: "",
     tpValue: "",
+    monthlyMissingTest: false,
+    monthlyRegulatorUnqualified: false,
     conclusion: "pending",
     note: "",
     completed: false,
@@ -1389,8 +1481,11 @@ function numericWaterQualityLimit(value: string): number | null {
 }
 
 function automaticWaterQualityConclusion(entry: WaterQualityEntry): "pending" | "qualified" | "unqualified" {
+  if (entry.monthlyMissingTest || entry.monthlyRegulatorUnqualified) return "unqualified";
   const pairs: Array<[string, string]> = [
     [entry.codValue, entry.codLimit],
+    ...(entry.bod5Limit ? [[entry.bod5Value ?? "", entry.bod5Limit] as [string, string]] : []),
+    ...(entry.ssLimit ? [[entry.ssValue ?? "", entry.ssLimit] as [string, string]] : []),
     [entry.nh3nValue, entry.nh3nLimit],
     ...(entry.hasTpLimit ? [[entry.tpValue, entry.tpLimit] as [string, string]] : []),
   ];
@@ -1399,14 +1494,49 @@ function automaticWaterQualityConclusion(entry: WaterQualityEntry): "pending" | 
   return values.some(([value, limit]) => value! > limit!) ? "unqualified" : "qualified";
 }
 
+function isMonthlyUnqualifiedOption(option: DeductionOption, item: L3Item): boolean {
+  return (option.value ?? 0) >= item.maxScore;
+}
+
 function waterQualityItemEntry(item: L3Item, waterQuality: WaterQualityEntry): ItemEntry {
   const automaticConclusion = automaticWaterQualityConclusion(waterQuality);
   const forceQualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "qualified";
   const forceUnqualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "unqualified" && automaticConclusion === "qualified";
+  const triggerReasons = [
+    waterQuality.monthlyMissingTest && "化验报告显示当月有一项没做化验项目",
+    waterQuality.monthlyRegulatorUnqualified && "环保部门或上级监管部门抽查判定不合格",
+  ].filter((item): item is string => Boolean(item));
+  const monthlyUnqualified = !forceQualified && (
+    waterQuality.conclusion === "unqualified"
+    || automaticConclusion === "unqualified"
+    || triggerReasons.length > 0
+    || forceUnqualified
+  );
+  const hasMonthlyRule = item.options.some(option => isMonthlyUnqualifiedOption(option, item));
+  if (hasMonthlyRule) {
+    const options = item.options.map(option => {
+      const selected = monthlyUnqualified && isMonthlyUnqualifiedOption(option, item);
+      return {
+        ...makeOptionEntry(option.id),
+        selection: selected ? "standard" as const : "no_deduction" as const,
+        instances: 1,
+        note: selected ? `水质不合格判定：${triggerReasons.length ? triggerReasons.join("；") : "判定为不合格"}` : "",
+      };
+    });
+    return {
+      itemId: item.id,
+      options,
+      generalNote: [waterQuality.note, triggerReasons.length ? `全月不合格触发原因：${triggerReasons.join("；")}` : ""].filter(Boolean).join("\n"),
+      done: waterQuality.completed,
+    };
+  }
   const codFailed = !forceQualified && (forceUnqualified || numericWaterQualityValue(waterQuality.codValue)! > numericWaterQualityLimit(waterQuality.codLimit)!);
   const measuredOtherFailedCount = Number(numericWaterQualityValue(waterQuality.nh3nValue)! > numericWaterQualityLimit(waterQuality.nh3nLimit)!)
-    + Number(waterQuality.hasTpLimit && numericWaterQualityValue(waterQuality.tpValue)! > numericWaterQualityLimit(waterQuality.tpLimit)!);
-  const otherFailedCount = forceQualified ? 0 : forceUnqualified ? (waterQuality.hasTpLimit ? 2 : 1) : measuredOtherFailedCount;
+    + Number(waterQuality.hasTpLimit && numericWaterQualityValue(waterQuality.tpValue)! > numericWaterQualityLimit(waterQuality.tpLimit)!)
+    + Number(Boolean(waterQuality.bod5Limit) && numericWaterQualityValue(waterQuality.bod5Value ?? "")! > numericWaterQualityLimit(waterQuality.bod5Limit ?? "")!)
+    + Number(Boolean(waterQuality.ssLimit) && numericWaterQualityValue(waterQuality.ssValue ?? "")! > numericWaterQualityLimit(waterQuality.ssLimit ?? "")!);
+  const measuredOtherCount = 1 + Number(waterQuality.hasTpLimit) + Number(Boolean(waterQuality.bod5Limit)) + Number(Boolean(waterQuality.ssLimit));
+  const otherFailedCount = forceQualified ? 0 : forceUnqualified ? measuredOtherCount : measuredOtherFailedCount;
   const options = item.options.map(option => {
     const optionText = `${option.reason} ${option.sourceText ?? ""}`;
     const isCodOption = optionText.includes("CODCr") && !optionText.includes("NH3-N");
@@ -1580,7 +1710,7 @@ function PSurveyForm({ category, respondent, entry, onBack, onSave }: {
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
         <button onClick={() => save(false)} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
-          <Save className="w-4 h-4" />保存草稿
+          <Save className="w-4 h-4" />保存并返回
         </button>
         <button
           onClick={() => save(true)}
@@ -1632,9 +1762,10 @@ function WaterQualityFixedField({ label, value }: { label: string; value: string
   );
 }
 
-function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, onSave }: {
+function PWaterQualityForm({ town, village, projectName, primaryFacilityType, entry, onBack, onSave }: {
   town: string;
   village: string;
+  projectName: string;
   primaryFacilityType: PrimaryFacilityType;
   entry: WaterQualityEntry;
   onBack: () => void;
@@ -1642,15 +1773,28 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
 }) {
   const [form, setForm] = useState<WaterQualityEntry>(() => applyFixedWaterQualityLimits(entry, primaryFacilityType));
   useEffect(() => {
-    setForm(prev => applyFixedWaterQualityLimits(prev, primaryFacilityType));
-  }, [primaryFacilityType]);
+    setForm(prev => ({
+      ...applyFixedWaterQualityLimits(prev, primaryFacilityType),
+      bod5Limit: projectName.includes("茂南") && primaryFacilityType === "town_plant" ? "10" : "",
+      ssLimit: projectName.includes("茂南") && primaryFacilityType === "town_plant" ? "10" : "",
+    }));
+  }, [primaryFacilityType, projectName]);
   const update = (patch: Partial<WaterQualityEntry>) => setForm(prev => ({ ...prev, ...patch }));
   const updateMeasurement = (patch: Partial<WaterQualityEntry>) => setForm(prev => {
     const next = { ...prev, ...patch };
     return next.conclusionOverridden ? next : { ...next, conclusion: automaticWaterQualityConclusion(next) };
   });
+  const updateMonthlyTrigger = (patch: Partial<WaterQualityEntry>) => setForm(prev => {
+    const next = { ...prev, ...patch };
+    return {
+      ...next,
+      conclusion: automaticWaterQualityConclusion(next),
+      conclusionOverridden: false,
+    };
+  });
   const automaticConclusion = automaticWaterQualityConclusion(form);
-  const requiredMeasurementsComplete = automaticConclusion !== "pending";
+  const hasMonthlyTrigger = Boolean(form.monthlyMissingTest || form.monthlyRegulatorUnqualified);
+  const requiredMeasurementsComplete = hasMonthlyTrigger || automaticConclusion !== "pending";
   const overrideNoteComplete = !form.conclusionOverridden || !!form.note.trim();
   const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale
     && requiredMeasurementsComplete && form.conclusion !== "pending" && overrideNoteComplete;
@@ -1692,6 +1836,14 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
           <div className="grid grid-cols-2 gap-3">
             <WaterQualityField label="CODCr 实测值" value={form.codValue} placeholder="mg/L" numeric onChange={codValue => updateMeasurement({ codValue })} />
             <WaterQualityFixedField label="CODCr 限值（mg/L）" value={form.codLimit} />
+            {form.bod5Limit && <>
+              <WaterQualityField label="BOD5 实测值" value={form.bod5Value ?? ""} placeholder="mg/L" numeric onChange={bod5Value => updateMeasurement({ bod5Value })} />
+              <WaterQualityFixedField label="BOD5 限值（mg/L）" value={form.bod5Limit} />
+            </>}
+            {form.ssLimit && <>
+              <WaterQualityField label="SS 实测值" value={form.ssValue ?? ""} placeholder="mg/L" numeric onChange={ssValue => updateMeasurement({ ssValue })} />
+              <WaterQualityFixedField label="SS 限值（mg/L）" value={form.ssLimit} />
+            </>}
             <WaterQualityField label="NH3-N 实测值" value={form.nh3nValue} placeholder="mg/L" numeric onChange={nh3nValue => updateMeasurement({ nh3nValue })} />
             <WaterQualityFixedField label="NH3-N 限值（mg/L）" value={form.nh3nLimit} />
             {form.hasTpLimit && (
@@ -1704,7 +1856,41 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-3">
-          <div className="text-xs text-muted-foreground">抽检结论</div>
+          <div>
+            <div className="text-xs text-muted-foreground">不合格判定</div>
+            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+              以下两项只作为全月不合格触发原因记录，不单独评分；如触发，则统一回填“判定为不合格扣分”。
+            </p>
+          </div>
+          <div className="space-y-2">
+            {[
+              {
+                key: "monthlyMissingTest" as const,
+                label: "化验报告显示当月有一项没做化验项目",
+              },
+              {
+                key: "monthlyRegulatorUnqualified" as const,
+                label: "环保部门或上级监管部门抽查判定不合格",
+              },
+            ].map(item => (
+              <button
+                key={item.key}
+                onClick={() => {
+                  updateMonthlyTrigger({ [item.key]: !form[item.key] });
+                }}
+                className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm flex items-center gap-2 ${
+                  form[item.key]
+                    ? "bg-red-50 border-red-200 text-red-700"
+                    : "bg-white border-border text-foreground"
+                }`}
+              >
+                <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${form[item.key] ? "bg-red-600 border-red-600" : "border-border"}`}>
+                  {form[item.key] && <Check className="w-3 h-3 text-white" />}
+                </span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
           <div className="text-xs text-primary">
             系统判定：{automaticConclusion === "pending" ? "请完整填写实测值" : automaticConclusion === "qualified" ? "达标" : "不达标"}
           </div>
@@ -1775,7 +1961,11 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
-  const current = total - deducted;
+  const current = allItems.reduce((sum, item) => {
+    const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
+    const done = derived ? derived.completed : Boolean(entries[item.id]?.done);
+    return sum + (done ? item.maxScore - calcEntryDeduction(entries, groups, item.id, surveyEntries) : 0);
+  }, 0);
   const doneCount = allItems.filter(i => {
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? derived.completed : entries[i.id]?.done;
@@ -1868,7 +2058,7 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right">
-                            <div className="text-sm font-semibold text-foreground">{item.maxScore - ded}</div>
+                            <div className="text-sm font-semibold text-foreground">{status === "pending" ? "—" : item.maxScore - ded}</div>
                             <div className="text-xs text-muted-foreground">/{item.maxScore}</div>
                           </div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -1885,8 +2075,8 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
-        <button className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
-          <Save className="w-4 h-4" />保存草稿
+        <button onClick={onBack} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" />返回上一页
         </button>
         <button onClick={onSummary} className="py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
           <BarChart3 className="w-4 h-4" />查看汇总
@@ -2354,7 +2544,7 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
       ) : (
         <div className="px-4 pb-10 pt-3 border-t border-border bg-white grid grid-cols-2 gap-2 shrink-0">
           <button onClick={() => save(false)} className="py-3 border border-primary text-primary rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
-            <Save className="w-4 h-4" />保存草稿
+            <Save className="w-4 h-4" />保存并返回
           </button>
           <button onClick={() => save(true)} className="py-3 bg-primary text-primary-foreground rounded-xl font-medium text-sm flex items-center justify-center gap-1.5">
             <CheckCircle className="w-4 h-4" />完成本项
@@ -2427,7 +2617,11 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
   const allItems = getAllItems(groups);
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
-  const current = total - deducted;
+  const current = allItems.reduce((sum, item) => {
+    const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
+    const done = derived ? derived.completed : Boolean(entries[item.id]?.done);
+    return sum + (done ? item.maxScore - calcEntryDeduction(entries, groups, item.id, surveyEntries) : 0);
+  }, 0);
   const doneCount = allItems.filter(i => {
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? derived.completed : entries[i.id]?.done;
@@ -2455,9 +2649,16 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
     if (isSurvey) { onSubmit(); return; }
     const errs: string[] = [];
     allItems.forEach(item => {
-      if (calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries)) return;
+      const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
+      if (derived) {
+        if (!derived.completed) errs.push(`“${item.name}”：关联问卷尚未填写完整`);
+        return;
+      }
       const e = entries[item.id];
-      if (!e) return;
+      if (!e?.done) {
+        errs.push(`“${item.name}”：尚未检查，请确认无扣分或填写扣分情况`);
+        return;
+      }
       e.options.forEach(oe => {
         if (oe.selection === "custom" && !oe.customNote.trim())
           errs.push(`"${item.name}"：选择了其他原因但未填写扣分依据`);
@@ -2631,7 +2832,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                         const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
                         const ded = derived?.deductedScore ?? calcEntryDeduction(entries, groups, item.id, surveyEntries);
                         const done = derived ? derived.completed : entries[item.id]?.done;
-                        const score = item.maxScore - ded;
+                        const score = done ? item.maxScore - ded : null;
                         return (
                           <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-2">
                             <div className="flex-1 min-w-0">
@@ -2645,7 +2846,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-sm font-bold text-foreground">{score}<span className="text-xs font-normal text-muted-foreground">/{item.maxScore}</span></span>
+                              <span className="text-sm font-bold text-foreground">{score ?? "—"}<span className="text-xs font-normal text-muted-foreground">/{item.maxScore}</span></span>
                               <button
                                 onClick={() => onEditItem(item.id)}
                                 className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg shrink-0"
@@ -3091,7 +3292,7 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
 
 // ==================== MAIN APP ====================
 
-type Page = "city" | "cycle" | "town" | "village" | "facility_choice" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
+type Page = "portal" | "knowledge" | "city" | "cycle" | "town" | "village" | "facility_choice" | "facilitytype" | "criteria" | "detail" | "summary" | "success" | "towncomplete" | "survey_list" | "survey_form" | "water_quality" | "submitted_data";
 
 function AssessmentApp() {
   const [auth, setAuth] = useState<AuthState | null>(() => {
@@ -3101,7 +3302,7 @@ function AssessmentApp() {
       return null;
     }
   });
-  const [page, setPage] = useState<Page>("city");
+  const [page, setPage] = useState<Page>("portal");
   const [city, setCity] = useState("");
   const [cityId, setCityId] = useState("");
   const [cycleId, setCycleId] = useState("");
@@ -3472,9 +3673,14 @@ function AssessmentApp() {
 
   const renderFieldPage = () => {
     switch (page) {
+      case "portal":
+        return <PPortal onField={() => setPage("city")} onKnowledge={() => setPage("knowledge")} />;
+      case "knowledge":
+        return <PKnowledge onBack={() => setPage("portal")} />;
       case "city":
         return (
           <P0City
+            onBack={() => setPage("portal")}
             onNext={c => {
               setCity(c.name);
               setCityId(c.id ?? "");
@@ -3715,6 +3921,7 @@ function AssessmentApp() {
           <PWaterQualityForm
             town={town}
             village={village}
+            projectName={city}
             primaryFacilityType={primaryFacilityType}
             entry={waterQuality}
             onBack={() => setPage("facilitytype")}

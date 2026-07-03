@@ -117,6 +117,7 @@ def build_report_dataset(
                 "indicatorVersionId": record.indicator_version_id,
                 "status": record.status,
                 "totalScore": record.total_score,
+                "rawPayload": record.raw_payload or {},
                 "submittedAt": record.submitted_at,
                 "reviewedAt": record.reviewed_at,
                 "lockedAt": record.locked_at,
@@ -226,3 +227,6 @@ def validate_report_dataset(snapshot: dict[str, Any]) -> None:
     missing_scores = [item["id"] for item in snapshot["records"] if item.get("scoreCount", 0) <= 0]
     if missing_scores:
         raise RuntimeError("Report generation requires at least one score detail for every selected record.")
+    incomplete = [item["id"] for item in snapshot["records"] if any(not entry.get("done") for entry in ((item.get("rawPayload") or {}).get("entries") or {}).values())]
+    if incomplete:
+        raise RuntimeError("Report generation requires all scoring items to be checked.")

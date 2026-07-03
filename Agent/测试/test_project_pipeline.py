@@ -32,6 +32,9 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+INDICATOR_GROUPS: dict[str, list[dict]] = {}
+
+
 def assert_ok(response, label: str):
     assert response.status_code < 300, f"{label}: {response.status_code} {response.text}"
     return response.json()
@@ -53,7 +56,7 @@ def leaf_standards(client: TestClient, project_id: str, cycle_id: str, facility_
 
 
 def record_payload(*, project, cycle, town, village, facility_type, indicator, note="极端重复扣分"):
-    option = indicator["deductionOptions"][0]
+    indicators = INDICATOR_GROUPS.get(indicator["id"], [indicator])
     payload = {
         "schemaVersion": "1.0",
         "cityId": project["id"],
@@ -78,13 +81,15 @@ def record_payload(*, project, cycle, town, village, facility_type, indicator, n
                 "completed": True,
             },
             "entries": {
-                indicator["id"]: {
-                    "itemId": indicator["id"],
+                item["id"]: {
+                    "itemId": item["id"],
+                    "done": True,
                     "options": [
-                        {"optionId": option["id"], "selection": "standard", "instances": 99, "note": note},
-                        {"optionId": option["id"], "selection": "standard", "instances": 99, "note": "第二原因"},
+                        {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": note},
+                        {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": "第二原因"},
                     ],
                 }
+                for item in indicators if item.get("deductionOptions")
             },
         }],
     }
@@ -159,6 +164,7 @@ def main():
         assert set(yunan_by_name["桂圩镇"]["assessmentTargets"]) == {"town_plant", "town_network", "rural_treatment"}
         assert maonan_by_name["金塘镇"]["assessmentTargets"] == ["town_plant"]
         assert maonan_by_name["中科云粤西产业园"]["assessmentTargets"] == ["town_network"]
+        assert sum(len(item["assessmentTargets"]) for item in maonan_towns) == 12
 
         village_total = 0
         for town in yunan_towns:
@@ -199,6 +205,9 @@ def main():
         assert split_options[0]["name"].startswith("1. ")
         assert split_options[1]["name"].startswith("2. ")
         assert all(float(option["deduction"]) > 0 for option in split_options)
+        for _, leaves in standards.values():
+            for leaf in leaves:
+                INDICATOR_GROUPS[leaf["id"]] = leaves
 
         invalid_payload = {"cityId": yunan["id"], "cycleId": yunan_cycle["id"], "town": "金塘镇", "primaryFacilityType": "town_plant"}
         invalid = client.post("/api/mobile/assessment-records", json=invalid_payload, headers=inspector)
@@ -209,6 +218,12 @@ def main():
         maonan_network_indicator = standards[("茂南项目", "town_network")][1][0]
         yunan_record = create_record(client, inspector, project=yunan, cycle=yunan_cycle, town="桂圩镇", village="山禾地村", facility_type="rural_treatment", indicator=yunan_indicator)
         maonan_record = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="金塘镇", village="", facility_type="town_plant", indicator=maonan_indicator)
+
+        incomplete_payload = record_payload(project=maonan, cycle=maonan_cycle, town="山阁镇", village="", facility_type="town_plant", indicator=maonan_indicator)
+        incomplete_payload["villages"][0]["entries"][maonan_indicator["id"]]["done"] = False
+        incomplete_created = assert_ok(client.post("/api/mobile/assessment-records", json=incomplete_payload, headers=inspector), "create incomplete assessment")
+        incomplete_submit = client.post(f"/api/mobile/assessment-records/{incomplete_created['recordIds'][0]}/submit", headers=inspector)
+        assert incomplete_submit.status_code == 409
 
         # A fresh browser/device must recover all submitted targets from the backend.
         maonan_plant = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator)
@@ -242,7 +257,8 @@ def main():
             assert len(detail["scores"]) >= 1
             manual_score = next(item for item in detail["scores"] if item["source"] == "manual")
             assert float(manual_score["deduction"]) <= float(manual_score["indicatorFullScore"])
-            assert round(float(detail["totalScore"]), 2) == round(100 - float(manual_score["deduction"]), 2)
+            total_deduction = sum(float(item["deduction"]) for item in detail["scores"])
+            assert round(float(detail["totalScore"]), 2) == round(max(100 - total_deduction, 0), 2)
             upload = client.post(
                 f"/api/mobile/assessment-records/{record_id}/attachments",
                 headers=inspector,
@@ -291,6 +307,8 @@ def main():
 
         dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": yunan["id"]}), "dashboard")
         assert any(item["name"] == "桂圩镇" and item["recordCount"] == 1 for item in dashboard["items"])
+        maonan_dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": maonan["id"]}), "maonan dashboard")
+        assert maonan_dashboard["overview"]["villageCount"] == 12
         print("PASS: two-project mobile -> dashboard -> review -> DOCX pipeline")
 
 

@@ -442,6 +442,25 @@ def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecor
         raise ValueError("Assessment record is locked")
     if record.status == "reviewed":
         raise ValueError("Reviewed records must be returned before resubmission")
+    facility_type = _raw_facility_type(record.raw_payload or {})
+    expected_ids = set(session.scalars(
+        select(Indicator.id).where(
+            Indicator.version_id == record.indicator_version_id,
+            Indicator.facility_type == facility_type,
+            Indicator.level == 3,
+            Indicator.enabled.is_(True),
+        )
+    ).all())
+    completed_ids = {
+        str(entry.get("itemId") or entry.get("indicatorId") or key)
+        for key, entry in _entry_items((record.raw_payload or {}).get("entries", {}))
+        if entry.get("done") is True
+    }
+    missing_ids = expected_ids - completed_ids
+    if missing_ids:
+        raise ValueError(f"Assessment has {len(missing_ids)} unchecked scoring items")
+    if expected_ids and {score.indicator_id for score in record.scores} != expected_ids:
+        raise ValueError("Assessment score details are incomplete")
     record.status = "submitted"
     record.submitted_at = datetime.now(timezone.utc)
     session.flush()

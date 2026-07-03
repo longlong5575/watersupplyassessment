@@ -45,6 +45,7 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
             )
         ) or 0
         village_count = session.scalar(select(func.count(Village.id)).where(Village.town_id == town.id, Village.is_active.is_(True))) or 0
+        project_point_count = village_count or len(town.assessment_targets or []) or 1
         deduction_total = 0
         survey_count = 0
         water_quality_count = 0
@@ -73,7 +74,7 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
                 returned_count += 1 if record.status == "returned" else 0
                 low_score_count += 1 if record.total_score is not None and float(record.total_score) < 80 else 0
                 missing_photo_count += 1 if _has_missing_deduction_photo(record, record_attachments) else 0
-        if completed_count >= max(village_count, 1):
+        if completed_count >= project_point_count:
             status = "completed"
         elif completed_count:
             status = "inprogress"
@@ -82,8 +83,8 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
         completed_town_count += 1 if status == "completed" else 0
         inprogress_town_count += 1 if status == "inprogress" else 0
         pending_town_count += 1 if status == "pending" else 0
-        total_villages += max(village_count, len(record_ids), 1)
-        completed_villages += completed_count
+        total_villages += max(project_point_count, len(record_ids))
+        completed_villages += min(completed_count, max(project_point_count, len(record_ids)))
         city = session.get(City, town.city_id)
         items.append(
             {
@@ -97,7 +98,7 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
                 "reportTemplate": town.report_template or {},
                 "recordCount": len(record_ids),
                 "completedCount": completed_count,
-                "villageCount": max(village_count, len(record_ids), 1),
+                "villageCount": max(project_point_count, len(record_ids)),
                 "status": status,
                 "deductionTotal": float(deduction_total),
                 "surveyCount": survey_count,
