@@ -52,7 +52,7 @@ def leaf_standards(client: TestClient, project_id: str, cycle_id: str, facility_
     return data, leaves
 
 
-def create_record(client: TestClient, headers: dict[str, str], *, project, cycle, town, village, facility_type, indicator):
+def record_payload(*, project, cycle, town, village, facility_type, indicator, note="极端重复扣分"):
     option = indicator["deductionOptions"][0]
     payload = {
         "schemaVersion": "1.0",
@@ -81,7 +81,7 @@ def create_record(client: TestClient, headers: dict[str, str], *, project, cycle
                 indicator["id"]: {
                     "itemId": indicator["id"],
                     "options": [
-                        {"optionId": option["id"], "selection": "standard", "instances": 99, "note": "极端重复扣分"},
+                        {"optionId": option["id"], "selection": "standard", "instances": 99, "note": note},
                         {"optionId": option["id"], "selection": "standard", "instances": 99, "note": "第二原因"},
                     ],
                 }
@@ -93,6 +93,11 @@ def create_record(client: TestClient, headers: dict[str, str], *, project, cycle
             "satisfaction_villager1": {"score": 5, "comment": "满意", "completed": True},
             "sewage_collection_villager1": {"score": 4, "comment": "有改善", "completed": True},
         }
+    return payload
+
+
+def create_record(client: TestClient, headers: dict[str, str], *, project, cycle, town, village, facility_type, indicator):
+    payload = record_payload(project=project, cycle=cycle, town=town, village=village, facility_type=facility_type, indicator=indicator)
     created = assert_ok(client.post("/api/mobile/assessment-records", json=payload, headers=headers), "create assessment")
     record_id = created["recordIds"][0]
     assert_ok(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=headers), "submit assessment")
@@ -201,8 +206,36 @@ def main():
 
         yunan_indicator = standards[("郁南项目", "rural_treatment")][1][0]
         maonan_indicator = standards[("茂南项目", "town_plant")][1][0]
+        maonan_network_indicator = standards[("茂南项目", "town_network")][1][0]
         yunan_record = create_record(client, inspector, project=yunan, cycle=yunan_cycle, town="桂圩镇", village="山禾地村", facility_type="rural_treatment", indicator=yunan_indicator)
         maonan_record = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="金塘镇", village="", facility_type="town_plant", indicator=maonan_indicator)
+
+        # A fresh browser/device must recover all submitted targets from the backend.
+        maonan_plant = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator)
+        maonan_network = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_network", indicator=maonan_network_indicator)
+        restored = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore mobile records")["items"]
+        restored_maonan = [item for item in restored if item["town"] == "茂南区"]
+        assert {item["raw"]["primaryFacilityType"] for item in restored_maonan} == {"town_plant", "town_network"}
+        assert all(item["editable"] is True for item in restored_maonan)
+
+        # Re-submitting an editable target updates the same record instead of creating a duplicate.
+        updated_payload = record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator, note="修改后再次同步")
+        updated = assert_ok(client.post("/api/mobile/assessment-records", json=updated_payload, headers=inspector), "update existing assessment")
+        assert updated["recordIds"] == [maonan_plant]
+        restored_after_update = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore updated records")["items"]
+        assert len([item for item in restored_after_update if item["town"] == "茂南区"]) == 2
+
+        # Locked records remain visible on mobile but cannot be edited or submitted again.
+        assert_ok(client.post(f"/api/records/{maonan_network}/review", headers=admin), "review network")
+        reviewed_items = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore reviewed records")["items"]
+        reviewed_network = next(item for item in reviewed_items if item["id"] == maonan_network)
+        assert reviewed_network["status"] == "reviewed" and reviewed_network["editable"] is False
+        assert_ok(client.post(f"/api/records/{maonan_network}/lock", headers=admin), "lock network")
+        locked_items = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore locked records")["items"]
+        locked_network = next(item for item in locked_items if item["id"] == maonan_network)
+        assert locked_network["status"] == "locked" and locked_network["editable"] is False
+        locked_update = client.post("/api/mobile/assessment-records", json=record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_network", indicator=maonan_network_indicator), headers=inspector)
+        assert locked_update.status_code == 422
 
         for record_id in [yunan_record, maonan_record]:
             detail = assert_ok(client.get(f"/api/records/{record_id}"), "record detail")
@@ -221,6 +254,9 @@ def main():
             blocked = client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector)
             assert blocked.status_code == 409
             assert_ok(client.post(f"/api/records/{record_id}/return", headers=admin, json={"reason": "补充退回重提验证", "data": {}}), "return")
+            returned_items = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector), "restore returned record")["items"]
+            returned_record = next(item for item in returned_items if item["id"] == record_id)
+            assert returned_record["status"] == "returned" and returned_record["editable"] is True
             assert_ok(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector), "resubmit returned")
             assert_ok(client.post(f"/api/records/{record_id}/review", headers=admin), "review after return")
             run = assert_ok(client.post(f"/api/agent/records/{record_id}/analysis", headers=admin), "agent record")

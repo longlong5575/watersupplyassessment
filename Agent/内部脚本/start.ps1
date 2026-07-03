@@ -19,7 +19,7 @@ function TextFromCodePoints([int[]]$Codes) {
 }
 
 $Text = @{
-  Title = TextFromCodePoints @(0x6392,0x6c34,0x8003,0x6838,0x7cfb,0x7edf)
+  Title = TextFromCodePoints @(0x0050,0x0050,0x0050,0x519c,0x6751,0x6c61,0x6c34,0x8003,0x6838,0x7cfb,0x7edf)
   Preparing = TextFromCodePoints @(0x51c6,0x5907,0x542f,0x52a8)
   PreparingMsg = TextFromCodePoints @(0x9996,0x6b21,0x542f,0x52a8,0x4f1a,0x81ea,0x52a8,0x5b89,0x88c5,0x4f9d,0x8d56,0xff0c,0x53ef,0x80fd,0x9700,0x8981,0x51e0,0x5206,0x949f,0x3002)
   Ports = TextFromCodePoints @(0x7aef,0x53e3,0x68c0,0x67e5)
@@ -35,6 +35,8 @@ $Text = @{
   Ready = TextFromCodePoints @(0x542f,0x52a8,0x5b8c,0x6210)
   ReadyMsg = TextFromCodePoints @(0x7cfb,0x7edf,0x5df2,0x53ef,0x4f7f,0x7528,0x3002)
   Failed = TextFromCodePoints @(0x542f,0x52a8,0x5931,0x8d25)
+  FailurePrefix = TextFromCodePoints @(0x542f,0x52a8,0x5931,0x8d25,0xff1a)
+  FailureLogHint = TextFromCodePoints @(0x8bf7,0x5c06,0x6b64,0x65e5,0x5fd7,0x6587,0x4ef6,0x53d1,0x9001,0x7ed9,0x6280,0x672f,0x652f,0x6301,0xff1a)
 }
 
 function Write-StartupStatus([string]$Stage, [string]$Message, [hashtable]$Extra = @{}) {
@@ -49,7 +51,7 @@ function Write-StartupStatus([string]$Stage, [string]$Message, [hashtable]$Extra
 function Show-StartupFailure([string]$Message) {
   try {
     $shell = New-Object -ComObject WScript.Shell
-    $shell.Popup("Startup failed: $Message`n`nPlease send this log file to support:`n$logPath", 0, "Watersupply Assessment", 16) | Out-Null
+    $shell.Popup(($Text.FailurePrefix + $Message + "`n`n" + $Text.FailureLogHint + "`n" + $logPath), 0, $Text.Title, 16) | Out-Null
   } catch {}
 }
 

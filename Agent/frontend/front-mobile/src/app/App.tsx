@@ -164,6 +164,8 @@ interface VillageRecord {
   entries: Record<string, ItemEntry>;
   surveyEntries?: Record<string, SurveyFormEntry>;
   waterQuality?: WaterQualityEntry;
+  backendStatus?: "submitted" | "returned" | "reviewed" | "locked";
+  editable?: boolean;
 }
 
 interface TownPackage {
@@ -185,6 +187,27 @@ interface SyncQueueItem {
   createdAt: string;
   syncedAt?: string;
   lastError?: string;
+}
+
+function mergeVillageRecords(existing: VillageRecord[], incoming: VillageRecord[]): VillageRecord[] {
+  const merged = new Map<string, VillageRecord>();
+  [...existing, ...incoming].forEach(record => {
+    const projectType = record.primaryFacilityType ?? record.facilityType;
+    const key = `${projectType}::${record.village}`;
+    merged.set(key, record);
+  });
+  return Array.from(merged.values());
+}
+
+function syncedRecordsForTown(
+  syncQueue: SyncQueueItem[],
+  town: string,
+  cityId: string,
+  period: string,
+): VillageRecord[] {
+  return syncQueue
+    .filter(item => item.syncStatus === "synced" && item.pkg.town === town && (!cityId || item.pkg.cityId === cityId) && item.pkg.period === period)
+    .reduce<VillageRecord[]>((records, item) => mergeVillageRecords(records, item.pkg.villages), []);
 }
 
 function makeLocalId() {
@@ -376,6 +399,23 @@ function makeScoreChoices(min: number, max: number): number[] {
     values.push(Number(value.toFixed(1)));
   }
   return values;
+}
+
+function isCountBasedOption(opt: DeductionOption): boolean {
+  return opt.type === "fixed" && Boolean(opt.unit || opt.maxInstances);
+}
+
+function getOptionUnit(opt: DeductionOption): string {
+  return opt.unit?.trim() || "项";
+}
+
+function getOptionMaxInstances(opt: DeductionOption): number {
+  return Math.max(1, Math.floor(opt.maxInstances ?? 999));
+}
+
+function clampOptionInstances(value: number, opt: DeductionOption): number {
+  const safeValue = Number.isFinite(value) ? Math.floor(value) : 1;
+  return Math.min(Math.max(1, safeValue), getOptionMaxInstances(opt));
 }
 
 function calcItemRaw(entry: ItemEntry, item: L3Item): number {
@@ -836,9 +876,10 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
 
 // ==================== PAGE 1: TOWN ====================
 
-function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue, onViewSubmitted, onRetrySync, onDiscardSync }: {
+function P1Town({ cityId, projectName, cycleName, onBack, onNext, submittedData, syncQueue, onViewSubmitted, onRetrySync, onDiscardSync }: {
   cityId?: string;
   projectName: string;
+  cycleName: string;
   onBack: () => void;
   onNext: (t: TownOption) => void;
   submittedData: Record<string, VillageRecord[]>;
@@ -867,6 +908,16 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
   const selected = towns.find(town => town.id === selectedId);
   const failedSyncCount = syncQueue.filter(item => item.syncStatus === "sync_failed").length;
   const pendingSyncCount = syncQueue.filter(item => item.syncStatus === "pending_sync").length;
+  const completedTypesByTown = new Map<string, Set<PrimaryFacilityType>>();
+  syncQueue
+    .filter(item => item.syncStatus === "synced" && (!cityId || item.pkg.cityId === cityId) && item.pkg.period === cycleName)
+    .forEach(item => {
+      const completedTypes = completedTypesByTown.get(item.pkg.town) ?? new Set<PrimaryFacilityType>();
+      item.pkg.villages.forEach(record => {
+        if (record.primaryFacilityType) completedTypes.add(record.primaryFacilityType);
+      });
+      completedTypesByTown.set(item.pkg.town, completedTypes);
+    });
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -887,14 +938,20 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">项目镇街清单</p>
           <div className="space-y-2">
-            {towns.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setSelectedId(t.id)}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
-                  selectedId === t.id ? "bg-primary/5 border-primary" : "bg-white border-border"
-                }`}
-              >
+            {towns.map(t => {
+              const completedTypes = completedTypesByTown.get(t.name) ?? new Set<PrimaryFacilityType>();
+              const completedCount = t.assessmentTargets.filter(type => completedTypes.has(type)).length;
+              const remainingCount = Math.max(t.assessmentTargets.length - completedCount, 0);
+              const completed = t.assessmentTargets.length > 0 && remainingCount === 0;
+              const inProgress = completedCount > 0 && !completed;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedId(t.id)}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
+                    selectedId === t.id ? "bg-primary/5 border-primary" : completed ? "bg-green-50/60 border-green-200" : inProgress ? "bg-amber-50/60 border-amber-200" : "bg-white border-border"
+                  }`}
+                >
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedId === t.id ? "bg-primary" : "bg-muted"}`}>
                     <MapPin className={`w-4 h-4 ${selectedId === t.id ? "text-primary-foreground" : "text-muted-foreground"}`} />
@@ -902,11 +959,20 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
                   <div className="text-left">
                     <span className={`text-sm font-medium ${selectedId === t.id ? "text-primary" : "text-foreground"}`}>{t.name}</span>
                     <div className="text-xs text-muted-foreground mt-0.5">{t.assessmentTargets.length}类考核对象</div>
+                    <div className={`text-xs mt-1 ${completed ? "text-green-700" : inProgress ? "text-amber-700" : "text-muted-foreground"}`}>
+                      已完成 {completedCount} 个考核对象
+                    </div>
+                    <div className={`text-xs mt-0.5 ${remainingCount === 0 ? "text-green-700 font-medium" : "text-muted-foreground"}`}>
+                      剩余 {remainingCount} 个考核对象
+                    </div>
                   </div>
                 </div>
-                {selectedId === t.id && <Check className="w-4 h-4 text-primary shrink-0" />}
-              </button>
-            ))}
+                  {completed
+                    ? <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+                    : selectedId === t.id && <Check className="w-4 h-4 text-primary shrink-0" />}
+                </button>
+              );
+            })}
             {towns.length === 0 && (
               <div className="rounded-lg border border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
                 当前项目暂无可选镇街
@@ -960,9 +1026,11 @@ function P1Town({ cityId, projectName, onBack, onNext, submittedData, syncQueue,
 
 // ==================== PAGE 2: VILLAGE ====================
 
-function P2Village({ town, cityId, onBack, onNext }: {
+function P2Village({ town, cityId, completedVillages, readonlyVillages, onBack, onNext }: {
   town: string;
   cityId?: string;
+  completedVillages: Set<string>;
+  readonlyVillages: Map<string, string>;
   onBack: () => void;
   onNext: (v: string) => void;
 }) {
@@ -997,12 +1065,17 @@ function P2Village({ town, cityId, onBack, onNext }: {
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">设施点清单</p>
           <div className="space-y-2">
-            {villages.map(v => (
-              <button
-                key={v.id}
-                onClick={() => setSelectedId(v.id)}
+            {villages.map(v => {
+              const completed = completedVillages.has(v.name);
+              const readonlyLabel = readonlyVillages.get(v.name);
+              const readOnly = !!readonlyLabel;
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => !readOnly && setSelectedId(v.id)}
+                  disabled={readOnly}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-lg border transition-colors ${
-                  selectedId === v.id ? "bg-primary/5 border-primary" : "bg-white border-border"
+                  selectedId === v.id ? "bg-primary/5 border-primary" : completed ? "bg-green-50/60 border-green-200" : "bg-white border-border"
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -1012,11 +1085,13 @@ function P2Village({ town, cityId, onBack, onNext }: {
                   <div className="text-left">
                     <span className={`text-sm font-medium ${selectedId === v.id ? "text-primary" : "text-foreground"}`}>{v.name}</span>
                     <div className="text-xs text-muted-foreground mt-0.5">{v.administrativeVillage || "行政村待核"}</div>
+                    {completed && <div className="text-xs text-green-700 font-medium mt-1">{readonlyLabel || "修改"}</div>}
                   </div>
                 </div>
-                {selectedId === v.id && <Check className="w-4 h-4 text-primary shrink-0" />}
-              </button>
-            ))}
+                  {completed ? <CheckCircle className="w-5 h-5 text-green-600 shrink-0" /> : selectedId === v.id && <Check className="w-4 h-4 text-primary shrink-0" />}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1057,9 +1132,11 @@ const PRIMARY_FACILITY_TYPE_INFO: Record<PrimaryFacilityType, { label: string; s
   rural_treatment: { label: "农村污水处理设施", sub: "进入后继续选择村点", icon: "🏘️" },
 };
 
-function P2bFacilityChoice({ town, allowedTargets, onBack, onSelect }: {
+function P2bFacilityChoice({ town, allowedTargets, completedTypes, readonlyTypes, onBack, onSelect }: {
   town: string;
   allowedTargets: PrimaryFacilityType[];
+  completedTypes: Set<PrimaryFacilityType>;
+  readonlyTypes: Map<PrimaryFacilityType, string>;
   onBack: () => void;
   onSelect: (type: PrimaryFacilityType) => void;
 }) {
@@ -1076,20 +1153,26 @@ function P2bFacilityChoice({ town, allowedTargets, onBack, onSelect }: {
       <div className="flex-1 px-4 py-5 space-y-3">
         {PRIMARY_FACILITY_TYPES.filter(type => allowedTargets.includes(type)).map(type => {
           const info = PRIMARY_FACILITY_TYPE_INFO[type];
+          const completed = completedTypes.has(type);
+          const readonlyLabel = readonlyTypes.get(type);
+          const readOnly = !!readonlyLabel;
           return (
             <button
               key={type}
-              onClick={() => onSelect(type)}
-              className="w-full text-left rounded-xl border-2 border-border bg-white p-5 transition-colors active:bg-gray-50"
+              onClick={() => !readOnly && onSelect(type)}
+              disabled={readOnly}
+              className={`w-full text-left rounded-xl border-2 p-5 transition-colors active:bg-gray-50 ${completed ? "border-green-200 bg-green-50/60" : "border-border bg-white"}`}
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center text-2xl shrink-0">{info.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="text-base font-semibold text-foreground">{info.label}</div>
                   <p className="text-xs text-muted-foreground mt-1">{info.sub}</p>
-                  <p className="text-xs text-primary font-medium mt-2">{type === "rural_treatment" ? "下一步选择村" : "进入镇街填报"}</p>
+                  <p className={`text-xs font-medium mt-2 ${completed ? "text-green-700" : "text-primary"}`}>
+                    {readonlyLabel || (completed ? "修改" : type === "rural_treatment" ? "下一步选择村" : "进入镇街填报")}
+                  </p>
                 </div>
-                <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+                {completed ? <CheckCircle className="w-5 h-5 text-green-600 shrink-0" /> : <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />}
               </div>
             </button>
           );
@@ -1155,7 +1238,7 @@ function P2bFacilityType({ town, village, primaryFacilityType, hasWaterQualityIt
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="text-sm font-semibold text-foreground">{info.label}</span>
                     <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${done ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"}`}>
-                      {done ? "已完成" : "待完成"}
+                      {done ? "修改" : "待完成"}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">{info.sub}</p>
@@ -1298,13 +1381,20 @@ function numericWaterQualityValue(value: string): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function numericWaterQualityLimit(value: string): number | null {
+  const matched = value.match(/\d+(?:\.\d+)?/);
+  if (!matched) return null;
+  const parsed = Number(matched[0]);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function automaticWaterQualityConclusion(entry: WaterQualityEntry): "pending" | "qualified" | "unqualified" {
   const pairs: Array<[string, string]> = [
     [entry.codValue, entry.codLimit],
     [entry.nh3nValue, entry.nh3nLimit],
     ...(entry.hasTpLimit ? [[entry.tpValue, entry.tpLimit] as [string, string]] : []),
   ];
-  const values = pairs.map(([value, limit]) => [numericWaterQualityValue(value), numericWaterQualityValue(limit)] as const);
+  const values = pairs.map(([value, limit]) => [numericWaterQualityValue(value), numericWaterQualityLimit(limit)] as const);
   if (values.some(([value, limit]) => value === null || limit === null)) return "pending";
   return values.some(([value, limit]) => value! > limit!) ? "unqualified" : "qualified";
 }
@@ -1313,9 +1403,9 @@ function waterQualityItemEntry(item: L3Item, waterQuality: WaterQualityEntry): I
   const automaticConclusion = automaticWaterQualityConclusion(waterQuality);
   const forceQualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "qualified";
   const forceUnqualified = waterQuality.conclusionOverridden && waterQuality.conclusion === "unqualified" && automaticConclusion === "qualified";
-  const codFailed = !forceQualified && (forceUnqualified || numericWaterQualityValue(waterQuality.codValue)! > numericWaterQualityValue(waterQuality.codLimit)!);
-  const measuredOtherFailedCount = Number(numericWaterQualityValue(waterQuality.nh3nValue)! > numericWaterQualityValue(waterQuality.nh3nLimit)!)
-    + Number(waterQuality.hasTpLimit && numericWaterQualityValue(waterQuality.tpValue)! > numericWaterQualityValue(waterQuality.tpLimit)!);
+  const codFailed = !forceQualified && (forceUnqualified || numericWaterQualityValue(waterQuality.codValue)! > numericWaterQualityLimit(waterQuality.codLimit)!);
+  const measuredOtherFailedCount = Number(numericWaterQualityValue(waterQuality.nh3nValue)! > numericWaterQualityLimit(waterQuality.nh3nLimit)!)
+    + Number(waterQuality.hasTpLimit && numericWaterQualityValue(waterQuality.tpValue)! > numericWaterQualityLimit(waterQuality.tpLimit)!);
   const otherFailedCount = forceQualified ? 0 : forceUnqualified ? (waterQuality.hasTpLimit ? 2 : 1) : measuredOtherFailedCount;
   const options = item.options.map(option => {
     const optionText = `${option.reason} ${option.sourceText ?? ""}`;
@@ -1564,6 +1654,14 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
   const overrideNoteComplete = !form.conclusionOverridden || !!form.note.trim();
   const canComplete = !!form.sampleTime && !!form.dischargeStandard && !!form.processType && !!form.designScale
     && requiredMeasurementsComplete && form.conclusion !== "pending" && overrideNoteComplete;
+  const missingFields = [
+    !form.sampleTime && "取样时间",
+    !form.processType && "工艺类型",
+    !form.designScale && "规模",
+    !requiredMeasurementsComplete && "全部实测值",
+    form.conclusion === "pending" && "抽检结论",
+    !overrideNoteComplete && "人工修改依据",
+  ].filter((item): item is string => Boolean(item));
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -1649,6 +1747,7 @@ function PWaterQualityForm({ town, village, primaryFacilityType, entry, onBack, 
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
+        {!canComplete && <p className="mb-2 text-center text-xs text-amber-700">请补充：{missingFields.join("、")}</p>}
         <button
           onClick={() => { if (canComplete) onSave({ ...form, completed: true }); }}
           disabled={!canComplete}
@@ -1945,6 +2044,14 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
           const oe = entry.options[oi];
           if (!oe) return null;
           const score = calcOptionScore(oe, opt);
+          const countBased = isCountBasedOption(opt);
+          const unit = getOptionUnit(opt);
+          const maxInstances = getOptionMaxInstances(opt);
+          const instances = clampOptionInstances(oe.instances, opt);
+          const fixedBaseScore = opt.value ?? 0;
+          const countScore = fixedBaseScore * instances;
+          const countScoreLimit = fixedBaseScore * maxInstances;
+          const quickCounts = Array.from(new Set([1, 2, 3, 5, 10, maxInstances].filter(v => v <= maxInstances)));
 
           return (
             <div key={opt.id} className="bg-white rounded-xl border border-border overflow-hidden">
@@ -1993,7 +2100,10 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                           className="mt-0.5 shrink-0"
                           style={{ accentColor: row.color }}
                           checked={oe.selection === row.sel}
-                          onChange={() => updateOpt(oi, { selection: row.sel })}
+                          onChange={() => updateOpt(oi, {
+                            selection: row.sel,
+                            instances: row.sel === "standard" ? clampOptionInstances(oe.instances, opt) : oe.instances,
+                          })}
                         />
                         <span className="text-sm text-foreground">{row.label}</span>
                       </label>
@@ -2005,37 +2115,70 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
                       <p className="text-xs font-semibold text-slate-600">建议扣分方案</p>
 
-                      {opt.type === "fixed" && opt.unit && (
+                      {countBased && (
                         <div className="space-y-2">
                           <p className="text-xs text-slate-500">
-                            每{opt.unit}扣 {opt.value} 分{opt.maxInstances ? `，最多扣 ${opt.maxInstances * opt.value!} 分` : ""}
+                            每{unit}扣 {fixedBaseScore} 分，最多选择 {maxInstances}{unit}
                           </p>
-                          <div className="flex items-center gap-3">
+                          <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center">
                             <button
-                              onClick={() => updateOpt(oi, { instances: Math.max(1, oe.instances - 1) })}
-                              className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center"
+                              onClick={() => updateOpt(oi, { instances: clampOptionInstances(instances - 1, opt) })}
+                              className="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center"
                             >
                               <Minus className="w-3.5 h-3.5 text-slate-600" />
                             </button>
-                            <span className="text-xl font-bold text-slate-800 w-8 text-center">{oe.instances}</span>
+                            <label className="relative block">
+                              <input
+                                type="number"
+                                min={1}
+                                max={maxInstances}
+                                value={instances}
+                                onChange={event => updateOpt(oi, { instances: clampOptionInstances(Number(event.target.value), opt) })}
+                                className="w-full h-9 rounded-lg bg-white border border-slate-200 text-center text-lg font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                                aria-label={`扣分${unit}数`}
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">{unit}</span>
+                            </label>
                             <button
-                              onClick={() => updateOpt(oi, { instances: Math.min(oe.instances + 1, opt.maxInstances ?? 999) })}
-                              className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center"
+                              onClick={() => updateOpt(oi, { instances: clampOptionInstances(instances + 1, opt) })}
+                              className="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center"
                             >
                               <Plus className="w-3.5 h-3.5 text-slate-600" />
                             </button>
-                            <span className="text-xs text-slate-500">{opt.unit}</span>
                           </div>
-                          <div className="bg-white rounded-lg px-3 py-2 border border-slate-200">
-                            <span className="text-xs text-slate-500">建议扣分：</span>
-                            <span className="text-sm font-bold text-primary ml-1">
-                              {opt.value! * Math.min(oe.instances, opt.maxInstances ?? 999)} 分
-                            </span>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {quickCounts.map(count => (
+                              <button
+                                key={count}
+                                onClick={() => updateOpt(oi, { instances: clampOptionInstances(count, opt) })}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
+                                  instances === count
+                                    ? "bg-primary text-primary-foreground border-primary"
+                                    : "bg-white text-slate-600 border-slate-200"
+                                }`}
+                              >
+                                {count}{unit}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="bg-white rounded-lg px-3 py-2 border border-slate-200 space-y-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-slate-500">自动计算</span>
+                              <span className="text-sm font-bold text-primary">
+                                {fixedBaseScore} × {instances}{unit} = {countScore} 分
+                              </span>
+                            </div>
+                            {countScoreLimit > countScore && (
+                              <p className="text-[11px] text-slate-500">本扣分原因最多可扣 {countScoreLimit} 分。</p>
+                            )}
+                            {rawTotal > item.maxScore && (
+                              <p className="text-[11px] text-red-600">本指标扣分已超过满分，最终按 {item.maxScore} 分封顶。</p>
+                            )}
                           </div>
                         </div>
                       )}
 
-                      {opt.type === "fixed" && !opt.unit && (
+                      {opt.type === "fixed" && !countBased && (
                         <div className="bg-white rounded-lg px-3 py-2 border border-slate-200">
                           <span className="text-xs text-slate-500">建议扣分（固定）：</span>
                           <span className="text-sm font-bold text-primary ml-1">{opt.value} 分</span>
@@ -2678,7 +2821,7 @@ function PSuccess({ town, village, primaryFacilityType, scoreByType, completedVi
 
       <div className="px-5 pb-10 space-y-2.5 shrink-0">
         <button onClick={onTownComplete} className="w-full py-3.5 bg-[#1a4a38] text-white rounded-xl font-semibold flex items-center justify-center gap-2">
-          <Package className="w-4 h-4" />已完成全镇考核
+          <Package className="w-4 h-4" />提交当前已保存考核
         </button>
         <button onClick={onNextVillage} className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2">
           {isRural ? "继续录入下一村点" : "继续录入其他考核对象"} <ChevronRight className="w-4 h-4" />
@@ -2791,6 +2934,24 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
 
 // ==================== SUBMITTED DATA VIEW ====================
 
+function formatSubmittedSyncTime(value?: string): string {
+  if (!value) return "时间未记录";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未记录";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatSubmittedScore(value: number): string {
+  return Number(value.toFixed(1)).toString();
+}
+
 function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDiscardSync }: {
   submittedData: Record<string, VillageRecord[]>;
   syncQueue: SyncQueueItem[];
@@ -2800,7 +2961,13 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
 }) {
   const [expandedTown, setExpandedTown] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const towns = Object.keys(submittedData);
+  const displaySubmittedData = syncQueue
+    .filter(item => item.syncStatus === "synced")
+    .reduce<Record<string, VillageRecord[]>>((result, item) => ({
+      ...result,
+      [item.pkg.town]: mergeVillageRecords(result[item.pkg.town] ?? [], item.pkg.villages),
+    }), { ...submittedData });
+  const towns = Object.keys(displaySubmittedData);
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -2835,7 +3002,7 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
         )}
         {syncQueue.filter(item => item.syncStatus === "synced").slice(0, 3).map(item => (
           <div key={item.localId} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">
-            {item.town} 已同步 · {item.syncedAt ?? item.createdAt}
+            {item.town} 已同步 · {formatSubmittedSyncTime(item.syncedAt ?? item.createdAt)}
           </div>
         ))}
         {towns.length === 0 && (
@@ -2847,11 +3014,12 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
         )}
 
         {towns.map(townName => {
-          const villages = submittedData[townName];
+          const villages = displaySubmittedData[townName];
           const totalMax = villages.reduce((s, v) => s + v.maxScore, 0);
           const totalCurrent = villages.reduce((s, v) => s + v.currentScore, 0);
           const pct = totalMax > 0 ? Math.round(totalCurrent / totalMax * 100) : 0;
           const isOpen = expandedTown === townName;
+          const projectCount = new Set(villages.map(record => record.primaryFacilityType ?? record.facilityType)).size;
 
           return (
             <div key={townName} className="bg-white rounded-xl border border-border overflow-hidden">
@@ -2865,12 +3033,12 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-foreground">{townName}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">{villages.length} 个村点</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{projectCount} 个考核项目 · {villages.length} 条记录</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <div className="text-right">
-                    <div className="text-sm font-bold text-foreground">{totalCurrent}<span className="text-xs font-normal text-muted-foreground">/{totalMax}</span></div>
+                    <div className="text-sm font-bold text-foreground">{formatSubmittedScore(totalCurrent)}<span className="text-xs font-normal text-muted-foreground">/{formatSubmittedScore(totalMax)}</span></div>
                     <div className="text-xs text-muted-foreground">{pct}%</div>
                   </div>
                   {isOpen ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
@@ -2888,19 +3056,25 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
                   {/* Village list */}
                   {villages.map((v, i) => {
                     const vPct = v.maxScore > 0 ? Math.round(v.currentScore / v.maxScore * 100) : 0;
+                    const projectType = v.primaryFacilityType;
+                    const projectLabel = projectType ? PRIMARY_FACILITY_TYPE_INFO[projectType].label : v.facilityType;
+                    const showVillage = projectType === "rural_treatment" && v.village && v.village !== projectLabel;
                     return (
                       <div key={i} className={`px-4 py-3 flex items-center justify-between ${i < villages.length - 1 ? "border-b border-border" : ""}`}>
                         <div className="flex items-center gap-2.5">
                           <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                             <Check className="w-3.5 h-3.5 text-green-600" />
                           </div>
-                          <span className="text-sm text-foreground">{v.village}</span>
+                          <div className="min-w-0">
+                            <div className="text-sm text-foreground">{projectLabel}</div>
+                            {showVillage && <div className="text-xs text-muted-foreground mt-0.5">{v.village}</div>}
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="w-16 h-1 bg-gray-100 rounded-full overflow-hidden">
                             <div className="h-full bg-green-500 rounded-full" style={{ width: `${vPct}%` }} />
                           </div>
-                          <span className="text-xs font-semibold text-foreground w-14 text-right">{v.currentScore}/{v.maxScore}</span>
+                          <span className="text-xs font-semibold text-foreground w-14 text-right">{formatSubmittedScore(v.currentScore)}/{formatSubmittedScore(v.maxScore)}</span>
                         </div>
                       </div>
                     );
@@ -3016,6 +3190,72 @@ function AssessmentApp() {
   useEffect(() => {
     localStorage.setItem(SYNC_QUEUE_STORAGE_KEY, JSON.stringify(syncQueue));
   }, [syncQueue]);
+  useEffect(() => {
+    if (!auth?.token || !cityId || !cycleName) return;
+    let cancelled = false;
+    const params = new URLSearchParams({ city_id: cityId, period: cycleName });
+    if (cycleId) params.set("cycle_id", cycleId);
+    fetch(`${API_BASE_URL}/mobile/assessment-records?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${auth.token}` },
+    })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error(`记录恢复失败：${response.status}`)))
+      .then(data => {
+        if (cancelled || !Array.isArray(data?.items)) return;
+        const recordsByTown = new Map<string, VillageRecord[]>();
+        const updatedAtByTown = new Map<string, string>();
+        data.items.forEach((item: { status: VillageRecord["backendStatus"]; editable?: boolean; town: string; updatedAt?: string; raw?: Partial<VillageRecord> }) => {
+          if (!item.raw || !item.town) return;
+          const record: VillageRecord = {
+            village: item.raw.village ?? PRIMARY_FACILITY_TYPE_INFO[item.raw.primaryFacilityType ?? "rural_treatment"].label,
+            facilityType: item.raw.facilityType ?? item.raw.primaryFacilityType ?? "rural_treatment",
+            primaryFacilityType: item.raw.primaryFacilityType,
+            standardFacilityType: item.raw.standardFacilityType,
+            submittedAt: item.raw.submittedAt ?? item.updatedAt ?? new Date().toISOString(),
+            maxScore: Number(item.raw.maxScore ?? 0),
+            deductedScore: Number(item.raw.deductedScore ?? 0),
+            currentScore: Number(item.raw.currentScore ?? 0),
+            entries: item.raw.entries ?? {},
+            surveyEntries: item.raw.surveyEntries ?? {},
+            waterQuality: item.raw.waterQuality,
+            backendStatus: item.status,
+            editable: item.editable !== false,
+          };
+          recordsByTown.set(item.town, mergeVillageRecords(recordsByTown.get(item.town) ?? [], [record]));
+          if (item.updatedAt) updatedAtByTown.set(item.town, item.updatedAt);
+        });
+        setSubmittedData(prev => {
+          const next = { ...prev };
+          recordsByTown.forEach((records, townName) => {
+            next[townName] = mergeVillageRecords(next[townName] ?? [], records);
+          });
+          return next;
+        });
+        setSyncQueue(prev => {
+          const backendPrefix = `backend-${cityId}-${cycleId || cycleName}-`;
+          const retained = prev.filter(item => !item.localId.startsWith(backendPrefix));
+          const restored = Array.from(recordsByTown.entries()).map(([townName, records]): SyncQueueItem => ({
+            localId: `${backendPrefix}${townName}`,
+            town: townName,
+            pkg: {
+              schemaVersion: "1.0",
+              exportedAt: updatedAtByTown.get(townName) ?? new Date().toISOString(),
+              cityId,
+              cycleId: cycleId || undefined,
+              city,
+              period: cycleName,
+              town: townName,
+              villages: records,
+            },
+            syncStatus: "synced",
+            createdAt: updatedAtByTown.get(townName) ?? new Date().toISOString(),
+            syncedAt: updatedAtByTown.get(townName),
+          }));
+          return [...retained, ...restored];
+        });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [auth?.token, cityId, cycleId, cycleName]);
   const [surveyEntries, setSurveyEntries] = useState<Record<string, SurveyFormEntry>>({});
   const [surveyTarget, setSurveyTarget] = useState<{ cat: SurveyCategory; res: SurveyRespondent } | null>(null);
   const [waterQuality, setWaterQuality] = useState<WaterQualityEntry>(() => emptyWaterQualityEntry());
@@ -3033,8 +3273,51 @@ function AssessmentApp() {
   const total = totalMaxScore(groups);
   const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
   const finalScore = total - deducted;
+  const syncedTownRecords = syncedRecordsForTown(syncQueue, town, cityId, cycleName);
+  const completedPrimaryTypes = new Set<PrimaryFacilityType>(
+    [...syncedTownRecords, ...completedVillages]
+      .map(record => record.primaryFacilityType)
+      .filter((type): type is PrimaryFacilityType => PRIMARY_FACILITY_TYPES.includes(type as PrimaryFacilityType)),
+  );
+  const readonlyPrimaryTypes = new Map<PrimaryFacilityType, string>();
+  [...syncedTownRecords, ...completedVillages].forEach(record => {
+    const type = record.primaryFacilityType;
+    if (!type || !PRIMARY_FACILITY_TYPES.includes(type)) return;
+    if (record.backendStatus === "locked") readonlyPrimaryTypes.set(type, "已锁定");
+    else if (record.backendStatus === "reviewed" || record.editable === false) readonlyPrimaryTypes.set(type, "已审核");
+  });
 
   const saveEntry = (e: ItemEntry) => setEntries(prev => ({ ...prev, [e.itemId]: e }));
+
+  const loadSavedRecord = (record: VillageRecord, type: PrimaryFacilityType) => {
+    const standardType = standardTypeForPrimary(type);
+    const restoredSurveyEntries = record.surveyEntries ?? {};
+    const restoredWaterQuality = record.waterQuality ?? emptyWaterQualityEntry(type);
+    const surveyCompleted = Object.values(restoredSurveyEntries).some(entry => entry.completed);
+    const restoredProgress: Partial<Record<FacilityType, boolean>> = {
+      [standardType]: true,
+      survey: surveyCompleted,
+      water_quality: !!restoredWaterQuality.completed,
+    };
+    const restoredScores: Partial<Record<FacilityType, TypeScore>> = {
+      [standardType]: {
+        maxScore: record.maxScore,
+        currentScore: record.currentScore,
+        deductedScore: record.deductedScore,
+      },
+    };
+    if (surveyCompleted) restoredScores.survey = { maxScore: 0, currentScore: 0, deductedScore: 0 };
+    if (restoredWaterQuality.completed) restoredScores.water_quality = { maxScore: 0, currentScore: 0, deductedScore: 0 };
+    setPrimaryFacilityType(type);
+    setFtype(standardType);
+    setEntries(record.entries ?? {});
+    setSurveyEntries(restoredSurveyEntries);
+    setWaterQuality(restoredWaterQuality);
+    setTypeProgress(restoredProgress);
+    setScoreByType(restoredScores);
+    setDetailId("");
+    setCompletedVillages(prev => mergeVillageRecords(prev, [record]));
+  };
 
   // Called from P5Summary — saves this type's score, marks done, returns to hub
   const handleSubmit = () => {
@@ -3089,7 +3372,10 @@ function AssessmentApp() {
   });
 
   const markPackageSynced = (pkg: TownPackage) => {
-    setSubmittedData(prev => ({ ...prev, [pkg.town]: pkg.villages }));
+    setSubmittedData(prev => ({
+      ...prev,
+      [pkg.town]: mergeVillageRecords(prev[pkg.town] ?? [], pkg.villages),
+    }));
     setSyncQueue(prev => prev.map(item => item.pkg.exportedAt === pkg.exportedAt
       ? { ...item, syncStatus: "synced", syncedAt: new Date().toISOString(), lastError: undefined }
       : item));
@@ -3220,8 +3506,18 @@ function AssessmentApp() {
           <P1Town
             cityId={cityId || undefined}
             projectName={city}
+            cycleName={cycleName}
             onBack={() => setPage("cycle")}
-            onNext={t => { setTown(t.name); setSelectedTown(t); setVillage(""); setCompletedVillages([]); setWaterQuality(emptyWaterQualityEntry(primaryFacilityType)); setTypeProgress({}); setScoreByType({}); setPage("facility_choice"); }}
+            onNext={t => {
+              setTown(t.name);
+              setSelectedTown(t);
+              setVillage("");
+              setCompletedVillages(syncedRecordsForTown(syncQueue, t.name, cityId, cycleName));
+              setWaterQuality(emptyWaterQualityEntry(primaryFacilityType));
+              setTypeProgress({});
+              setScoreByType({});
+              setPage("facility_choice");
+            }}
             submittedData={submittedData}
             syncQueue={syncQueue}
             onViewSubmitted={() => setPage("submitted_data")}
@@ -3234,8 +3530,27 @@ function AssessmentApp() {
           <P2Village
             town={town}
             cityId={cityId || undefined}
+            completedVillages={new Set(completedVillages.filter(record => record.primaryFacilityType === "rural_treatment").map(record => record.village))}
+            readonlyVillages={new Map(completedVillages
+              .filter(record => record.primaryFacilityType === "rural_treatment" && (record.backendStatus === "locked" || record.backendStatus === "reviewed" || record.editable === false))
+              .map(record => [record.village, record.backendStatus === "locked" ? "已锁定" : "已审核"]))}
             onBack={() => setPage("facility_choice")}
-            onNext={v => { setVillage(v); setWaterQuality(emptyWaterQualityEntry(primaryFacilityType)); setPage("facilitytype"); }}
+            onNext={v => {
+              setVillage(v);
+              const savedRecord = completedVillages.find(record => record.primaryFacilityType === "rural_treatment" && record.village === v);
+              if (savedRecord) {
+                loadSavedRecord(savedRecord, "rural_treatment");
+              } else {
+                setPrimaryFacilityType("rural_treatment");
+                setFtype("treatment");
+                setEntries({});
+                setSurveyEntries({});
+                setWaterQuality(emptyWaterQualityEntry("rural_treatment"));
+                setTypeProgress({});
+                setScoreByType({});
+              }
+              setPage("facilitytype");
+            }}
           />
         );
       case "facility_choice":
@@ -3243,20 +3558,34 @@ function AssessmentApp() {
           <P2bFacilityChoice
             town={town}
             allowedTargets={selectedTown?.assessmentTargets ?? []}
+            completedTypes={completedPrimaryTypes}
+            readonlyTypes={readonlyPrimaryTypes}
             onBack={() => setPage("town")}
             onSelect={type => {
-              setPrimaryFacilityType(type);
-              setFtype(standardTypeForPrimary(type));
-              setEntries({});
-              setSurveyEntries({});
-              setWaterQuality(emptyWaterQualityEntry(type));
-              setTypeProgress({});
-              setScoreByType({});
               if (type === "rural_treatment") {
+                setPrimaryFacilityType(type);
+                setFtype(standardTypeForPrimary(type));
+                setEntries({});
+                setSurveyEntries({});
+                setWaterQuality(emptyWaterQualityEntry(type));
+                setTypeProgress({});
+                setScoreByType({});
                 setVillage("");
                 setPage("village");
               } else {
                 setVillage(PRIMARY_FACILITY_TYPE_INFO[type].label);
+                const savedRecord = completedVillages.find(record => record.primaryFacilityType === type);
+                if (savedRecord) {
+                  loadSavedRecord(savedRecord, type);
+                } else {
+                  setPrimaryFacilityType(type);
+                  setFtype(standardTypeForPrimary(type));
+                  setEntries({});
+                  setSurveyEntries({});
+                  setWaterQuality(emptyWaterQualityEntry(type));
+                  setTypeProgress({});
+                  setScoreByType({});
+                }
                 setPage("facilitytype");
               }
             }}

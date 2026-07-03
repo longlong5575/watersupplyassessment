@@ -165,6 +165,40 @@ def create_record(payload: dict[str, Any], session: Session = Depends(get_sessio
     return response
 
 
+@router.get("/assessment-records")
+def list_mobile_records(
+    city_id: str | None = None,
+    cycle_id: str | None = None,
+    period: str | None = None,
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    statement = select(AssessmentRecord).where(AssessmentRecord.status.in_(["submitted", "returned", "reviewed", "locked"]))
+    if city_id:
+        statement = statement.where(AssessmentRecord.city_id == city_id)
+    if cycle_id:
+        statement = statement.where(AssessmentRecord.cycle_id == cycle_id)
+    elif period:
+        cycle_statement = select(AssessmentCycle.id).where(AssessmentCycle.name == period)
+        if city_id:
+            cycle_statement = cycle_statement.where(AssessmentCycle.city_id == city_id)
+        matching_cycle_id = session.scalar(cycle_statement)
+        if matching_cycle_id is None:
+            return {"items": []}
+        statement = statement.where(AssessmentRecord.cycle_id == matching_cycle_id)
+    records = session.scalars(statement.order_by(AssessmentRecord.updated_at.desc())).all()
+    return {
+        "items": [
+            {
+                **_record_payload(record),
+                "raw": record.raw_payload or {},
+                "editable": record.status in {"submitted", "returned"},
+            }
+            for record in records
+        ]
+    }
+
+
 @router.put("/assessment-records/{record_id}/scores")
 def update_scores(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
     record = session.get(AssessmentRecord, record_id)

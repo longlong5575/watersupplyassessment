@@ -63,10 +63,13 @@ def main() -> None:
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    python_exe = PYTHONW if PYTHONW.exists() else PYTHON
+    if not python_exe.exists():
+        raise RuntimeError(f"Backend Python environment is missing: {python_exe}")
     with OUT_LOG.open("ab") as stdout, ERR_LOG.open("ab") as stderr:
         process = subprocess.Popen(
             [
-                str(PYTHONW if PYTHONW.exists() else PYTHON),
+                str(python_exe),
                 "-m",
                 "uvicorn",
                 "app.main:app",

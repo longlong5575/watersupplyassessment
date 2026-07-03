@@ -2613,7 +2613,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
         method: "POST",
         headers: authHeaders(),
       });
-      if (!response.ok) throw new Error("agent analysis failed");
+      if (!response.ok) throw new Error("智能分析生成失败");
       await loadAgentRuns(selected.id);
     } finally {
       setAgentBusy(false);
@@ -2636,22 +2636,22 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   };
 
   const action = async (id: string, name: "review" | "return" | "lock") => {
-    const actionText = name === "review" ? "Review" : name === "return" ? "Return" : "Lock";
-    if (!window.confirm(`Confirm ${actionText}? This operation will be recorded.`)) return;
+    const actionText = name === "review" ? "复核通过" : name === "return" ? "退回补充" : "锁定记录";
+    if (!window.confirm(`确认${actionText}？本次操作会写入记录。`)) return;
     setBusy(id);
     try {
       const response = await fetch(`${API_BASE_URL}/records/${id}/${name}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: name === "return" ? JSON.stringify({ reason: returnReasons[id]?.trim() || "Need additional field evidence" }) : undefined,
+        body: name === "return" ? JSON.stringify({ reason: returnReasons[id]?.trim() || "请补充现场佐证材料" }) : undefined,
       });
-      if (!response.ok) throw new Error(`${actionText} failed`);
-      setNotice(`${actionText} completed and logged.`);
+      if (!response.ok) throw new Error(`${actionText}失败`);
+      setNotice(`${actionText}已完成并记录。`);
       if (name === "return") setReturnReasons(prev => ({ ...prev, [id]: "" }));
       load();
       if (selected?.id === id) view(id);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : `${actionText} failed`);
+      setNotice(error instanceof Error ? localizeBackendMessage(error.message) : `${actionText}失败`);
     } finally { setBusy(null); }
   };
 
@@ -2681,7 +2681,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
           }),
         }),
       });
-      if (!response.ok) throw new Error("Failed to save scores");
+      if (!response.ok) throw new Error("保存评分失败");
       await view(selected.id);
       setScorePatchReason("");
       load();
@@ -3770,7 +3770,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
   const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
   const visibleTownNames = visibleTowns.map(t => t.name);
   const visibleTownKey = visibleTownNames.join("|");
-  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && !precheckLoading && precheck?.ok === true && Boolean(reportPeriod);
+  const canProceed = Boolean(projectId) && visibleTowns.length > 0;
   useEffect(() => {
     if (!projectId || visibleTowns.length === 0) {
       setPrecheck(null);
@@ -3789,7 +3789,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
         outputs: ["separate", "summary"],
       }),
     })
-      .then(response => response.ok ? response.json() : Promise.reject(new Error("precheck failed")))
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("数据预校验未完成")))
       .then(data => {
         if (!cancelled) {
           setPrecheck(data);
@@ -3800,10 +3800,11 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
         if (!cancelled) {
           setPrecheck({
             ok: false,
-            errors: [error instanceof Error ? error.message : "precheck failed"],
+            errors: [error instanceof Error ? error.message : "数据预校验未完成"],
             warnings: [],
             summary: { requestedTownCount: visibleTowns.length, availableTownCount: 0, recordCount: 0, recordIds: [], indicatorVersionIds: [] },
           });
+          if (!reportPeriod) setReportPeriod("当前考核周期");
         }
       })
       .finally(() => { if (!cancelled) setPrecheckLoading(false); });
@@ -3882,25 +3883,6 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           </table>
         </div>
 
-        {/* 生成前数据检查 */}
-        <div className="bg-card border border-border rounded-lg px-6 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">生成前数据检查</h3>
-              <p className="text-xs text-muted-foreground mt-1">生成报告前自动检查已复核数据，缺少关键数据时会阻止继续生成。</p>
-            </div>
-            <span className={`rounded px-2 py-1 text-xs ${precheck?.ok ? "bg-green-50 text-green-700" : precheckLoading ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
-              {precheckLoading ? "检查中" : precheck?.ok ? "可生成" : "需补数据"}
-            </span>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">已选镇街</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.requestedTownCount ?? visibleTowns.length}</div></div>
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">可生成镇街</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.availableTownCount ?? 0}</div></div>
-            <div className="rounded border border-border px-3 py-2"><div className="text-muted-foreground">可用记录</div><div className="mt-1 font-mono text-foreground">{precheck?.summary.recordCount ?? 0}</div></div>
-          </div>
-          {!!precheck?.errors.length && <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{precheck.errors.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
-          {!!precheck?.warnings.length && <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{precheck.warnings.slice(0, 4).map(item => <p key={item}>{localizeBackendMessage(item)}</p>)}</div>}
-        </div>
         {/* Actions */}
         <div className="flex items-center justify-between pt-1">
           <button onClick={() => onNav("dataupload")} className="inline-flex items-center gap-2 rounded border border-primary/40 bg-primary/5 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/10 transition-colors">
@@ -3911,6 +3893,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
             <button
               disabled={!canProceed}
               onClick={() => {
+                if (!reportPeriod) setReportPeriod(precheck?.summary.cycleName || "当前考核周期");
                 setSelectedTowns(visibleTowns.map(t => t.name));
                 onNav("confirm");
               }}

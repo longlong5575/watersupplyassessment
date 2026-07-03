@@ -32,7 +32,8 @@ function Stop-FromPidFile([string]$PidFile) {
 function Show-Message([string]$Message, [int]$Icon = 64) {
   try {
     $shell = New-Object -ComObject WScript.Shell
-    $shell.Popup($Message, 5, "Watersupply Assessment", $Icon) | Out-Null
+    $title = -join ([char[]](0x0050, 0x0050, 0x0050, 0x519c, 0x6751, 0x6c61, 0x6c34, 0x8003, 0x6838, 0x7cfb, 0x7edf))
+    $shell.Popup($Message, 5, $title, $Icon) | Out-Null
   } catch {}
 }
 
@@ -42,8 +43,10 @@ try {
       Stop-FromPidFile (Join-Path $logDir $name)
     }
   }
-  Show-Message "Services have been stopped."
+  $stoppedMessage = -join ([char[]](0x670d, 0x52a1, 0x5df2, 0x505c, 0x6b62, 0x3002))
+  Show-Message $stoppedMessage
 } catch {
-  Show-Message ("Stop failed: " + $_.Exception.Message) 16
+  $failedPrefix = -join ([char[]](0x505c, 0x6b62, 0x670d, 0x52a1, 0x5931, 0x8d25, 0xff1a))
+  Show-Message ($failedPrefix + $_.Exception.Message) 16
   throw
 }
