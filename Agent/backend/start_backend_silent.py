@@ -21,12 +21,9 @@ def default_runtime_root() -> Path:
 
 
 RUNTIME_ROOT = default_runtime_root()
-VENV_DIR = RUNTIME_ROOT / "backend" / ".venv"
 PYTHON_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
 LOG_DIR = RUNTIME_ROOT / "logs"
 STORAGE_DIR = RUNTIME_ROOT / "storage"
-PYTHON = VENV_DIR / "Scripts" / "python.exe"
-PYTHONW = VENV_DIR / "Scripts" / "pythonw.exe"
 PID_FILE = LOG_DIR / "backend-server.pid"
 OUT_LOG = LOG_DIR / "backend-server.out.log"
 ERR_LOG = LOG_DIR / "backend-server.err.log"
@@ -69,7 +66,7 @@ def _clean_env() -> dict[str, str]:
     env["DATABASE_URL"] = f"sqlite:///{(STORAGE_DIR / 'assessment.db').as_posix()}"
     env["STORAGE_DIR"] = str(STORAGE_DIR)
     env["CELERY_TASK_ALWAYS_EAGER"] = "true"
-    package_paths = [str(PYTHON_PACKAGES), str(VENV_DIR / "Lib" / "site-packages")]
+    package_paths = [str(PYTHON_PACKAGES)]
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = os.pathsep.join([*package_paths, existing] if existing else package_paths)
     return env

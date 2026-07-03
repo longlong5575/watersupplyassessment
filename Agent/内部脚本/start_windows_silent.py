@@ -49,7 +49,7 @@ def runtime_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "STORAGE_DIR": str(storage_dir),
         "CELERY_TASK_ALWAYS_EAGER": "true",
     })
-    package_paths = [str(BACKEND_PACKAGES), str(BACKEND_RUNTIME / ".venv" / "Lib" / "site-packages")]
+    package_paths = [str(BACKEND_PACKAGES)]
     if env.get("PYTHONPATH"):
         package_paths.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(package_paths)
@@ -124,27 +124,8 @@ def ensure_env_file(directory: Path) -> None:
 
 
 def ensure_backend(python: Path) -> Path:
-    venv_dir = BACKEND_RUNTIME / ".venv"
-    venv_python = venv_dir / "Scripts" / "python.exe"
     BACKEND_RUNTIME.mkdir(parents=True, exist_ok=True)
     BACKEND_PACKAGES.mkdir(parents=True, exist_ok=True)
-    valid_venv = venv_python.exists()
-    if valid_venv:
-        try:
-            subprocess.check_call(
-                [str(venv_python), "-c", "import sys"],
-                cwd=str(BACKEND),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except (OSError, subprocess.CalledProcessError):
-            valid_venv = False
-    if not valid_venv:
-        if venv_dir.exists():
-            shutil.rmtree(venv_dir)
-        run([str(python), "-m", "venv", str(venv_dir)], BACKEND)
     run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--target", str(BACKEND_PACKAGES), "-r", "requirements.txt"], BACKEND)
     return python
 

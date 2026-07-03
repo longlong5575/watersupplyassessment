@@ -66,24 +66,6 @@ Push-Location $backend
 try {
   New-Item -ItemType Directory -Force -Path $runtimeBackend | Out-Null
   $pythonPackages = Join-Path $runtimeBackend "python-packages"
-  $venvPath = Join-Path $runtimeBackend ".venv"
-  $venvConfig = Join-Path $venvPath "pyvenv.cfg"
-  $venvPython = Join-Path $venvPath "Scripts\python.exe"
-  $venvIsValid = $false
-  if ((Test-Path -LiteralPath $venvConfig) -and (Test-Path -LiteralPath $venvPython)) {
-    try {
-      $venvProbe = (& $venvPython -c "print('WATERSUPPLY_VENV_OK')" 2>$null | Select-Object -Last 1)
-      $venvIsValid = ($LASTEXITCODE -eq 0 -and $venvProbe -eq "WATERSUPPLY_VENV_OK")
-    } catch {
-      $venvIsValid = $false
-    }
-  }
-  if ((Test-Path -LiteralPath $venvPath) -and -not $venvIsValid) {
-    Remove-Item -LiteralPath $venvPath -Recurse -Force
-  }
-  if (-not (Test-Path -LiteralPath $venvPath)) {
-    & $python312 -m venv $venvPath
-  }
   Install-PythonRequirements $python312 $pythonPackages
 }
 finally { Pop-Location }

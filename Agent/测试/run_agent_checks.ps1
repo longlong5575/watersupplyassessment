@@ -18,14 +18,13 @@ if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
   if (Test-Path -LiteralPath $candidate) { $pythonExe = $candidate }
 }
 $pythonPackages = Join-Path (Join-Path $runtimeRoot "backend") "python-packages"
-$venvPackages = Join-Path (Join-Path (Join-Path $runtimeRoot "backend") ".venv") "Lib\site-packages"
 if (-not (Test-Path -LiteralPath $pythonPackages)) {
   & (Join-Path (Join-Path $agentRoot "内部脚本") "init-recipient.ps1")
 }
 if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
   throw "Python 3.12 is missing after initialization."
 }
-$env:PYTHONPATH = (($pythonPackages, $venvPackages, $env:PYTHONPATH) | Where-Object { $_ }) -join ";"
+$env:PYTHONPATH = (($pythonPackages, $env:PYTHONPATH) | Where-Object { $_ }) -join ";"
 
 function Invoke-Checked {
   param([scriptblock]$Command)
@@ -95,6 +94,8 @@ $summary.projectPipeline = $true
 
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_report_quality.py") }
 $summary.reportQuality = $true
+
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_ui_copy.py") }
 
 Invoke-FrontendChecks -Source $front -Name "front" -MarkTypecheck { $summary.desktopTypecheck = $true } -MarkBuild { $summary.desktopBuild = $true }
 Invoke-FrontendChecks -Source $mobile -Name "front-mobile" -MarkTypecheck { $summary.mobileTypecheck = $true } -MarkBuild { $summary.mobileBuild = $true }

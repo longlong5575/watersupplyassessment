@@ -24,7 +24,6 @@ LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_DIR = AGENT_ROOT / "backend"
 BACKEND_STARTER = BACKEND_DIR / "start_backend_silent.py"
 BACKEND_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
-BACKEND_VENV_PACKAGES = RUNTIME_ROOT / "backend" / ".venv" / "Lib" / "site-packages"
 PNPM_CANDIDATES = [
     Path(os.environ.get("USERPROFILE", "")) / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "bin" / "pnpm.cmd",
 ]
@@ -85,7 +84,7 @@ def ensure_backend(creationflags: int) -> None:
             "STORAGE_DIR": str(storage_dir),
             "CELERY_TASK_ALWAYS_EAGER": "true",
         })
-        package_paths = [str(BACKEND_PACKAGES), str(BACKEND_VENV_PACKAGES)]
+        package_paths = [str(BACKEND_PACKAGES)]
         if env.get("PYTHONPATH"):
             package_paths.append(env["PYTHONPATH"])
         env["PYTHONPATH"] = os.pathsep.join(package_paths)
