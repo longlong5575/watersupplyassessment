@@ -47,9 +47,9 @@ function Install-PythonRequirements {
     & $PythonExe -m ensurepip --upgrade
     if ($LASTEXITCODE -ne 0) { throw "Python pip initialization failed." }
   }
-  & $PythonExe -m pip install --disable-pip-version-check --target $TargetDir -r requirements.txt
+  & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir -r requirements.txt
   if ($LASTEXITCODE -eq 0) { return }
-  & $PythonExe -m pip install --disable-pip-version-check --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+  & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
   if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
 }
 
