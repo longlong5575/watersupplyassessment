@@ -688,7 +688,7 @@ function PPortal({ onField, onKnowledge }: { onField: () => void; onKnowledge: (
 function PKnowledge({ onBack }: { onBack: () => void }) {
   const items = [
     { title: "考核标准", desc: "郁南、茂南项目评分条目与扣分口径" },
-    { title: "项目资料", desc: "镇街、村点、考核对象和报告引用资料" },
+    { title: "项目资料", desc: "镇街、项目点、考核对象和报告引用资料" },
     { title: "报告口径", desc: "最终报告中使用的格式、标题和说明文字" },
   ];
   return (
@@ -875,7 +875,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
       })
       .catch(() => {
         const fallback = fixedCycleOptions();
-        setError("后端暂时未连接，仍可先选择固定批次");
+        setError("后端暂时未连接，仍可先选择固定考核周期");
         setCycles(fallback);
         setSelectedYear(initialYear);
         setSelectedPeriodId("q2");
@@ -902,7 +902,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-        {loading && <div className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-muted-foreground">正在同步后台批次...</div>}
+        {loading && <div className="rounded-xl border border-border bg-white px-4 py-3 text-sm text-muted-foreground">正在同步后台考核周期...</div>}
         {!loading && error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>}
         <div>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">年度</p>
@@ -941,7 +941,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
         <div className="rounded-xl border border-border bg-white px-4 py-3 flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold text-foreground">{selected.name}</div>
-            <div className="text-xs text-muted-foreground mt-1">{selected.backendId ? `后台批次：${cycleStatusLabel(selected.status)}` : cycleStatusLabel(selected.status)}</div>
+            <div className="text-xs text-muted-foreground mt-1">{selected.backendId ? `后台周期：${cycleStatusLabel(selected.status)}` : cycleStatusLabel(selected.status)}</div>
           </div>
           <CheckCircle className="w-5 h-5 text-primary" />
         </div>
@@ -1144,7 +1144,7 @@ function P2Village({ town, cityId, completedVillages, readonlyVillages, onBack, 
           <Building2 className="w-3.5 h-3.5 text-primary-foreground/55" />
           <span className="text-xs text-primary-foreground/55">{town}</span>
         </div>
-        <h1 className="text-xl font-semibold text-primary-foreground">选择考核村点</h1>
+        <h1 className="text-xl font-semibold text-primary-foreground">选择考核项目点</h1>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5">
@@ -1215,7 +1215,7 @@ const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; ico
 const PRIMARY_FACILITY_TYPE_INFO: Record<PrimaryFacilityType, { label: string; sub: string; icon: string }> = {
   town_plant: { label: "镇街污水厂", sub: "镇街污水处理厂考核", icon: "🏭" },
   town_network: { label: "镇街污水收集管网", sub: "镇街收集管网考核", icon: "🔧" },
-  rural_treatment: { label: "农村污水处理设施", sub: "进入后继续选择村点", icon: "🏘️" },
+  rural_treatment: { label: "农村污水处理设施", sub: "进入后继续选择项目点", icon: "🏘️" },
 };
 
 function P2bFacilityChoice({ town, allowedTargets, completedTypes, readonlyTypes, onBack, onSelect }: {
@@ -3025,7 +3025,7 @@ function PSuccess({ town, village, primaryFacilityType, scoreByType, completedVi
           <Package className="w-4 h-4" />提交当前已保存考核
         </button>
         <button onClick={onNextVillage} className="w-full py-3.5 bg-primary text-primary-foreground rounded-xl font-semibold flex items-center justify-center gap-2">
-          {isRural ? "继续录入下一村点" : "继续录入其他考核对象"} <ChevronRight className="w-4 h-4" />
+          {isRural ? "继续录入下一项目点" : "继续录入其他考核对象"} <ChevronRight className="w-4 h-4" />
         </button>
         <button onClick={onBack} className="w-full py-3 border border-border text-muted-foreground rounded-xl text-sm font-medium flex items-center justify-center gap-1.5">
           <ChevronLeft className="w-4 h-4" />返回修改
@@ -3059,7 +3059,7 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
         </button>
         <div className="text-xs text-white/55 mb-1">{town}</div>
         <h1 className="text-xl font-semibold text-white mb-0.5">全镇考核完成</h1>
-        <p className="text-xs text-white/55">共 {completedVillages.length} 个村点 · 平均得分率 {avgPct}%</p>
+        <p className="text-xs text-white/55">共 {completedVillages.length} 个项目点 · 平均得分率 {avgPct}%</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
@@ -3067,7 +3067,7 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-white rounded-xl border border-border p-3 text-center">
             <div className="text-xl font-bold text-foreground">{completedVillages.length}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">考核村点</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">考核项目点</div>
           </div>
           <div className="bg-white rounded-xl border border-border p-3 text-center">
             <div className="text-xl font-bold text-foreground">{avgPct}%</div>
@@ -3082,7 +3082,7 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
         {/* Village list */}
         <div className="bg-white rounded-xl border border-border overflow-hidden">
           <div className="px-4 py-2.5 bg-gray-50 border-b border-border">
-            <span className="text-xs font-medium text-muted-foreground">各村点得分</span>
+            <span className="text-xs font-medium text-muted-foreground">各项目点得分</span>
           </div>
           {completedVillages.map((r, i) => {
             const p = r.maxScore > 0 ? Math.round(r.currentScore / r.maxScore * 100) : 0;

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import subprocess
 import time
 import urllib.request
@@ -20,6 +22,7 @@ def default_runtime_root() -> Path:
 
 RUNTIME_ROOT = default_runtime_root()
 VENV_DIR = RUNTIME_ROOT / "backend" / ".venv"
+PYTHON_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
 LOG_DIR = RUNTIME_ROOT / "logs"
 STORAGE_DIR = RUNTIME_ROOT / "storage"
 PYTHON = VENV_DIR / "Scripts" / "python.exe"
@@ -28,6 +31,30 @@ PID_FILE = LOG_DIR / "backend-server.pid"
 OUT_LOG = LOG_DIR / "backend-server.out.log"
 ERR_LOG = LOG_DIR / "backend-server.err.log"
 BACKEND_PORT = os.environ.get("BACKEND_PORT", "8000")
+
+
+def _system_python(windowed: bool = True) -> Path:
+    candidates: list[Path] = []
+    env_python = os.environ.get("PYTHON312_EXE")
+    if env_python:
+        candidates.append(Path(env_python))
+    local_app = os.environ.get("LOCALAPPDATA")
+    if local_app:
+        candidates.append(Path(local_app) / "Programs" / "Python" / "Python312" / "python.exe")
+    if sys.executable:
+        candidates.append(Path(sys.executable))
+    for name in ("py", "python"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    for candidate in candidates:
+        if candidate.exists():
+            if windowed and candidate.name.lower() == "python.exe":
+                pythonw = candidate.with_name("pythonw.exe")
+                if pythonw.exists():
+                    return pythonw
+            return candidate
+    raise RuntimeError("Python 3.12 was not found.")
 
 
 def _clean_env() -> dict[str, str]:
@@ -42,6 +69,9 @@ def _clean_env() -> dict[str, str]:
     env["DATABASE_URL"] = f"sqlite:///{(STORAGE_DIR / 'assessment.db').as_posix()}"
     env["STORAGE_DIR"] = str(STORAGE_DIR)
     env["CELERY_TASK_ALWAYS_EAGER"] = "true"
+    package_paths = [str(PYTHON_PACKAGES), str(VENV_DIR / "Lib" / "site-packages")]
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join([*package_paths, existing] if existing else package_paths)
     return env
 
 
@@ -63,9 +93,7 @@ def main() -> None:
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    python_exe = PYTHONW if PYTHONW.exists() else PYTHON
-    if not python_exe.exists():
-        raise RuntimeError(f"Backend Python environment is missing: {python_exe}")
+    python_exe = _system_python(windowed=True)
     with OUT_LOG.open("ab") as stdout, ERR_LOG.open("ab") as stderr:
         process = subprocess.Popen(
             [

@@ -12,13 +12,20 @@ New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
 $pnpm = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd"
 if (-not (Test-Path -LiteralPath $pnpm)) { $pnpm = "pnpm" }
-$pythonExe = Join-Path (Join-Path (Join-Path $runtimeRoot "backend") ".venv") "Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $pythonExe)) {
+$pythonExe = $env:PYTHON312_EXE
+if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
+  $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+  if (Test-Path -LiteralPath $candidate) { $pythonExe = $candidate }
+}
+$pythonPackages = Join-Path (Join-Path $runtimeRoot "backend") "python-packages"
+$venvPackages = Join-Path (Join-Path (Join-Path $runtimeRoot "backend") ".venv") "Lib\site-packages"
+if (-not (Test-Path -LiteralPath $pythonPackages)) {
   & (Join-Path (Join-Path $agentRoot "内部脚本") "init-recipient.ps1")
 }
-if (-not (Test-Path -LiteralPath $pythonExe)) {
-  throw "Backend Python environment is missing after initialization."
+if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
+  throw "Python 3.12 is missing after initialization."
 }
+$env:PYTHONPATH = (($pythonPackages, $venvPackages, $env:PYTHONPATH) | Where-Object { $_ }) -join ";"
 
 function Invoke-Checked {
   param([scriptblock]$Command)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -22,8 +23,8 @@ RUNTIME_ROOT = default_runtime_root()
 LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_DIR = AGENT_ROOT / "backend"
 BACKEND_STARTER = BACKEND_DIR / "start_backend_silent.py"
-BACKEND_PYTHONW = RUNTIME_ROOT / "backend" / ".venv" / "Scripts" / "pythonw.exe"
-BACKEND_PYTHON = RUNTIME_ROOT / "backend" / ".venv" / "Scripts" / "python.exe"
+BACKEND_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
+BACKEND_VENV_PACKAGES = RUNTIME_ROOT / "backend" / ".venv" / "Lib" / "site-packages"
 PNPM_CANDIDATES = [
     Path(os.environ.get("USERPROFILE", "")) / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "bin" / "pnpm.cmd",
 ]
@@ -34,6 +35,30 @@ def find_pnpm() -> str:
         if candidate.exists():
             return str(candidate)
     return "pnpm.cmd"
+
+
+def find_python(windowed: bool = True) -> Path | None:
+    candidates: list[Path] = []
+    env_python = os.environ.get("PYTHON312_EXE")
+    if env_python:
+        candidates.append(Path(env_python))
+    local_app = os.environ.get("LOCALAPPDATA")
+    if local_app:
+        candidates.append(Path(local_app) / "Programs" / "Python" / "Python312" / "python.exe")
+    if sys.executable:
+        candidates.append(Path(sys.executable))
+    for name in ("py", "python"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    for candidate in candidates:
+        if candidate.exists():
+            if windowed and candidate.name.lower() == "python.exe":
+                pythonw = candidate.with_name("pythonw.exe")
+                if pythonw.exists():
+                    return pythonw
+            return candidate
+    return None
 
 
 def backend_is_ready() -> bool:
@@ -47,8 +72,8 @@ def backend_is_ready() -> bool:
 def ensure_backend(creationflags: int) -> None:
     if backend_is_ready():
         return
-    python = BACKEND_PYTHONW if BACKEND_PYTHONW.exists() else BACKEND_PYTHON
-    if not python.exists() or not BACKEND_STARTER.exists():
+    python = find_python(windowed=True)
+    if python is None or not BACKEND_STARTER.exists():
         return
     LOG_DIR.mkdir(exist_ok=True)
     with (LOG_DIR / "backend-autostart.out.log").open("ab") as stdout, (LOG_DIR / "backend-autostart.err.log").open("ab") as stderr:
@@ -60,6 +85,10 @@ def ensure_backend(creationflags: int) -> None:
             "STORAGE_DIR": str(storage_dir),
             "CELERY_TASK_ALWAYS_EAGER": "true",
         })
+        package_paths = [str(BACKEND_PACKAGES), str(BACKEND_VENV_PACKAGES)]
+        if env.get("PYTHONPATH"):
+            package_paths.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(package_paths)
         subprocess.Popen(
             [str(python), str(BACKEND_STARTER)],
             cwd=str(BACKEND_DIR),

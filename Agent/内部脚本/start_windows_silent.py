@@ -27,6 +27,7 @@ def default_runtime_root() -> Path:
 RUNTIME_ROOT = default_runtime_root()
 LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_RUNTIME = RUNTIME_ROOT / "backend"
+BACKEND_PACKAGES = BACKEND_RUNTIME / "python-packages"
 FRONT_RUNTIME = RUNTIME_ROOT / "frontend" / "front"
 MOBILE_RUNTIME = RUNTIME_ROOT / "frontend" / "front-mobile"
 STARTUP_LOG = LOG_DIR / "startup.log"
@@ -48,6 +49,10 @@ def runtime_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "STORAGE_DIR": str(storage_dir),
         "CELERY_TASK_ALWAYS_EAGER": "true",
     })
+    package_paths = [str(BACKEND_PACKAGES), str(BACKEND_RUNTIME / ".venv" / "Lib" / "site-packages")]
+    if env.get("PYTHONPATH"):
+        package_paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(package_paths)
     if extra:
         env.update(extra)
     return env
@@ -122,6 +127,7 @@ def ensure_backend(python: Path) -> Path:
     venv_dir = BACKEND_RUNTIME / ".venv"
     venv_python = venv_dir / "Scripts" / "python.exe"
     BACKEND_RUNTIME.mkdir(parents=True, exist_ok=True)
+    BACKEND_PACKAGES.mkdir(parents=True, exist_ok=True)
     valid_venv = venv_python.exists()
     if valid_venv:
         try:
@@ -139,8 +145,8 @@ def ensure_backend(python: Path) -> Path:
         if venv_dir.exists():
             shutil.rmtree(venv_dir)
         run([str(python), "-m", "venv", str(venv_dir)], BACKEND)
-    run([str(venv_python), "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt"], BACKEND)
-    return venv_python
+    run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--target", str(BACKEND_PACKAGES), "-r", "requirements.txt"], BACKEND)
+    return python
 
 
 def sync_runtime_frontend(source: Path, target: Path) -> Path:

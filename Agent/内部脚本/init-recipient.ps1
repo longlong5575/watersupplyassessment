@@ -40,10 +40,16 @@ function Sync-RuntimeFrontend([string]$source, [string]$target) {
 }
 
 function Install-PythonRequirements {
-  param([string]$PythonExe)
-  & $PythonExe -m pip install --disable-pip-version-check -r requirements.txt
+  param([string]$PythonExe, [string]$TargetDir)
+  New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+  & $PythonExe -m pip --version | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    & $PythonExe -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) { throw "Python pip initialization failed." }
+  }
+  & $PythonExe -m pip install --disable-pip-version-check --target $TargetDir -r requirements.txt
   if ($LASTEXITCODE -eq 0) { return }
-  & $PythonExe -m pip install --disable-pip-version-check --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+  & $PythonExe -m pip install --disable-pip-version-check --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
   if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
 }
 
@@ -59,6 +65,7 @@ if (-not $python312 -or -not (Test-Path -LiteralPath $python312)) {
 Push-Location $backend
 try {
   New-Item -ItemType Directory -Force -Path $runtimeBackend | Out-Null
+  $pythonPackages = Join-Path $runtimeBackend "python-packages"
   $venvPath = Join-Path $runtimeBackend ".venv"
   $venvConfig = Join-Path $venvPath "pyvenv.cfg"
   $venvPython = Join-Path $venvPath "Scripts\python.exe"
@@ -74,8 +81,10 @@ try {
   if ((Test-Path -LiteralPath $venvPath) -and -not $venvIsValid) {
     Remove-Item -LiteralPath $venvPath -Recurse -Force
   }
-  & $python312 -m venv $venvPath
-  Install-PythonRequirements $venvPython
+  if (-not (Test-Path -LiteralPath $venvPath)) {
+    & $python312 -m venv $venvPath
+  }
+  Install-PythonRequirements $python312 $pythonPackages
 }
 finally { Pop-Location }
 

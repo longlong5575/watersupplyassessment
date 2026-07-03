@@ -159,7 +159,12 @@ try {
   & (Join-Path $scriptRoot "init-recipient.ps1")
   Set-FrontendEnv $front $backendPort
   Set-FrontendEnv $mobile $backendPort
-  $backendPythonw = Join-Path (Join-Path (Join-Path $runtimeRoot "backend") ".venv") "Scripts\pythonw.exe"
+  $backendPythonw = if ($env:PYTHON312_EXE -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $env:PYTHON312_EXE) "pythonw.exe"))) {
+    Join-Path (Split-Path -Parent $env:PYTHON312_EXE) "pythonw.exe"
+  } else {
+    Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\pythonw.exe"
+  }
+  if (-not (Test-Path -LiteralPath $backendPythonw)) { $backendPythonw = $env:PYTHON312_EXE }
   Write-StartupStatus $Text.Backend $Text.BackendMsg
   & $backendPythonw (Join-Path $backend "start_backend_silent.py")
   Write-StartupStatus $Text.Frontend $Text.FrontendMsg

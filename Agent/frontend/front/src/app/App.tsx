@@ -1607,6 +1607,8 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
 
   const steps = PROGRESS_STEPS.map(s => s.id === 1
     ? { ...s, label: isMobile ? "读取数据看板数据" : "读取资料包", desc: isMobile ? "载入看板已完成调研数据" : "解压并索引全部附件" }
+    : s.id === 4 && isMobile
+      ? { ...s, label: "读取考核结果", desc: "直接使用数据看板已锁定结果" }
     : s
   );
 
@@ -1724,7 +1726,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
                     <div className="flex-1">
                       <p className={`text-sm font-medium ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{s.label}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {s.id === 4 ? (hasMethod ? "使用提供的金额计算方法" : "使用默认金额计算方法") : s.desc}
+                        {s.id === 4 && !isMobile ? (hasMethod ? "使用提供的金额计算方法" : "使用默认金额计算方法") : s.desc}
                       </p>
                     </div>
                     <div className="text-xs font-mono">
@@ -1770,9 +1772,9 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
                 <div>
                   <p className="text-xs text-muted-foreground mb-1.5">系统提示</p>
                   <div className="space-y-1.5">
-                    <div className={`flex items-start gap-2 text-xs ${hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}`}>
-                      <Info size={12} className={`mt-0.5 shrink-0 ${hasMethod ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"}`} />
-                      {hasMethod ? "已读取提供的金额计算方法。" : "未提供新的金额计算方法，已使用默认金额计算方法。"}
+                    <div className={`flex items-start gap-2 text-xs ${isMobile || hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}`}>
+                      <Info size={12} className={`mt-0.5 shrink-0 ${isMobile || hasMethod ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"}`} />
+                      {isMobile ? "已读取数据看板考核结果。" : hasMethod ? "已读取提供的金额计算方法。" : "未提供新的金额计算方法，已使用默认金额计算方法。"}
                     </div>
                     {step >= 4 && (
                       <div className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -1843,8 +1845,9 @@ function formatElapsed(s: number): string {
   return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分钟`;
 }
 
-function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports, onPreviewReport }: {
+function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports, onPreviewReport }: {
   onNav: (p: Page) => void;
+  dataSource: "upload" | "mobile";
   packageFiles: File[];
   methodFiles: File[];
   methodText: string;
@@ -1857,6 +1860,7 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
   onPreviewReport: (report: Report) => void;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
+  const isMobile = dataSource === "mobile";
 
   const nowStr = generatedAt ?? new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-");
   const townReports: Report[] = selectedTowns.map((town, i) => ({
@@ -1980,10 +1984,12 @@ function ResultPage({ onNav, packageFiles, methodFiles, methodText, outputSelect
               </div>
               <div className="px-4 py-4 space-y-3">
                 {[
-                  { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "资料包已处理" },
-                  { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "金额核算完成" },
+                  { icon: CheckCircle2, color: "text-[var(--status-success)]", text: isMobile ? "看板数据已处理" : "资料包已处理" },
+                  { icon: CheckCircle2, color: "text-[var(--status-success)]", text: isMobile ? "考核结果已读取" : "金额核算完成" },
                   { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "报告校验通过" },
-                  hasMethod
+                  isMobile
+                    ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用数据看板数据" }
+                    : hasMethod
                     ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用提供的金额计算方法" }
                     : { icon: Info, color: "text-[var(--status-warning)]", text: "使用默认金额计算方法" },
                 ].map(({ icon: Icon, color, text }) => (
@@ -2073,7 +2079,7 @@ function HistoryPage({ onNav, reports, onPreviewReport }: { onNav: (p: Page) => 
                     <div className="text-[10px] text-muted-foreground">{r.recordIds?.length ?? 0} 条记录</div>
                   </td>
                   <td className="px-3 py-3"><StatusBadge status={r.status} /></td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.createdAt}</td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{formatPlatformTime(r.createdAt)}</td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-3">
                       <a href={r.downloadUrl} className="text-xs text-primary hover:underline flex items-center gap-1">
@@ -2798,7 +2804,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
             </div>
             <div className="grid grid-cols-4 gap-3 px-5 py-3 border-b border-border text-xs text-muted-foreground">
               <p>城市：<span className="text-foreground">{selected.cityName || "-"}</span></p>
-              <p>批次：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
+              <p>周期：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
             <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
               <p>提交：<span className="text-foreground">{formatPlatformTime(selected.submittedAt)}</span></p>
             </div>
@@ -2963,7 +2969,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
                     )}
                     <div className="flex items-center justify-between border-t border-border pt-3">
                       <p className="text-muted-foreground">
-                        来源 {agentRuns[0].output.source || "deterministic-agent"} · 证据 {agentRuns[0].output.evidenceRefs?.length ?? 0} 条 · {agentRuns[0].createdAt}
+                        来源 {agentRuns[0].output.source || "deterministic-agent"} · 证据 {agentRuns[0].output.evidenceRefs?.length ?? 0} 条 · {formatPlatformTime(agentRuns[0].createdAt)}
                       </p>
                       <div className="flex items-center gap-2">
                         <button disabled={agentBusy} onClick={() => confirmAgentRun(agentRuns[0].id, false)} className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-40">弃用</button>
@@ -4122,6 +4128,7 @@ function AssessmentApp() {
       case "result": return (
         <ResultPage
           onNav={setPage}
+          dataSource={dataSource}
           packageFiles={packageFiles}
           methodFiles={methodFiles}
           methodText={methodText}
