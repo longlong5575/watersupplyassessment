@@ -25,6 +25,7 @@ FORBIDDEN_SNIPPETS = [
     "考核村点",
     "各村点得分",
     "record_review_assist",
+    "知识库入口已预留",
 ]
 
 

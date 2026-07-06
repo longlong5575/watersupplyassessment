@@ -424,6 +424,79 @@ function clampOptionInstances(value: number, opt: DeductionOption): number {
   return Math.min(Math.max(1, safeValue), getOptionMaxInstances(opt));
 }
 
+function itemKnowledgeText(item: L3Item): string {
+  const optionText = item.options.map(option => `${option.reason} ${option.sourceText ?? ""}`).join(" ");
+  return `${item.name} ${item.description} ${item.evaluationStandard ?? ""} ${item.standardText ?? ""} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""} ${optionText}`;
+}
+
+function isMonthlyUnqualifiedRuleItem(item: L3Item): boolean {
+  const text = itemKnowledgeText(item);
+  return text.includes("全月不合格") || (text.includes("化验") && text.includes("判定为不合格"));
+}
+
+function isMonthlyReasonOption(option: DeductionOption): boolean {
+  const text = `${option.reason} ${option.sourceText ?? ""}`;
+  return text.includes("视为全月不合格") && !text.includes("判定为不合格扣");
+}
+
+function isMonthlyDeductionOption(option: DeductionOption, item: L3Item): boolean {
+  const text = `${option.reason} ${option.sourceText ?? ""}`;
+  return text.includes("判定为不合格") || (option.value ?? 0) >= item.maxScore;
+}
+
+function knowledgeGuidanceForItem(item: L3Item): string[] {
+  const text = itemKnowledgeText(item);
+  const tips: string[] = [];
+  if (text.includes("停产")) {
+    tips.push("停产口径：按标准记录停产天数；因故停减产程序符合要求的天数不扣分，未履行或无法证明合规程序的停产天数按标准扣分。");
+  }
+  if (isMonthlyUnqualifiedRuleItem(item)) {
+    tips.push("全月不合格口径：化验报告显示当月有一项应做化验项目未做，或环保部门/上级监管部门抽查判定不合格时，先判定本月不合格，再按“判定为不合格”统一扣分。");
+  }
+  if (text.includes("水质") || text.includes("CODCr") || text.includes("NH3-N")) {
+    tips.push("水质口径：以实测值与对应排放限值比对，超限即判为该指标不达标；现场可在水质抽检模块自动回填评分。");
+  }
+  if (text.includes("每一处") || text.includes("每项") || text.includes("出现一项")) {
+    tips.push("数量扣分口径：同类问题按处数/项数选择数量，系统按标准单项扣分自动累加，并按本评分点满分封顶。");
+  }
+  return tips;
+}
+
+function buildMonthlyEntry(item: L3Item, current: ItemEntry, unqualified: boolean, reasonIds: Set<string>): ItemEntry {
+  const reasonOptions = item.options.filter(isMonthlyReasonOption);
+  const deduction = item.options.find(option => isMonthlyDeductionOption(option, item));
+  const options = item.options.map(option => {
+    const base = current.options.find(entry => entry.optionId === option.id) ?? makeOptionEntry(option.id);
+    if (!unqualified) {
+      return { ...base, selection: "no_deduction" as SelectionType, customScore: 0, customNote: "", note: "" };
+    }
+    if (deduction?.id === option.id) {
+      return {
+        ...base,
+        selection: "standard" as SelectionType,
+        instances: 1,
+        note: "不合格判定自动扣分",
+      };
+    }
+    if (reasonOptions.some(reason => reason.id === option.id) && reasonIds.has(option.id)) {
+      return {
+        ...base,
+        selection: "custom" as SelectionType,
+        customScore: 0,
+        customNote: option.reason,
+        note: "全月不合格触发原因",
+      };
+    }
+    return { ...base, selection: "no_deduction" as SelectionType, customScore: 0, customNote: "", note: "" };
+  });
+  const selectedReasons = reasonOptions.filter(option => reasonIds.has(option.id)).map(option => option.reason);
+  return {
+    ...current,
+    options,
+    generalNote: selectedReasons.length ? `全月不合格原因：${selectedReasons.join("；")}` : current.generalNote,
+  };
+}
+
 function calcItemRaw(entry: ItemEntry, item: L3Item): number {
   return entry.options.reduce((sum, oe) => {
     const opt = item.options.find(o => o.id === oe.optionId);
@@ -686,11 +759,16 @@ function PPortal({ onField, onKnowledge }: { onField: () => void; onKnowledge: (
 }
 
 function PKnowledge({ onBack }: { onBack: () => void }) {
+  const [keyword, setKeyword] = useState("");
   const items = [
-    { title: "考核标准", desc: "郁南、茂南项目评分条目与扣分口径" },
-    { title: "项目资料", desc: "镇街、项目点、考核对象和报告引用资料" },
-    { title: "报告口径", desc: "最终报告中使用的格式、标题和说明文字" },
+    ...getAllItems(TREATMENT_STANDARDS as unknown as L1Group[]).map(item => ({ item, type: "污水处理设施" })),
+    ...getAllItems(NETWORK_STANDARDS as unknown as L1Group[]).map(item => ({ item, type: "管网设施" })),
   ];
+  const normalizedKeyword = keyword.trim();
+  const filtered = items.filter(({ item, type }) => {
+    if (!normalizedKeyword) return true;
+    return `${type} ${itemKnowledgeText(item)} ${knowledgeGuidanceForItem(item).join(" ")}`.includes(normalizedKeyword);
+  });
   return (
     <div className="flex flex-col h-full bg-background">
       <div className="bg-primary px-4 pt-12 pb-5 shrink-0">
@@ -698,20 +776,60 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
           <ChevronLeft className="w-4 h-4" />返回
         </button>
         <h1 className="text-lg font-semibold text-primary-foreground">知识库</h1>
-        <p className="text-xs text-primary-foreground/55 mt-1">现场可快速核对标准和项目资料</p>
+        <p className="text-xs text-primary-foreground/55 mt-1">按评分点核对标准、扣分口径和常见判定问题</p>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-3">
-        {items.map(item => (
-          <div key={item.title} className="rounded-xl border border-border bg-white p-4">
-            <div className="text-sm font-semibold text-foreground">{item.title}</div>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.desc}</p>
+      <div className="px-4 pt-4 pb-2 bg-background shrink-0">
+        <label className="relative block">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            value={keyword}
+            onChange={event => setKeyword(event.target.value)}
+            placeholder="搜索评分点、停产、全月不合格、水质..."
+            className="w-full h-11 rounded-xl border border-border bg-white pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </label>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        {filtered.map(({ item, type }) => {
+          const tips = knowledgeGuidanceForItem(item);
+          return (
+          <div key={`${type}-${item.id}`} className="rounded-xl border border-border bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs text-primary font-medium">{type}</div>
+                <div className="text-sm font-semibold text-foreground mt-0.5">{item.name}</div>
+              </div>
+              <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{item.maxScore}分</span>
+            </div>
+            {tips.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {tips.map(tip => (
+                  <div key={tip} className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800">
+                    {tip}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+              {item.evaluationStandard || item.description}
+            </div>
+            {item.options.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                {item.options.map(option => (
+                  <div key={option.id} className="rounded-lg bg-muted px-3 py-2 text-xs text-foreground leading-relaxed">
+                    {option.reason}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ))}
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-xs text-amber-800 leading-relaxed">
-            知识库入口已预留，后续可继续接入标准全文检索、项目资料附件和报告范例。
-          </p>
-        </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="rounded-xl border border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+            没有找到匹配的评分点
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2121,6 +2239,16 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
   const capped = Math.min(rawTotal, item.maxScore);
   const current = derived ? derived.currentScore : item.maxScore - capped;
   const overLimit = rawTotal > item.maxScore;
+  const knowledgeTips = knowledgeGuidanceForItem(item);
+  const monthlyRule = isMonthlyUnqualifiedRuleItem(item);
+  const monthlyReasonOptions = item.options.filter(isMonthlyReasonOption);
+  const monthlyDeductionOption = item.options.find(option => isMonthlyDeductionOption(option, item));
+  const monthlyUnqualified = monthlyRule && monthlyDeductionOption
+    ? entry.options.some(oe => oe.optionId === monthlyDeductionOption.id && oe.selection !== "no_deduction")
+    : false;
+  const selectedMonthlyReasons = new Set(entry.options
+    .filter(oe => oe.selection === "custom" && oe.note === "全月不合格触发原因")
+    .map(oe => oe.optionId));
 
   const updateOpt = (i: number, patch: Partial<OptionEntry>) => {
     setEntry(prev => ({
@@ -2148,7 +2276,14 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
     });
   };
 
-  const save = (done: boolean) => { onSave({ ...entry, done }); onBack(); };
+  const save = (done: boolean) => {
+    if (done && monthlyUnqualified && selectedMonthlyReasons.size === 0) {
+      window.alert("请选择至少一个不合格原因");
+      return;
+    }
+    onSave({ ...entry, done });
+    onBack();
+  };
 
   return (
     <div className="flex flex-col h-full bg-background relative">
@@ -2213,6 +2348,18 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
           </div>
         )}
 
+        {knowledgeTips.length > 0 && (
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-800">
+              <Package className="w-3.5 h-3.5" />
+              知识库解释
+            </div>
+            {knowledgeTips.map(tip => (
+              <p key={tip} className="text-xs text-blue-800 leading-relaxed">{tip}</p>
+            ))}
+          </div>
+        )}
+
         {derived && (
           <div className={`rounded-xl border p-4 ${derived.completed ? "bg-blue-50 border-blue-200" : "bg-amber-50 border-amber-200"}`}>
             <div className="flex items-start gap-2">
@@ -2229,8 +2376,70 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
           </div>
         )}
 
+        {monthlyRule && !derived && (
+          <div className="bg-white rounded-xl border border-border overflow-hidden">
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-sm font-semibold text-foreground">不合格判定</p>
+              <p className="text-xs text-muted-foreground mt-1">先判断本项是否合格；选择不合格后，再选择触发原因，系统自动按“判定为不合格”扣分。</p>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setEntry(prev => buildMonthlyEntry(item, prev, false, new Set()))}
+                  className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                    !monthlyUnqualified ? "border-green-500 bg-green-50 text-green-700" : "border-border bg-white text-foreground"
+                  }`}
+                >
+                  合格
+                </button>
+                <button
+                  onClick={() => {
+                    const defaultReason = monthlyReasonOptions[0]?.id;
+                    setEntry(prev => buildMonthlyEntry(item, prev, true, new Set(defaultReason ? [defaultReason] : [])));
+                  }}
+                  className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                    monthlyUnqualified ? "border-red-500 bg-red-50 text-red-700" : "border-border bg-white text-foreground"
+                  }`}
+                >
+                  不合格
+                </button>
+              </div>
+
+              {monthlyUnqualified && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">不合格原因</p>
+                  {monthlyReasonOptions.map(option => {
+                    const checked = selectedMonthlyReasons.has(option.id);
+                    return (
+                      <label key={option.id} className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={event => {
+                            const next = new Set(selectedMonthlyReasons);
+                            if (event.target.checked) next.add(option.id);
+                            else next.delete(option.id);
+                            setEntry(prev => buildMonthlyEntry(item, prev, true, next));
+                          }}
+                        />
+                        <span className="text-xs text-foreground leading-relaxed">{option.reason}</span>
+                      </label>
+                    );
+                  })}
+                  {monthlyDeductionOption && (
+                    <div className="rounded-lg bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-700 leading-relaxed">
+                      自动扣分：{monthlyDeductionOption.reason}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Deduction options */}
-        {!derived && item.options.map((opt, oi) => {
+        {!derived && !monthlyRule && item.options.map((opt, oi) => {
           const oe = entry.options[oi];
           if (!oe) return null;
           const score = calcOptionScore(oe, opt);
