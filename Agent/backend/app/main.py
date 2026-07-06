@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -38,4 +40,8 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "database": "connected"}
+    return {
+        "status": "ok",
+        "database": "connected",
+        "buildId": os.environ.get("WATERSUPPLY_BUILD_ID", "development"),
+    }

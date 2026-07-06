@@ -10,6 +10,8 @@ $logDir = Join-Path $runtimeRoot "logs"
 $logPath = Join-Path $logDir "startup.log"
 $statusPath = Join-Path $logDir "startup-status.txt"
 $statusJsonPath = Join-Path $logDir "startup-status.json"
+$launchMutex = New-Object System.Threading.Mutex($false, "Local\PPP-Rural-Sewage-Assessment-Startup")
+$launchLockAcquired = $false
 $backend = Join-Path $agentRoot "backend"
 $front = Join-Path (Join-Path $runtimeRoot "frontend") "front"
 $mobile = Join-Path (Join-Path $runtimeRoot "frontend") "front-mobile"
@@ -106,6 +108,25 @@ function Test-UrlReady([string]$url) {
   }
 }
 
+function Get-AppBuildId {
+  $sourceRoots = @((Join-Path $agentRoot "backend"), (Join-Path $agentRoot "frontend"))
+  $latest = Get-ChildItem -LiteralPath $sourceRoots -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch '[\\/](node_modules|dist|__pycache__)[\\/]' } |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+  if (-not $latest) { throw "未找到应用程序源文件，请确认 Agent 文件夹完整。" }
+  return $latest.LastWriteTimeUtc.Ticks.ToString()
+}
+
+function Test-BackendBuild([string]$url, [string]$ExpectedBuildId) {
+  try {
+    $health = Invoke-RestMethod -Uri "$url/health" -TimeoutSec 2
+    return ($health.status -eq "ok" -and $health.buildId -eq $ExpectedBuildId)
+  } catch {
+    return $false
+  }
+}
+
 function Test-PortAvailable([int]$Port) {
   $client = New-Object System.Net.Sockets.TcpClient
   try {
@@ -135,14 +156,21 @@ function Set-FrontendEnv([string]$directory, [int]$BackendPort) {
 }
 
 try {
+  $launchLockAcquired = $launchMutex.WaitOne(0)
+  if (-not $launchLockAcquired) { return }
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
   Write-StartupStatus $Text.Preparing $Text.PreparingMsg
-  Start-Transcript -LiteralPath $logPath -Append | Out-Null
-  if ((Test-UrlReady "http://127.0.0.1:8000/health") -and (Test-UrlReady "http://127.0.0.1:5173") -and (Test-UrlReady "http://127.0.0.1:5174")) {
+  $appBuildId = Get-AppBuildId
+  $env:WATERSUPPLY_BUILD_ID = $appBuildId
+  if ((Test-BackendBuild "http://127.0.0.1:8000" $appBuildId) -and (Test-UrlReady "http://127.0.0.1:5173") -and (Test-UrlReady "http://127.0.0.1:5174")) {
     Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:8000"; platformUrl = "http://127.0.0.1:5173"; mobileUrl = "http://127.0.0.1:5174" }
     Start-Process "http://127.0.0.1:5173"
     Start-Process "http://127.0.0.1:5174"
     return
+  }
+  if ((Test-UrlReady "http://127.0.0.1:8000/health") -or (Test-UrlReady "http://127.0.0.1:5173") -or (Test-UrlReady "http://127.0.0.1:5174") -or (Test-Path -LiteralPath (Join-Path $logDir "backend-server.pid"))) {
+    & (Join-Path $scriptRoot "stop-services.ps1") -Silent
+    Start-Sleep -Seconds 1
   }
   $backendPort = Get-FreePort 8000 8100 8199
   $frontPort = Get-FreePort 5173 5200 5299
@@ -159,14 +187,10 @@ try {
   & (Join-Path $scriptRoot "init-recipient.ps1")
   Set-FrontendEnv $front $backendPort
   Set-FrontendEnv $mobile $backendPort
-  $backendPythonw = if ($env:PYTHON312_EXE -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $env:PYTHON312_EXE) "pythonw.exe"))) {
-    Join-Path (Split-Path -Parent $env:PYTHON312_EXE) "pythonw.exe"
-  } else {
-    Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\pythonw.exe"
-  }
-  if (-not (Test-Path -LiteralPath $backendPythonw)) { $backendPythonw = $env:PYTHON312_EXE }
+  $backendLauncherPython = $env:PYTHON312_EXE
+  if (-not $backendLauncherPython) { throw "未找到 Python 运行环境，请重新启动系统以自动修复。" }
   Write-StartupStatus $Text.Backend $Text.BackendMsg
-  & $backendPythonw (Join-Path $backend "start_backend_silent.py")
+  & $backendLauncherPython (Join-Path $backend "start_backend_silent.py")
   Write-StartupStatus $Text.Frontend $Text.FrontendMsg
   $frontPid = Start-Frontend $front $frontPort
   $mobilePid = Start-Frontend $mobile $mobilePort
@@ -184,5 +208,8 @@ try {
   $_ | Out-File -LiteralPath $logPath -Append -Encoding utf8
   Show-StartupFailure $message
 } finally {
-  try { Stop-Transcript | Out-Null } catch {}
+  if ($launchLockAcquired) {
+    try { $launchMutex.ReleaseMutex() } catch {}
+  }
+  $launchMutex.Dispose()
 }

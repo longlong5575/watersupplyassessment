@@ -1,3 +1,5 @@
+param([switch]$Silent)
+
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -43,10 +45,19 @@ try {
       Stop-FromPidFile (Join-Path $logDir $name)
     }
   }
+  $runtimeProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ProcessId -ne $PID -and
+      $_.CommandLine -and
+      $_.CommandLine.IndexOf($runtimeRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    }
+  foreach ($runtimeProcess in $runtimeProcesses) {
+    Stop-ProcessTree ([int]$runtimeProcess.ProcessId)
+  }
   $stoppedMessage = -join ([char[]](0x670d, 0x52a1, 0x5df2, 0x505c, 0x6b62, 0x3002))
-  Show-Message $stoppedMessage
+  if (-not $Silent) { Show-Message $stoppedMessage }
 } catch {
   $failedPrefix = -join ([char[]](0x505c, 0x6b62, 0x670d, 0x52a1, 0x5931, 0x8d25, 0xff1a))
-  Show-Message ($failedPrefix + $_.Exception.Message) 16
+  if (-not $Silent) { Show-Message ($failedPrefix + $_.Exception.Message) 16 }
   throw
 }
