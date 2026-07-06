@@ -28,8 +28,20 @@ function Initialize-Frontend([string]$directory) {
   $example = Join-Path $directory ".env.example"
   $local = Join-Path $directory ".env.local"
   if ((Test-Path -LiteralPath $example) -and -not (Test-Path -LiteralPath $local)) { Copy-Item -LiteralPath $example -Destination $local }
+  $nodeModules = Join-Path $directory "node_modules"
+  $marker = Join-Path $nodeModules ".watersupply-deps.sha256"
+  $dependencyFiles = @("package.json", "pnpm-lock.yaml") | ForEach-Object { Join-Path $directory $_ } | Where-Object { Test-Path -LiteralPath $_ }
+  $dependencyHash = ($dependencyFiles | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash }) -join ":"
+  if ((Test-Path -LiteralPath $nodeModules) -and (Test-Path -LiteralPath $marker)) {
+    $cachedHash = (Get-Content -LiteralPath $marker -Raw).Trim()
+    if ($cachedHash -eq $dependencyHash) { return }
+  }
   Push-Location $directory
-  try { Invoke-Pnpm install --frozen-lockfile }
+  try {
+    Invoke-Pnpm install --frozen-lockfile
+    New-Item -ItemType Directory -Force -Path $nodeModules | Out-Null
+    Set-Content -LiteralPath $marker -Value $dependencyHash -Encoding ASCII
+  }
   finally { Pop-Location }
 }
 
@@ -42,15 +54,28 @@ function Sync-RuntimeFrontend([string]$source, [string]$target) {
 function Install-PythonRequirements {
   param([string]$PythonExe, [string]$TargetDir)
   New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+  $requirements = Join-Path (Get-Location) "requirements.txt"
+  $marker = Join-Path $TargetDir ".requirements.sha256"
+  $requirementsHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash
+  if (Test-Path -LiteralPath (Join-Path $TargetDir "fastapi")) {
+    if (-not (Test-Path -LiteralPath $marker)) {
+      Set-Content -LiteralPath $marker -Value $requirementsHash -Encoding ASCII
+      return
+    }
+    $cachedHash = (Get-Content -LiteralPath $marker -Raw).Trim()
+    if ($cachedHash -eq $requirementsHash) { return }
+  }
   & $PythonExe -m pip --version | Out-Null
   if ($LASTEXITCODE -ne 0) {
     & $PythonExe -m ensurepip --upgrade
     if ($LASTEXITCODE -ne 0) { throw "Python pip initialization failed." }
   }
   & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir -r requirements.txt
-  if ($LASTEXITCODE -eq 0) { return }
-  & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
-  if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
+  if ($LASTEXITCODE -ne 0) {
+    & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
+  }
+  Set-Content -LiteralPath $marker -Value $requirementsHash -Encoding ASCII
 }
 
 Require-Command "node"

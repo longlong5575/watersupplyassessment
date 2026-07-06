@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -123,10 +124,42 @@ def ensure_env_file(directory: Path) -> None:
         local.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def dependency_hash(*files: Path) -> str:
+    digest = hashlib.sha256()
+    for file in files:
+        if file.exists():
+            digest.update(file.name.encode("utf-8"))
+            digest.update(file.read_bytes())
+    return digest.hexdigest()
+
+
 def ensure_backend(python: Path) -> Path:
     BACKEND_RUNTIME.mkdir(parents=True, exist_ok=True)
     BACKEND_PACKAGES.mkdir(parents=True, exist_ok=True)
-    run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--target", str(BACKEND_PACKAGES), "-r", "requirements.txt"], BACKEND)
+    marker = BACKEND_PACKAGES / ".requirements.sha256"
+    current_hash = dependency_hash(BACKEND / "requirements.txt")
+    if (BACKEND_PACKAGES / "fastapi").exists():
+        if not marker.exists():
+            marker.write_text(current_hash, encoding="ascii")
+            return python
+        if marker.read_text(encoding="ascii").strip() == current_hash:
+            return python
+    run(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--upgrade",
+            "--target",
+            str(BACKEND_PACKAGES),
+            "-r",
+            "requirements.txt",
+        ],
+        BACKEND,
+    )
+    marker.write_text(current_hash, encoding="ascii")
     return python
 
 
@@ -147,10 +180,17 @@ def sync_runtime_frontend(source: Path, target: Path) -> Path:
 def ensure_frontend(source: Path, target: Path, pnpm: str) -> Path:
     directory = sync_runtime_frontend(source, target)
     ensure_env_file(directory)
+    node_modules = directory / "node_modules"
+    marker = node_modules / ".watersupply-deps.sha256"
+    current_hash = dependency_hash(directory / "package.json", directory / "pnpm-lock.yaml")
+    if node_modules.exists() and marker.exists() and marker.read_text(encoding="ascii").strip() == current_hash:
+        return directory
     if Path(pnpm).name.lower().startswith("npx"):
         run([pnpm, "--yes", "pnpm@10.12.1", "install", "--frozen-lockfile"], directory)
     else:
         run([pnpm, "install", "--frozen-lockfile"], directory)
+    node_modules.mkdir(parents=True, exist_ok=True)
+    marker.write_text(current_hash, encoding="ascii")
     return directory
 
 
