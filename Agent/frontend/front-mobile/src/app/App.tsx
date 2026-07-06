@@ -3925,14 +3925,42 @@ function AssessmentApp() {
     if (!auth?.token || !cityId || !cycleName) throw new Error("请先选择项目和考核季度");
     const params = new URLSearchParams({ city_id: cityId, period: cycleName });
     if (cycleId) params.set("cycle_id", cycleId);
-    const response = await fetch(`${API_BASE_URL}/mobile/assessment-records?${params.toString()}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${auth.token}` },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/mobile/assessment-records?${params.toString()}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+    } catch {
+      throw new Error("清空失败：无法连接后端服务。解决方法：关闭系统后重新点击“点我启动”，等待两个页面都打开后再试。");
+    }
     if (!response.ok) {
-      if (response.status === 401) throw new Error("登录状态已失效，请重新登录后再试");
-      if (response.status === 422) throw new Error("当前项目与考核季度不匹配，请返回重新选择");
-      throw new Error(`清空失败，请稍后重试（${response.status}）`);
+      let backendReason = "";
+      try {
+        const body = await response.json();
+        backendReason = typeof body?.detail === "string" ? body.detail : "";
+      } catch {
+        backendReason = "";
+      }
+      if (response.status === 401) {
+        throw new Error("清空失败：登录状态已经失效。解决方法：退出当前页面并重新登录，然后再次清空。");
+      }
+      if (response.status === 403) {
+        throw new Error("清空失败：当前账号没有删除权限。解决方法：使用管理员账号登录后再试。");
+      }
+      if (response.status === 404) {
+        throw new Error(`清空失败：${backendReason || "没有找到当前项目或季度数据"}。解决方法：返回上一级，重新选择项目和考核季度。`);
+      }
+      if (response.status === 405) {
+        throw new Error("清空失败：正在运行的后端版本尚未更新。解决方法：先点击“停止服务”，再重新点击“点我启动”，然后重试。");
+      }
+      if (response.status === 409 || response.status === 422) {
+        throw new Error(`清空失败：${backendReason || "当前项目与考核季度不匹配"}。解决方法：返回上一级，重新选择正确的项目和季度。`);
+      }
+      if (response.status >= 500) {
+        throw new Error(`清空失败：${backendReason || "后端处理数据时发生异常"}。解决方法：重新启动系统后再试；如果仍然失败，请保留当前项目和季度信息交给技术人员检查。`);
+      }
+      throw new Error(`清空失败：${backendReason || "服务器拒绝了本次操作"}。解决方法：刷新页面并重新登录后再试。`);
     }
     const result = await response.json();
     const remainingQueue = syncQueue.filter(item => !(
