@@ -307,6 +307,19 @@ def main():
             float(count_option["deduction"]) * int(count_option["maxInstances"]),
         )
         assert float(count_score["deduction"]) == expected_count_deduction
+        adjusted_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=stress_towns[2]["name"], village="",
+            facility_type="town_plant", indicators=plant_leaves,
+        )
+        adjusted_payload["villages"][0]["entries"][count_indicator["id"]]["options"] = [{
+            "optionId": count_option["id"], "selection": "standard", "instances": 999,
+            "adjustedScore": 0.7, "note": "调整值应直接覆盖标准扣分",
+        }]
+        adjusted_created = assert_ok(client.post("/api/mobile/assessment-records", json=adjusted_payload, headers=inspector), "adjusted score assessment")
+        assert adjusted_created["recordIds"] == count_created["recordIds"]
+        adjusted_detail = assert_ok(client.get(f"/api/records/{adjusted_created['recordIds'][0]}"), "adjusted score detail")
+        adjusted_score = next(item for item in adjusted_detail["scores"] if item["indicatorId"] == count_indicator["id"])
+        assert float(adjusted_score["deduction"]) == 0.7
 
         water_indicator = next(item for item in plant_leaves if item["name"] == "污水处理质量")
         water_option = next(option for option in water_indicator["deductionOptions"] if float(option["deduction"]) == float(water_indicator["fullScore"]))
@@ -370,6 +383,18 @@ def main():
         ), "preserve survey scores after entries update")
         assert any(item["source"] == "survey" for item in entries_only_update["scores"])
         assert round(float(entries_only_update["totalScore"]), 2) == round(survey_total, 2)
+        cleared_surveys = assert_ok(client.put(
+            f"/api/mobile/assessment-records/{survey_created['recordIds'][0]}/surveys", headers=inspector, json={},
+        ), "clear survey scores")
+        cleared_detail = assert_ok(client.get(f"/api/records/{survey_created['recordIds'][0]}"), "cleared survey detail")
+        assert not any(item["source"] == "survey" for item in cleared_detail["scores"])
+        assert {item["indicatorId"] for item in cleared_detail["scores"]} == {item["id"] for item in rural_leaves}
+        assert float(cleared_surveys["totalScore"]) == 100
+
+        cleared_scores = assert_ok(client.put(
+            f"/api/mobile/assessment-records/{full_created['recordIds'][0]}/scores", headers=inspector, json={"entries": {}},
+        ), "clear score entries")
+        assert float(cleared_scores["totalScore"]) == 0
 
         invalid_payload = {"cityId": yunan["id"], "cycleId": yunan_cycle["id"], "town": "金塘镇", "primaryFacilityType": "town_plant"}
         invalid = client.post("/api/mobile/assessment-records", json=invalid_payload, headers=inspector)

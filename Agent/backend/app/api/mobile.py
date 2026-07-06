@@ -216,7 +216,7 @@ def update_surveys(record_id: str, payload: dict[str, Any], session: Session = D
     record = session.get(AssessmentRecord, record_id)
     if record is None: raise HTTPException(status_code=404, detail="Record not found")
     if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
-    record.raw_payload = {**record.raw_payload, "surveys": payload}
+    record.raw_payload = {**record.raw_payload, "surveyEntries": payload}
     sync_surveys(session, record, payload)
     session.commit()
     return _record_payload(record)

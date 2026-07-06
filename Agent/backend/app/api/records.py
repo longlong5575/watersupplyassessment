@@ -163,6 +163,7 @@ def update_record(record_id: str, payload: RecordPatch, session: Session = Depen
     if "entries" in payload.data:
         sync_scores(session, record, payload.data["entries"])
     if "surveys" in payload.data:
+        record.raw_payload = {**record.raw_payload, "surveyEntries": payload.data["surveys"]}
         sync_surveys(session, record, payload.data["surveys"])
     if "waterQuality" in payload.data:
         sync_water_quality(session, record, payload.data["waterQuality"])

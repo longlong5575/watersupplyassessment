@@ -226,19 +226,25 @@ def _score_option(session: Session, option_entry: dict[str, Any]) -> tuple[str |
         return option_id, 0, option_entry.get("note") or ""
     if selection == "custom":
         deduction = _to_float(option_entry.get("customScore"))
+        use_instances = False
+    elif option_entry.get("adjustedScore") not in (None, ""):
+        deduction = _to_float(option_entry.get("adjustedScore"))
+        use_instances = False
     elif option_entry.get("rangeValue") not in (None, ""):
         deduction = _to_float(option_entry.get("rangeValue"))
+        use_instances = False
     else:
         option = session.get(DeductionOption, option_id) if option_id else None
         deduction = _to_float(option.deduction_value if option else option_entry.get("deduction"))
-    deduction += _to_float(option_entry.get("adjustedScore"))
+        use_instances = True
     instances = max(1, int(_to_float(option_entry.get("instances"), 1)))
     option = session.get(DeductionOption, option_id) if option_id else None
     option_meta = option.meta if option is not None and isinstance(option.meta, dict) else {}
     max_instances = int(_to_float(option_meta.get("maxInstances"), 0))
     if max_instances > 0:
         instances = min(instances, max_instances)
-    deduction *= instances
+    if use_instances:
+        deduction *= instances
     reason = option_entry.get("note") or option_entry.get("customNote") or option_entry.get("adjustNote") or ""
     return option_id, max(deduction, 0), reason
 
@@ -289,11 +295,10 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
             sync_option_photos(session, record.id, score.id, option_id, option_entry)
         created.append(score)
     session.flush()
-    if created:
-        existing_surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)))
-        if existing_surveys:
-            apply_survey_backfill(session, record, existing_surveys)
-        recalculate_record_total(session, record)
+    existing_surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)))
+    if existing_surveys:
+        apply_survey_backfill(session, record, existing_surveys)
+    recalculate_record_total(session, record)
     return created
 
 
@@ -357,6 +362,9 @@ def sync_surveys(session: Session, record: AssessmentRecord, payload: Any) -> li
         session.add(survey)
         survey_items.append(survey)
     session.flush()
+    if not survey_items:
+        sync_scores(session, record, (record.raw_payload or {}).get("entries", {}))
+        return survey_items
     apply_survey_backfill(session, record, survey_items)
     recalculate_record_total(session, record)
     return survey_items
