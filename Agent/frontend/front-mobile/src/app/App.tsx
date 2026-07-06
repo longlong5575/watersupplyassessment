@@ -5,6 +5,7 @@ import {
   AlertCircle, ChevronDown, ChevronUp, Save, Send,
   Plus, Minus, MapPin, Building2, BarChart3,
   AlertTriangle, Info, Check, Package, Smartphone,
+  Trash2,
 } from "lucide-react";
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
@@ -214,6 +215,15 @@ function syncedRecordsForTown(
   return syncQueue
     .filter(item => item.syncStatus === "synced" && item.pkg.town === town && (!cityId || item.pkg.cityId === cityId) && item.pkg.period === period)
     .reduce<VillageRecord[]>((records, item) => mergeVillageRecords(records, item.pkg.villages), []);
+}
+
+function submittedDataFromQueue(syncQueue: SyncQueueItem[]): Record<string, VillageRecord[]> {
+  return syncQueue
+    .filter(item => item.syncStatus === "synced")
+    .reduce<Record<string, VillageRecord[]>>((result, item) => ({
+      ...result,
+      [item.pkg.town]: mergeVillageRecords(result[item.pkg.town] ?? [], item.pkg.villages),
+    }), {});
 }
 
 function makeLocalId() {
@@ -3362,22 +3372,45 @@ function formatSubmittedScore(value: number): string {
   return Number(value.toFixed(1)).toString();
 }
 
-function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDiscardSync }: {
-  submittedData: Record<string, VillageRecord[]>;
+function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onRetrySync, onDiscardSync, onClearSubmittedData }: {
+  projectName: string;
+  cityId: string;
+  cycleName: string;
   syncQueue: SyncQueueItem[];
   onBack: () => void;
   onRetrySync: () => Promise<void>;
   onDiscardSync: () => void;
+  onClearSubmittedData: () => Promise<{ recordCount: number; reportCount: number }>;
 }) {
   const [expandedTown, setExpandedTown] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
-  const displaySubmittedData = syncQueue
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState("");
+  const scopedQueue = syncQueue.filter(item => (!cityId || item.pkg.cityId === cityId) && item.pkg.period === cycleName);
+  const displaySubmittedData = scopedQueue
     .filter(item => item.syncStatus === "synced")
     .reduce<Record<string, VillageRecord[]>>((result, item) => ({
       ...result,
       [item.pkg.town]: mergeVillageRecords(result[item.pkg.town] ?? [], item.pkg.villages),
-    }), { ...submittedData });
+    }), {});
   const towns = Object.keys(displaySubmittedData);
+  const pendingItems = scopedQueue.filter(item => item.syncStatus !== "synced");
+
+  const clearSubmittedData = async () => {
+    if (!window.confirm(`确定清空“${projectName} · ${cycleName}”的全部已提交数据吗？`)) return;
+    if (!window.confirm("请再次确认：评分、问卷、水质、附件、复核记录和已生成报告都会删除，且无法恢复。")) return;
+    setClearing(true);
+    setClearError("");
+    try {
+      const result = await onClearSubmittedData();
+      setExpandedTown(null);
+      window.alert(`清空完成：已删除 ${result.recordCount} 条考核记录和 ${result.reportCount} 份报告。`);
+    } catch (error) {
+      setClearError(error instanceof Error ? error.message : "清空失败，请稍后重试");
+    } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -3386,16 +3419,17 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
           <ChevronLeft className="w-4 h-4" />返回
         </button>
         <h1 className="text-xl font-semibold text-primary-foreground mb-0.5">已提交镇街数据</h1>
-        <p className="text-xs text-primary-foreground/55">共 {towns.length} 个镇街 · 待同步 {syncQueue.filter(item => item.syncStatus !== "synced").length} 个</p>
+        <p className="text-xs text-primary-foreground/55">{projectName} · {cycleName}</p>
+        <p className="text-xs text-primary-foreground/55 mt-0.5">共 {towns.length} 个镇街 · 待同步 {pendingItems.length} 个</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {syncQueue.filter(item => item.syncStatus !== "synced").length > 0 && (
+        {pendingItems.length > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">还有数据包未同步到后台</p>
-                <p className="mt-1">{syncQueue.filter(item => item.syncStatus === "sync_failed").length} 个失败，{syncQueue.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
+                <p className="mt-1">{pendingItems.filter(item => item.syncStatus === "sync_failed").length} 个失败，{pendingItems.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={onDiscardSync} disabled={retrying} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-red-600 disabled:opacity-50">放弃</button>
@@ -3410,7 +3444,7 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
             </div>
           </div>
         )}
-        {syncQueue.filter(item => item.syncStatus === "synced").slice(0, 3).map(item => (
+        {scopedQueue.filter(item => item.syncStatus === "synced").slice(0, 3).map(item => (
           <div key={item.localId} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">
             {item.town} 已同步 · {formatSubmittedSyncTime(item.syncedAt ?? item.createdAt)}
           </div>
@@ -3419,7 +3453,7 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <BarChart3 className="w-12 h-12 text-muted-foreground/40 mb-3" />
             <p className="text-sm text-muted-foreground">暂无已提交数据</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">完成全镇考核并提交后将在此显示</p>
+            <p className="text-xs text-muted-foreground/70 mt-1">提交当前已保存考核后将在此显示</p>
           </div>
         )}
 
@@ -3494,6 +3528,19 @@ function PSubmittedData({ submittedData, syncQueue, onBack, onRetrySync, onDisca
             </div>
           );
         })}
+        <div className="pt-3 pb-6">
+          {clearError && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{clearError}</div>
+          )}
+          <button
+            onClick={clearSubmittedData}
+            disabled={clearing}
+            className="w-full rounded-xl border border-red-300 bg-white py-3 text-sm font-semibold text-red-600 flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+            {clearing ? "正在清空..." : "清空当前项目和季度数据"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -3824,9 +3871,8 @@ function AssessmentApp() {
     });
   };
 
-  const retryPendingSync = async () => {
+  const retrySyncItems = async (pending: SyncQueueItem[]) => {
     if (!auth?.token) return;
-    const pending = syncQueue.filter(item => item.syncStatus !== "synced");
     if (!pending.length) return;
     setSubmitError("");
     for (const item of pending) {
@@ -3847,10 +3893,64 @@ function AssessmentApp() {
     }
   };
 
+  const retryPendingSync = async () => {
+    await retrySyncItems(syncQueue.filter(item => item.syncStatus !== "synced"));
+  };
+
+  const retryCurrentSubmittedSync = async () => {
+    await retrySyncItems(syncQueue.filter(item =>
+      item.syncStatus !== "synced"
+      && (!cityId || item.pkg.cityId === cityId)
+      && item.pkg.period === cycleName
+    ));
+  };
+
   const discardPendingSync = () => {
     if (!window.confirm("确定放弃所有同步失败和等待同步的数据包吗？此操作无法撤销。")) return;
     setSyncQueue(prev => prev.filter(item => item.syncStatus === "synced"));
     setSubmitError("");
+  };
+
+  const discardCurrentPendingSync = () => {
+    if (!window.confirm(`确定放弃“${city} · ${cycleName}”尚未同步的数据包吗？此操作无法撤销。`)) return;
+    setSyncQueue(prev => prev.filter(item => !(
+      item.syncStatus !== "synced"
+      && (!cityId || item.pkg.cityId === cityId)
+      && item.pkg.period === cycleName
+    )));
+    setSubmitError("");
+  };
+
+  const clearCurrentSubmittedData = async (): Promise<{ recordCount: number; reportCount: number }> => {
+    if (!auth?.token || !cityId || !cycleName) throw new Error("请先选择项目和考核季度");
+    const params = new URLSearchParams({ city_id: cityId, period: cycleName });
+    if (cycleId) params.set("cycle_id", cycleId);
+    const response = await fetch(`${API_BASE_URL}/mobile/assessment-records?${params.toString()}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${auth.token}` },
+    });
+    if (!response.ok) {
+      if (response.status === 401) throw new Error("登录状态已失效，请重新登录后再试");
+      if (response.status === 422) throw new Error("当前项目与考核季度不匹配，请返回重新选择");
+      throw new Error(`清空失败，请稍后重试（${response.status}）`);
+    }
+    const result = await response.json();
+    const remainingQueue = syncQueue.filter(item => !(
+      (!cityId || item.pkg.cityId === cityId) && item.pkg.period === cycleName
+    ));
+    setSyncQueue(remainingQueue);
+    setSubmittedData(submittedDataFromQueue(remainingQueue));
+    setCompletedVillages([]);
+    setTown("");
+    setSelectedTown(null);
+    setVillage("");
+    setEntries({});
+    setSurveyEntries({});
+    setWaterQuality(emptyWaterQualityEntry());
+    setTypeProgress({});
+    setScoreByType({});
+    setSubmitError("");
+    return { recordCount: Number(result.recordCount || 0), reportCount: Number(result.reportCount || 0) };
   };
 
   useEffect(() => {
@@ -4166,11 +4266,14 @@ function AssessmentApp() {
       case "submitted_data":
         return (
           <PSubmittedData
-            submittedData={submittedData}
+            projectName={city}
+            cityId={cityId}
+            cycleName={cycleName}
             syncQueue={syncQueue}
             onBack={() => setPage("town")}
-            onRetrySync={retryPendingSync}
-            onDiscardSync={discardPendingSync}
+            onRetrySync={retryCurrentSubmittedSync}
+            onDiscardSync={discardCurrentPendingSync}
+            onClearSubmittedData={clearCurrentSubmittedData}
           />
         );
       default:

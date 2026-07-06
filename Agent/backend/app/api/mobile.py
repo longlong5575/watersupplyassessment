@@ -1,13 +1,19 @@
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import current_user
 from app.core.storage import save_upload
-from app.models import AssessmentCycle, AssessmentRecord, Attachment, City, DeductionOption, Indicator, IndicatorVersion, Town, User, Village
+from app.models import (
+    AgentRun, AssessmentCycle, AssessmentRecord, AssessmentScore, Attachment, City,
+    DeductionOption, Indicator, IndicatorVersion, Report, ReportTask, ReviewLog,
+    SurveyRecord, Town, User, Village, WaterQualityRecord,
+)
 from app.services.assessment_ingest import (
     create_assessment_record,
     split_town_package,
@@ -23,6 +29,22 @@ from app.services.standard_names import clean_standard_name
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
 PROJECT_NAMES = {"郁南项目", "茂南项目"}
+
+
+def _remove_managed_file(storage_key: str | None) -> bool:
+    if not storage_key:
+        return False
+    root = settings.storage_dir.resolve()
+    path = Path(storage_key)
+    candidate = path.resolve() if path.is_absolute() else (Path.cwd() / path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    if not candidate.is_file():
+        return False
+    candidate.unlink()
+    return True
 
 
 def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
@@ -67,10 +89,10 @@ def projects(session: Session = Depends(get_session)):
 def project_report_template(city_id: str, session: Session = Depends(get_session)):
     city = session.get(City, city_id)
     if city is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="未找到所选项目")
     catalog = project_by_name(city.name)
     if catalog is None:
-        raise HTTPException(status_code=404, detail="Project template not found")
+        raise HTTPException(status_code=404, detail="未找到所选项目的报告模板")
     return {
         "projectId": city.id,
         "projectName": city.name,
@@ -196,6 +218,69 @@ def list_mobile_records(
             }
             for record in records
         ]
+    }
+
+
+@router.delete("/assessment-records")
+def clear_mobile_records(
+    city_id: str,
+    cycle_id: str | None = None,
+    period: str | None = None,
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    city = session.get(City, city_id)
+    if city is None:
+        raise HTTPException(status_code=404, detail="未找到所选项目")
+    cycle = session.get(AssessmentCycle, cycle_id) if cycle_id else None
+    if cycle is None and period:
+        cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city_id, AssessmentCycle.name == period))
+    if cycle is None:
+        return {"projectId": city_id, "cycleId": cycle_id, "recordCount": 0, "reportCount": 0, "fileCount": 0}
+    if cycle.city_id != city_id:
+        raise HTTPException(status_code=422, detail="所选考核季度不属于当前项目")
+
+    record_ids = list(session.scalars(select(AssessmentRecord.id).where(
+        AssessmentRecord.city_id == city_id,
+        AssessmentRecord.cycle_id == cycle.id,
+    )))
+    task_ids = list(session.scalars(select(ReportTask.id).where(ReportTask.cycle_id == cycle.id)))
+    report_filter = Report.cycle_id == cycle.id
+    if task_ids:
+        report_filter = or_(report_filter, Report.task_id.in_(task_ids))
+    report_rows = list(session.scalars(select(Report).where(report_filter)))
+    attachment_rows = list(session.scalars(select(Attachment).where(Attachment.record_id.in_(record_ids)))) if record_ids else []
+    storage_keys = [item.storage_key for item in attachment_rows] + [item.storage_key for item in report_rows]
+
+    if record_ids:
+        session.execute(delete(AgentRun).where(AgentRun.record_id.in_(record_ids)))
+        session.execute(delete(ReviewLog).where(ReviewLog.record_id.in_(record_ids)))
+        session.execute(delete(Attachment).where(Attachment.record_id.in_(record_ids)))
+        session.execute(delete(SurveyRecord).where(SurveyRecord.record_id.in_(record_ids)))
+        session.execute(delete(WaterQualityRecord).where(WaterQualityRecord.record_id.in_(record_ids)))
+        session.execute(delete(AssessmentScore).where(AssessmentScore.record_id.in_(record_ids)))
+        session.execute(delete(AssessmentRecord).where(AssessmentRecord.id.in_(record_ids)))
+    if task_ids:
+        session.execute(delete(AgentRun).where(AgentRun.report_task_id.in_(task_ids)))
+    report_ids = [item.id for item in report_rows]
+    if report_ids:
+        session.execute(delete(Report).where(Report.id.in_(report_ids)))
+    if task_ids:
+        session.execute(delete(ReportTask).where(ReportTask.id.in_(task_ids)))
+    session.commit()
+
+    removed_files = 0
+    for storage_key in storage_keys:
+        try:
+            removed_files += int(_remove_managed_file(storage_key))
+        except OSError:
+            continue
+    return {
+        "projectId": city_id,
+        "cycleId": cycle.id,
+        "recordCount": len(record_ids),
+        "reportCount": len(report_rows),
+        "fileCount": removed_files,
     }
 
 

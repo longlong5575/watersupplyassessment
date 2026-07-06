@@ -396,6 +396,48 @@ def main():
         ), "clear score entries")
         assert float(cleared_scores["totalScore"]) == 0
 
+        # Clearing submitted data is scoped to one project and cycle and removes
+        # dependent review/agent/report rows plus managed files.
+        adjusted_record_id = adjusted_created["recordIds"][0]
+        assert_ok(client.post(f"/api/mobile/assessment-records/{adjusted_record_id}/submit", headers=inspector), "submit clear fixture")
+        attachment = client.post(
+            f"/api/mobile/assessment-records/{adjusted_record_id}/attachments",
+            headers=inspector,
+            data={"score_id": adjusted_score["id"], "deduction_option_id": adjusted_score["deductionOptionId"] or ""},
+            files={"file": ("clear-fixture.jpg", b"clear fixture", "image/jpeg")},
+        )
+        assert_ok(attachment, "upload clear fixture")
+        assert_ok(client.post(f"/api/records/{adjusted_record_id}/review", headers=admin), "review clear fixture")
+        clear_agent = assert_ok(client.post(f"/api/agent/records/{adjusted_record_id}/analysis", headers=admin), "clear fixture agent run")
+        assert clear_agent["recordId"] == adjusted_record_id
+        clear_task = assert_ok(client.post("/api/report-tasks", headers=admin, json={
+            "source": "dashboard", "projectId": yunan["id"], "period": yunan_cycle["name"],
+            "townNames": [stress_towns[2]["name"]], "outputs": ["separate", "summary"],
+        }), "create clear fixture reports")
+        clear_result = assert_ok(client.get(f"/api/report-tasks/{clear_task['id']}"), "clear fixture report result")
+        assert clear_result["status"] == "completed"
+        from app.core.database import SessionLocal
+        from app.models import Attachment, Report
+        with SessionLocal() as session:
+            clear_report_paths = [Path(session.get(Report, item["id"]).storage_key) for item in clear_result["reports"]]
+            clear_attachment_path = Path(session.get(Attachment, attachment.json()["id"]).storage_key)
+        assert all(path.is_file() for path in [*clear_report_paths, clear_attachment_path])
+
+        wrong_scope = client.delete("/api/mobile/assessment-records", headers=inspector, params={
+            "city_id": yunan["id"], "cycle_id": maonan_cycle["id"], "period": yunan_cycle["name"],
+        })
+        assert wrong_scope.status_code == 422
+        cleared = assert_ok(client.delete("/api/mobile/assessment-records", headers=inspector, params={
+            "city_id": yunan["id"], "cycle_id": yunan_cycle["id"], "period": yunan_cycle["name"],
+        }), "clear project cycle data")
+        assert cleared["recordCount"] >= 5
+        assert cleared["reportCount"] == len(clear_result["reports"])
+        assert all(not path.exists() for path in [*clear_report_paths, clear_attachment_path])
+        after_clear = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={
+            "city_id": yunan["id"], "cycle_id": yunan_cycle["id"],
+        }), "records after project clear")
+        assert after_clear["items"] == []
+
         invalid_payload = {"cityId": yunan["id"], "cycleId": yunan_cycle["id"], "town": "金塘镇", "primaryFacilityType": "town_plant"}
         invalid = client.post("/api/mobile/assessment-records", json=invalid_payload, headers=inspector)
         assert invalid.status_code == 422

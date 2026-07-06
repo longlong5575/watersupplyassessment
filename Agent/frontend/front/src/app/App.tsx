@@ -4011,7 +4011,10 @@ function AssessmentApp() {
     loadCities();
     loadReports();
     loadDashboardTowns();
-    const timer = window.setInterval(loadDashboardTowns, 3000);
+    const timer = window.setInterval(() => {
+      loadDashboardTowns();
+      loadReports();
+    }, 3000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
