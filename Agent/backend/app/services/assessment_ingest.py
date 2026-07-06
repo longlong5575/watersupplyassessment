@@ -168,7 +168,7 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
         record.raw_payload = raw
     session.flush()
     sync_scores(session, record, raw.get("entries", []))
-    if raw.get("surveyEntries"):
+    if "surveyEntries" in raw:
         sync_surveys(session, record, raw["surveyEntries"])
     if raw.get("waterQuality"):
         sync_water_quality(session, record, raw["waterQuality"])
@@ -232,7 +232,13 @@ def _score_option(session: Session, option_entry: dict[str, Any]) -> tuple[str |
         option = session.get(DeductionOption, option_id) if option_id else None
         deduction = _to_float(option.deduction_value if option else option_entry.get("deduction"))
     deduction += _to_float(option_entry.get("adjustedScore"))
-    deduction *= max(1, int(_to_float(option_entry.get("instances"), 1)))
+    instances = max(1, int(_to_float(option_entry.get("instances"), 1)))
+    option = session.get(DeductionOption, option_id) if option_id else None
+    option_meta = option.meta if option is not None and isinstance(option.meta, dict) else {}
+    max_instances = int(_to_float(option_meta.get("maxInstances"), 0))
+    if max_instances > 0:
+        instances = min(instances, max_instances)
+    deduction *= instances
     reason = option_entry.get("note") or option_entry.get("customNote") or option_entry.get("adjustNote") or ""
     return option_id, max(deduction, 0), reason
 
@@ -250,7 +256,10 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
         options = entry.get("options") if isinstance(entry.get("options"), list) else []
         selected_options = [option for option in options if isinstance(option, dict) and option.get("selection") not in (None, "no_deduction")]
         if not selected_options:
-            legacy_deduction = _to_float(entry.get("deduction") or entry.get("deduct"))
+            legacy_deduction = min(
+                max(_to_float(entry.get("deduction") or entry.get("deduct")), 0),
+                float(indicator.full_score),
+            )
             score = AssessmentScore(
                 record_id=record.id,
                 indicator_id=indicator.id,
@@ -281,9 +290,19 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
         created.append(score)
     session.flush()
     if created:
-        total_deduction = sum(_to_float(item.deduction) for item in created)
-        record.total_score = max(0, min(100 - total_deduction, 100))
+        existing_surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)))
+        if existing_surveys:
+            apply_survey_backfill(session, record, existing_surveys)
+        recalculate_record_total(session, record)
     return created
+
+
+def recalculate_record_total(session: Session, record: AssessmentRecord) -> float:
+    session.flush()
+    scores = list(session.scalars(select(AssessmentScore).where(AssessmentScore.record_id == record.id)))
+    record.total_score = max(0, min(sum(_to_float(item.score) for item in scores), 100))
+    session.flush()
+    return float(record.total_score)
 
 
 def sync_option_photos(session: Session, record_id: str, score_id: str, deduction_option_id: str | None, option_entry: dict[str, Any]) -> None:
@@ -339,6 +358,7 @@ def sync_surveys(session: Session, record: AssessmentRecord, payload: Any) -> li
         survey_items.append(survey)
     session.flush()
     apply_survey_backfill(session, record, survey_items)
+    recalculate_record_total(session, record)
     return survey_items
 
 
@@ -396,9 +416,21 @@ def apply_survey_backfill(session: Session, record: AssessmentRecord, survey_ite
         indicator = session.get(Indicator, mapping.indicator_id)
         rule = mapping.rule if isinstance(mapping.rule, dict) else {}
         average_score = _survey_average_score(_filtered_survey_scores(matched, rule), rule)
-        if indicator is None or average_score is None:
+        expected_type = _raw_facility_type(record.raw_payload or {})
+        if (
+            indicator is None
+            or indicator.version_id != record.indicator_version_id
+            or indicator.facility_type != expected_type
+            or average_score is None
+        ):
             continue
         scaled_score = max(0, min(float(indicator.full_score), average_score / 5 * float(indicator.full_score)))
+        session.execute(
+            delete(AssessmentScore).where(
+                AssessmentScore.record_id == record.id,
+                AssessmentScore.indicator_id == indicator.id,
+            )
+        )
         session.add(
             AssessmentScore(
                 record_id=record.id,

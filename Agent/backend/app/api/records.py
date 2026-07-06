@@ -21,7 +21,7 @@ from app.models import (
     WaterQualityRecord,
 )
 from app.schemas import RecordPatch, ScorePatch
-from app.services.assessment_ingest import sync_scores, sync_surveys, sync_water_quality
+from app.services.assessment_ingest import recalculate_record_total, sync_scores, sync_surveys, sync_water_quality
 from app.services.review import review_record
 from app.services.standard_names import clean_standard_name
 
@@ -188,16 +188,22 @@ def update_record_scores(record_id: str, payload: ScorePatch, session: Session =
         score = session.get(AssessmentScore, item.id)
         if score is None:
             continue
-        if item.score is not None:
-            score.score = max(item.score, 0)
-        if item.deduction is not None:
-            score.deduction = max(item.deduction, 0)
+        indicator = session.get(Indicator, score.indicator_id)
+        full_score = float(indicator.full_score) if indicator is not None else max(float(score.score or 0) + float(score.deduction or 0), 0)
+        if item.score is not None and item.deduction is not None:
+            score.score = min(max(item.score, 0), full_score)
+            score.deduction = min(max(item.deduction, 0), full_score - float(score.score))
+        elif item.score is not None:
+            score.score = min(max(item.score, 0), full_score)
+            score.deduction = full_score - float(score.score)
+        elif item.deduction is not None:
+            score.deduction = min(max(item.deduction, 0), full_score)
+            score.score = full_score - float(score.deduction)
         if item.reason is not None:
             score.reason = item.reason
         score.source = "review"
     session.flush()
-    total = sum(float(item.score or 0) for item in record.scores)
-    record.total_score = total
+    recalculate_record_total(session, record)
     after = {
         "scores": [
             {"id": item.id, "score": float(item.score) if item.score is not None else None, "deduction": float(item.deduction), "reason": item.reason}

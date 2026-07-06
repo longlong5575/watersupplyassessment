@@ -43,9 +43,17 @@ def latest_reports(report_root: Path) -> list[Path]:
     candidates = sorted(report_root.rglob("*.docx"), key=lambda path: path.stat().st_mtime, reverse=True)
     selected: list[Path] = []
     for keyword in ("郁南", "茂南"):
-        match = next((path for path in candidates if keyword in path.name and "汇总" not in path.name), None)
-        if match:
-            selected.append(match)
+        for is_summary in (False, True):
+            match = next(
+                (
+                    path
+                    for path in candidates
+                    if keyword in path.name and (("汇总" in path.name) == is_summary)
+                ),
+                None,
+            )
+            if match:
+                selected.append(match)
     return selected
 
 
@@ -58,7 +66,7 @@ def inspect_report(path: Path) -> dict[str, object]:
     bad_tokens = [token for token in BAD_TOKENS if token in text]
     replacement_chars = text.count("\ufffd")
     sequence_errors = serial_errors(document)
-    required_sections = ["考核对象", "考核结果", "证据附件目录", "Agent辅助校验", "附录A 水质评价限值"]
+    required_sections = ["考核实施情况", "考核对象", "考核结果", "综合评价", "主要问题及扣分分析", "证据附件目录", "附录A 水质评价限值"]
     missing_sections = [item for item in required_sections if item not in text]
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
     passed = not missing and not bad_tokens and replacement_chars == 0 and not sequence_errors and not missing_sections and not weird_numbers
@@ -85,8 +93,8 @@ def main() -> None:
     result_root = runtime_root / "test-results"
     report_root = result_root / "project-pipeline" / "storage" / "generated_reports"
     reports = latest_reports(report_root)
-    if len(reports) < 2:
-        raise FileNotFoundError(f"未找到郁南和茂南两类最新版报告：{report_root}")
+    if len(reports) < 4:
+        raise FileNotFoundError(f"未找到郁南和茂南两类正文及汇总报告：{report_root}")
     items = [inspect_report(path) for path in reports]
     result = {"passed": all(item["passed"] for item in items), "items": items}
     output = result_root / "report-quality-summary.json"

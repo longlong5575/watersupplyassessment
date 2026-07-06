@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -84,12 +85,12 @@ def record_payload(*, project, cycle, town, village, facility_type, indicator, n
                 item["id"]: {
                     "itemId": item["id"],
                     "done": True,
-                    "options": [
+                    "options": ([
                         {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": note},
                         {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": "第二原因"},
-                    ],
+                    ] if item.get("deductionOptions") else []),
                 }
-                for item in indicators if item.get("deductionOptions")
+                for item in indicators
             },
         }],
     }
@@ -99,6 +100,26 @@ def record_payload(*, project, cycle, town, village, facility_type, indicator, n
             "sewage_collection_villager1": {"score": 4, "comment": "有改善", "completed": True},
         }
     return payload
+
+
+def complete_payload(*, project, cycle, town, village, facility_type, indicators):
+    return {
+        "schemaVersion": "1.0",
+        "cityId": project["id"],
+        "cycleId": cycle["id"],
+        "city": project["name"],
+        "period": cycle["name"],
+        "town": town,
+        "villages": [{
+            "village": village,
+            "primaryFacilityType": facility_type,
+            "currentScore": 100,
+            "entries": {
+                item["id"]: {"itemId": item["id"], "done": True, "options": []}
+                for item in indicators
+            },
+        }],
+    }
 
 
 def create_record(client: TestClient, headers: dict[str, str], *, project, cycle, town, village, facility_type, indicator):
@@ -123,15 +144,18 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "问卷调查（村级考核有）" in all_text
         assert "农村污水处理设施" in all_text
         assert "DB44/2208-2019" in all_text
-        assert "公众调查情况" in all_text
+        assert "公众调查分析" in all_text
     if project_name == "茂南项目":
         assert "城镇设施绩效考核报告" in all_text
         assert "水质净化厂" in all_text
         assert "问卷调查（村级考核有）" not in all_text
     assert "证据附件目录" in all_text
-    assert "Agent辅助校验" in all_text
+    assert "考核实施情况" in all_text
+    assert "综合评价" in all_text
+    assert "主要问题及扣分分析" in all_text
     assert "fixture-photo.jpg" in all_text
-    assert "已确认摘要" in all_text
+    assert "Agent辅助校验" not in all_text
+    assert "系统采集" not in all_text
     for table in document.tables:
         if not table.rows:
             continue
@@ -186,6 +210,14 @@ def main():
         ]:
             for facility_type in types:
                 standards[(project["name"], facility_type)] = leaf_standards(client, project["id"], cycle["id"], facility_type)
+
+        for _, leaves in standards.values():
+            option_names = [option["name"] for item in leaves for option in item.get("deductionOptions", [])]
+            assert not any("检查单元" in name or "抽查5个井段" in name for name in option_names), "抽检规则不应成为扣分选项"
+        maonan_network = standards[("茂南项目", "town_network")][1]
+        overflow_item = next(item for item in maonan_network if "无污水冒出" in item["name"])
+        overflow_options = [option["name"] for option in overflow_item["deductionOptions"]]
+        assert overflow_options == ["发现管道（渠箱）有污水冒出，每处扣0.2分"], overflow_options
         unit_options = [
             option
             for _, leaves in standards.values()
@@ -194,6 +226,24 @@ def main():
             if option.get("unit")
         ]
         assert unit_options and all(option.get("maxInstances") for option in unit_options)
+        all_options = [
+            option
+            for _, leaves in standards.values()
+            for item in leaves
+            for option in item.get("deductionOptions") or []
+        ]
+        assert all(option.get("name", "").strip() and float(option.get("deduction") or 0) > 0 for option in all_options)
+        count_markers = re.compile(r"每(?:缺少|发现|出现|增加|有|个|一|处|项|次|座|人|岗位)")
+        count_options = [option for option in all_options if count_markers.search(option["name"])]
+        assert count_options and all(option.get("unit") and option.get("maxInstances") for option in count_options)
+        for project_name in ("郁南项目", "茂南项目"):
+            plant_items = standards[(project_name, "town_plant")][1]
+            water_quality = next(item for item in plant_items if item["name"] == "污水处理质量")
+            full_score = float(water_quality["fullScore"])
+            assert any(
+                "判定为不合格扣" in option["name"] and float(option["deduction"]) == full_score
+                for option in water_quality["deductionOptions"]
+            )
         split_option_items = [
             item
             for _, leaves in standards.values()
@@ -202,12 +252,124 @@ def main():
         ]
         assert split_option_items
         split_options = split_option_items[0]["deductionOptions"]
-        assert split_options[0]["name"].startswith("1. ")
-        assert split_options[1]["name"].startswith("2. ")
+        assert all(not re.match(r"^\d+\.\s", option["name"]) for option in split_options)
         assert all(float(option["deduction"]) > 0 for option in split_options)
         for _, leaves in standards.values():
             for leaf in leaves:
                 INDICATOR_GROUPS[leaf["id"]] = leaves
+
+        # Scoring stress cases: full score, capped legacy input, capped counts,
+        # water-quality full deduction, survey replacement, and review overrides.
+        stress_towns = [town for town in yunan_towns if "town_plant" in town["assessmentTargets"]]
+        assert len(stress_towns) >= 4
+        plant_leaves = standards[("郁南项目", "town_plant")][1]
+
+        full_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=stress_towns[0]["name"], village="",
+            facility_type="town_plant", indicators=plant_leaves,
+        )
+        full_created = assert_ok(client.post("/api/mobile/assessment-records", json=full_payload, headers=inspector), "full-score assessment")
+        full_detail = assert_ok(client.get(f"/api/records/{full_created['recordIds'][0]}"), "full-score detail")
+        assert float(full_detail["totalScore"]) == 100
+        assert all(float(item["deduction"]) == 0 for item in full_detail["scores"])
+
+        legacy_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=stress_towns[1]["name"], village="",
+            facility_type="town_plant", indicators=plant_leaves,
+        )
+        legacy_indicator = plant_leaves[0]
+        legacy_payload["villages"][0]["entries"][legacy_indicator["id"]]["deduction"] = 999999
+        legacy_created = assert_ok(client.post("/api/mobile/assessment-records", json=legacy_payload, headers=inspector), "legacy overflow assessment")
+        legacy_detail = assert_ok(client.get(f"/api/records/{legacy_created['recordIds'][0]}"), "legacy overflow detail")
+        legacy_score = next(item for item in legacy_detail["scores"] if item["indicatorId"] == legacy_indicator["id"])
+        assert float(legacy_score["deduction"]) == float(legacy_indicator["fullScore"])
+        assert float(legacy_score["score"]) == 0
+        assert float(legacy_detail["totalScore"]) == 100 - float(legacy_indicator["fullScore"])
+
+        count_indicator = next(
+            item for item in plant_leaves
+            if any(option.get("unit") and option.get("maxInstances") for option in item.get("deductionOptions") or [])
+        )
+        count_option = next(option for option in count_indicator["deductionOptions"] if option.get("unit") and option.get("maxInstances"))
+        count_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=stress_towns[2]["name"], village="",
+            facility_type="town_plant", indicators=plant_leaves,
+        )
+        count_payload["villages"][0]["entries"][count_indicator["id"]]["options"] = [{
+            "optionId": count_option["id"], "selection": "standard",
+            "instances": int(count_option["maxInstances"]) + 1000, "note": "超量项数封顶验证",
+        }]
+        count_created = assert_ok(client.post("/api/mobile/assessment-records", json=count_payload, headers=inspector), "count overflow assessment")
+        count_detail = assert_ok(client.get(f"/api/records/{count_created['recordIds'][0]}"), "count overflow detail")
+        count_score = next(item for item in count_detail["scores"] if item["indicatorId"] == count_indicator["id"])
+        expected_count_deduction = min(
+            float(count_indicator["fullScore"]),
+            float(count_option["deduction"]) * int(count_option["maxInstances"]),
+        )
+        assert float(count_score["deduction"]) == expected_count_deduction
+
+        water_indicator = next(item for item in plant_leaves if item["name"] == "污水处理质量")
+        water_option = next(option for option in water_indicator["deductionOptions"] if float(option["deduction"]) == float(water_indicator["fullScore"]))
+        water_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=stress_towns[3]["name"], village="",
+            facility_type="town_plant", indicators=plant_leaves,
+        )
+        water_payload["villages"][0]["waterQuality"] = {
+            "sampleTime": "2026-06-30T23:59:59", "codValue": "9999", "codLimit": "40",
+            "nh3nValue": "9999", "nh3nLimit": "5", "tpValue": "9999", "tpLimit": "0.5",
+            "conclusion": "unqualified", "completed": True,
+        }
+        water_payload["villages"][0]["entries"][water_indicator["id"]]["options"] = [{
+            "optionId": water_option["id"], "selection": "standard", "instances": 1,
+            "note": "水质不合格判定：极端超限",
+        }]
+        water_created = assert_ok(client.post("/api/mobile/assessment-records", json=water_payload, headers=inspector), "water-quality assessment")
+        water_detail = assert_ok(client.get(f"/api/records/{water_created['recordIds'][0]}"), "water-quality detail")
+        water_score = next(item for item in water_detail["scores"] if item["indicatorId"] == water_indicator["id"])
+        assert float(water_score["deduction"]) == float(water_indicator["fullScore"])
+        assert float(water_detail["totalScore"]) == 100 - float(water_indicator["fullScore"])
+
+        review_score_id = legacy_score["id"]
+        reviewed_scores = assert_ok(client.put(
+            f"/api/records/{legacy_created['recordIds'][0]}/scores", headers=admin,
+            json={"scores": [{"id": review_score_id, "deduction": 999999, "reason": "后台极端改分"}], "reason": "封顶验证"},
+        ), "review score cap")
+        reviewed_item = next(item for item in reviewed_scores["scores"] if item["id"] == review_score_id)
+        assert float(reviewed_item["deduction"]) == float(reviewed_item["indicatorFullScore"])
+        assert float(reviewed_item["score"]) == 0
+        assert 0 <= float(reviewed_scores["totalScore"]) <= 100
+
+        rural_town = next(town for town in yunan_towns if town["name"] != "桂圩镇" and "rural_treatment" in town["assessmentTargets"])
+        rural_villages = assert_ok(client.get(f"/api/mobile/towns/{rural_town['id']}/villages"), "stress rural villages")["items"]
+        assert rural_villages
+        rural_leaves = standards[("郁南项目", "rural_treatment")][1]
+        survey_payload = complete_payload(
+            project=yunan, cycle=yunan_cycle, town=rural_town["name"], village=rural_villages[0]["name"],
+            facility_type="rural_treatment", indicators=rural_leaves,
+        )
+        survey_payload["villages"][0]["surveyEntries"] = {
+            f"{category}_{respondent}": {"score": score, "comment": "极端问卷回填", "completed": True}
+            for category, respondents, score in [
+                ("sewage_collection", ["villager1", "villager2", "gov_rep", "assessment_team"], 1),
+                ("overall_effect", ["villager1", "villager2", "gov_rep", "assessment_team"], 3),
+                ("satisfaction", ["villager1", "villager2", "gov_rep", "implementation_org"], 5),
+            ]
+            for respondent in respondents
+        }
+        survey_created = assert_ok(client.post("/api/mobile/assessment-records", json=survey_payload, headers=inspector), "survey backfill assessment")
+        survey_detail = assert_ok(client.get(f"/api/records/{survey_created['recordIds'][0]}"), "survey backfill detail")
+        indicator_ids = [item["indicatorId"] for item in survey_detail["scores"]]
+        assert len(indicator_ids) == len(set(indicator_ids)), "问卷回填后不应重复生成同一评分点"
+        assert set(indicator_ids) == {item["id"] for item in rural_leaves}, "问卷评分不得串用其他项目或考核对象的指标"
+        assert round(float(survey_detail["totalScore"]), 2) == round(sum(float(item["score"]) for item in survey_detail["scores"]), 2)
+        assert 0 < float(survey_detail["totalScore"]) < 100
+        survey_total = float(survey_detail["totalScore"])
+        entries_only_update = assert_ok(client.put(
+            f"/api/records/{survey_created['recordIds'][0]}", headers=admin,
+            json={"data": {"entries": survey_payload["villages"][0]["entries"]}, "reason": "仅更新评分明细"},
+        ), "preserve survey scores after entries update")
+        assert any(item["source"] == "survey" for item in entries_only_update["scores"])
+        assert round(float(entries_only_update["totalScore"]), 2) == round(survey_total, 2)
 
         invalid_payload = {"cityId": yunan["id"], "cycleId": yunan_cycle["id"], "town": "金塘镇", "primaryFacilityType": "town_plant"}
         invalid = client.post("/api/mobile/assessment-records", json=invalid_payload, headers=inspector)
@@ -306,7 +468,7 @@ def main():
             assert download.status_code == 200 and len(download.content) > 10000
 
         dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": yunan["id"]}), "dashboard")
-        assert any(item["name"] == "桂圩镇" and item["recordCount"] == 1 for item in dashboard["items"])
+        assert any(item["name"] == "桂圩镇" and item["recordCount"] >= 1 for item in dashboard["items"])
         maonan_dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": maonan["id"]}), "maonan dashboard")
         assert maonan_dashboard["overview"]["villageCount"] == 12
         print("PASS: two-project mobile -> dashboard -> review -> DOCX pipeline")

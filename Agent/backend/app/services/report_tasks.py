@@ -1,5 +1,6 @@
 import shutil
 import traceback
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,18 @@ STATUS_LABELS = {
     "locked": "已锁定",
     "submitted": "已提交",
     "draft": "草稿",
+}
+SURVEY_TYPE_LABELS = {
+    "satisfaction": "满意度调查",
+    "sewage_collection": "污水收集效果调查",
+    "overall_effect": "整体效果调查",
+}
+RESPONDENT_LABELS = {
+    "villager1": "村民代表一",
+    "villager2": "村民代表二",
+    "gov_rep": "镇街代表",
+    "assessment_team": "考核小组",
+    "implementation_org": "实施机构",
 }
 
 PROJECT_REPORT_PROFILES = {
@@ -76,7 +89,7 @@ def _prepare_document(title: str):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
-    from docx.shared import Cm, Pt
+    from docx.shared import Cm, Pt, RGBColor
 
     document = Document()
     section = document.sections[0]
@@ -88,6 +101,13 @@ def _prepare_document(title: str):
     normal.font.name = "宋体"
     normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
     normal.font.size = Pt(10.5)
+    for style_name, size in (("Heading 1", 16), ("Heading 2", 14), ("Heading 3", 12)):
+        style = document.styles[style_name]
+        style.font.name = "黑体"
+        style._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
+        style.font.size = Pt(size)
+        style.font.bold = True
+        style.font.color.rgb = RGBColor(0, 0, 0)
     heading = document.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = heading.add_run(title)
@@ -124,10 +144,13 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
                 _set_cell_text(cell, value)
 
 
-def _add_paragraph(document, text: str, *, bold_prefix: str | None = None) -> None:
+def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, indent: bool = True) -> None:
     from docx.shared import Pt
 
     paragraph = document.add_paragraph()
+    paragraph.paragraph_format.line_spacing = 1.5
+    if indent:
+        paragraph.paragraph_format.first_line_indent = Pt(21)
     if bold_prefix and text.startswith(bold_prefix):
         run = paragraph.add_run(bold_prefix)
         run.bold = True
@@ -179,6 +202,21 @@ def _record_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
+def _record_point_name(record: dict[str, Any]) -> str:
+    return record.get("village") or record.get("town") or "该项目点"
+
+
+def _format_report_time(value: Any) -> str:
+    if not value:
+        return "-"
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return text.replace("T", " ")
+
+
 def _deduction_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for record in records:
@@ -224,7 +262,7 @@ def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
             rows.append([
                 len(rows) + 1,
                 record.get("village") or record.get("town") or "-",
-                payload.get("sampleTime") or item.get("sampledAt") or "-",
+                _format_report_time(payload.get("sampleTime") or item.get("sampledAt")),
                 payload.get("codValue") or "-",
                 payload.get("codLimit") or "-",
                 payload.get("bod5Value") or "-",
@@ -247,8 +285,8 @@ def _survey_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
             rows.append([
                 len(rows) + 1,
                 record.get("village") or "-",
-                item.get("surveyType") or "-",
-                item.get("respondent") or "-",
+                SURVEY_TYPE_LABELS.get(item.get("surveyType"), item.get("surveyType") or "-"),
+                RESPONDENT_LABELS.get(item.get("respondent"), item.get("respondent") or "-"),
                 item.get("score") if item.get("score") is not None else "-",
             ])
     return rows
@@ -290,16 +328,24 @@ def _accepted_agent_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
 
 
 def _add_title_and_preface(document, *, title: str, project_name: str, cycle_name: str, town_name: str, profile: dict[str, Any]) -> None:
-    _add_paragraph(document, f"项目名称：{project_name}")
-    _add_paragraph(document, f"考核周期：{cycle_name}")
-    _add_paragraph(document, f"考核镇街：{town_name}")
-    _add_paragraph(document, f"报告类型：{profile['titleSuffix']}")
+    _add_paragraph(document, f"项目名称：{project_name}", indent=False)
+    _add_paragraph(document, f"考核周期：{cycle_name}", indent=False)
+    _add_paragraph(document, f"考核镇街：{town_name}", indent=False)
+    _add_paragraph(document, f"报告类型：{profile['titleSuffix']}", indent=False)
     document.add_paragraph("")
     document.add_heading("一、考核概况", level=1)
     _add_paragraph(document, profile["basis"])
-    _add_paragraph(document, f"本报告根据系统采集、后台复核和锁定后的数据生成，标题、章节和表格结构参照{profile['shortName']}示例报告整理。")
+    _add_paragraph(document, f"本次绩效考核以{town_name}纳入本期考核范围的污水处理设施及其配套设施为对象，通过现场检查、资料核查、水质检测和评分复核，对设施运行维护质量及管理成效进行综合评价。")
     document.add_heading("1.1 考核方法", level=2)
     _add_simple_table(document, ["序号", "工作内容"], [[index, item] for index, item in enumerate(profile["methods"], 1)])
+
+
+def _add_implementation_overview(document, town_data: dict[str, Any], records: list[dict[str, Any]]) -> None:
+    document.add_heading("二、考核实施情况", level=1)
+    types = _facility_types(records)
+    type_names = "、".join(REPORT_TYPE_LABELS.get(item, item) for item in types) or "相关污水处理设施"
+    _add_paragraph(document, f"本期考核工作围绕{type_names}展开，共形成{len(records)}条经复核的考核记录。考核组依据对应项目评分标准，对各评分点的资料完整性、现场运行状况、水质检测结果及相关佐证材料逐项核查。")
+    _add_paragraph(document, "评分过程坚持一项一据、据实评价原则；涉及按处、按项、按次扣分的内容，根据已确认数量计算扣分，并以该评分点满分为扣分上限。涉及水质不合格判定的内容，按对应标准及检测限值统一处理。")
 
 
 def _add_project_assessment_object(document, town_data: dict[str, Any], records: list[dict[str, Any]], *, heading_prefix: str) -> None:
@@ -338,58 +384,73 @@ def _add_project_results(document, records: list[dict[str, Any]], profile: dict[
     document.add_heading("三、考核结果", level=1)
     _add_simple_table(document, ["序号", "考核类型", "行政村", "设施点", "状态", "得分"], _record_score_rows(records))
 
-    document.add_heading("3.1 评分明细", level=2)
+    scores = [float(item.get("totalScore") or 0) for item in records]
+    average = sum(scores) / len(scores) if scores else 0
+    deductions = _deduction_rows(records)
+    document.add_heading("3.1 综合评价", level=2)
+    _add_paragraph(document, f"本次纳入评价的项目点共{len(records)}个，平均得分为{average:.2f}分。评分结果以后台复核确认后的记录为依据，共识别{len(deductions)}条扣分问题。")
+    for record in records:
+        point_name = _record_point_name(record)
+        raw_type = record.get("facilityType") or record.get("rawFacilityType")
+        record_deductions = [score for score in record.get("scores") or [] if float(score.get("deduction") or 0) > 0]
+        _add_paragraph(document, f"{point_name}的考核对象为{REPORT_TYPE_LABELS.get(raw_type, raw_type or '相关设施')}，本期得分为{float(record.get('totalScore') or 0):.2f}分，共记录{len(record_deductions)}项扣分。评价结果反映了本期已提交并经复核资料所对应的运行维护和管理情况。")
+
+    document.add_heading("3.2 评分明细", level=2)
     score_rows = _all_score_rows(records)
     if score_rows:
         _add_simple_table(document, ["序号", "项目点", "指标编号", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows)
     else:
         _add_paragraph(document, "本次系统数据未记录完整评分明细。")
 
-    document.add_heading("3.2 扣分问题汇总", level=2)
-    deductions = _deduction_rows(records)
+    document.add_heading("3.3 主要问题及扣分分析", level=2)
     if deductions:
+        _add_paragraph(document, "经逐项核查，扣分问题主要分布在下列评分条目。各项扣分均对应已确认的评分记录，具体问题及扣分情况如下。")
         _add_simple_table(document, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"], deductions)
+        grouped: dict[str, float] = {}
+        for row in deductions:
+            grouped[str(row[2])] = grouped.get(str(row[2]), 0) + float(row[4] or 0)
+        leading = sorted(grouped.items(), key=lambda item: item[1], reverse=True)[:5]
+        _add_paragraph(document, "从扣分分布看，主要问题集中在" + "、".join(f"{name}（累计扣{score:.2f}分）" for name, score in leading) + "。后续整改应结合评分依据、现场佐证和责任分工逐项闭环。")
     else:
-        _add_paragraph(document, "本次已复核数据未记录扣分项。")
+        _add_paragraph(document, "本次已复核数据未记录扣分项。现有资料反映各评分点满足本期考核要求，后续仍应保持运行维护资料和现场管理记录完整。")
 
     if profile.get("hasSurvey"):
-        document.add_heading("3.3 公众调查情况", level=2)
+        document.add_heading("3.4 公众调查分析", level=2)
         rows = _survey_rows(records)
         if rows:
+            survey_scores = [float(row[4]) for row in rows if isinstance(row[4], (int, float))]
+            survey_average = sum(survey_scores) / len(survey_scores) if survey_scores else 0
+            _add_paragraph(document, f"本期共纳入{len(rows)}份有效调查记录，平均得分为{survey_average:.2f}分。调查结果作为污水收集效果、整体效果及满意度相关评分的评价依据之一。")
             _add_simple_table(document, ["序号", "设施点", "调查类型", "对象", "得分"], rows)
         else:
             _add_paragraph(document, "本次系统数据未记录公众调查表；农村设施正式报告可在补充问卷后自动纳入。")
 
-    document.add_heading("3.4 水质抽检情况", level=2)
+    water_heading = "3.5 水质抽检分析" if profile.get("hasSurvey") else "3.4 水质抽检分析"
+    document.add_heading(water_heading, level=2)
     rows = _water_quality_rows(records)
     if rows:
+        qualified = sum(1 for row in rows if row[-1] == "达标")
+        _add_paragraph(document, f"本期共记录{len(rows)}组水质抽检数据，其中{qualified}组判定为达标、{len(rows) - qualified}组判定为不达标或待判定。各指标实测值与对应排放限值的比对结果如下。")
         _add_simple_table(document, ["序号", "项目点", "取样时间", "CODCr实测", "CODCr限值", "BOD5实测", "BOD5限值", "SS实测", "SS限值", "NH3-N实测", "NH3-N限值", "TP实测", "TP限值", "结论"], rows)
     else:
         _add_paragraph(document, "本次系统数据未记录水质抽检实测值；报告附录仍列示对应项目水质限值。")
 
-    document.add_heading("3.5 证据附件目录", level=2)
+    attachment_heading = "3.6 证据附件目录" if profile.get("hasSurvey") else "3.5 证据附件目录"
+    document.add_heading(attachment_heading, level=2)
     attachment_rows = _attachment_rows(records)
     if attachment_rows:
         _add_simple_table(document, ["序号", "设施点", "文件名", "评分记录", "扣分项", "大小"], attachment_rows)
     else:
         _add_paragraph(document, "本次系统数据未记录现场照片或附件。")
 
-    document.add_heading("3.6 Agent辅助校验", level=2)
-    agent_rows = _accepted_agent_rows(records)
-    if agent_rows:
-        _add_simple_table(document, ["序号", "设施点", "能力", "置信度", "已确认摘要"], agent_rows)
-    else:
-        _add_paragraph(document, "本次报告未采用已确认的 Agent 辅助段落；分数、扣分和结论均来自后台确定性数据。")
-
-
 def _add_project_conclusion_and_appendix(document, records: list[dict[str, Any]], profile: dict[str, Any]) -> None:
     scores = [float(item.get("totalScore") or 0) for item in records]
     average = sum(scores) / len(scores) if scores else 0
     document.add_heading("四、结论与建议", level=1)
-    _add_paragraph(document, f"本次纳入报告的复核记录共{len(records)}条，平均得分为{average:.2f}分。最终结论以主管部门复核确认结果为准。")
+    _add_paragraph(document, f"综合现场检查、资料核查、水质检测及评分复核结果，本次纳入报告的考核记录共{len(records)}条，平均得分为{average:.2f}分。最终考核结果以主管部门确认意见为准。")
     deductions = _deduction_rows(records)
     if deductions:
-        _add_paragraph(document, f"本期共形成{len(deductions)}条扣分明细，建议后续整改台账按评分条目、现场佐证和复核意见逐项闭环。")
+        _add_paragraph(document, f"本期共形成{len(deductions)}条扣分明细。建议项目实施单位对照评分标准建立整改台账，明确责任人、整改措施和完成时限；对运行记录、维护台账和现场管理类问题及时补正，对水质和设施运行类问题持续跟踪复核，形成问题发现、整改落实和复核销号的闭环管理。")
     else:
         _add_paragraph(document, "本期未形成扣分明细，建议继续保持运行维护资料、现场巡查和水质检测记录完整归档。")
 
@@ -404,6 +465,7 @@ def _generate_town_document(project_name: str, cycle_name: str, town_data: dict[
     title = f"{project_name}{town_name}{cycle_name}{profile['titleSuffix']}"
     document = _prepare_document(title)
     _add_title_and_preface(document, title=title, project_name=project_name, cycle_name=cycle_name, town_name=town_name, profile=profile)
+    _add_implementation_overview(document, town_data, records)
     _add_project_assessment_object(document, town_data, records, heading_prefix="二")
     _add_project_results(document, records, profile)
     _add_project_conclusion_and_appendix(document, records, profile)
@@ -412,22 +474,35 @@ def _generate_town_document(project_name: str, cycle_name: str, town_data: dict[
 
 def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dict[str, Any]):
     profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
-    document = _prepare_document(f"{project_name}{cycle_name}{profile['titleSuffix']}汇总报告")
-    _add_paragraph(document, f"项目名称：{project_name}")
-    _add_paragraph(document, f"考核周期：{cycle_name}")
-    document.add_heading("一、考核范围", level=1)
+    title = f"{project_name}{cycle_name}{profile['titleSuffix']}汇总报告"
+    document = _prepare_document(title)
+    _add_title_and_preface(
+        document,
+        title=title,
+        project_name=project_name,
+        cycle_name=cycle_name,
+        town_name="全项目",
+        profile=profile,
+    )
+    all_records = snapshot.get("records") or []
+    towns = snapshot.get("towns") or []
+    document.add_heading("二、考核实施情况", level=1)
     _add_paragraph(document, profile["basis"])
-    document.add_heading("二、考核对象与结果汇总", level=1)
+    _add_paragraph(
+        document,
+        f"本次汇总覆盖{len(towns)}个镇街、{len(all_records)}个已提交并经复核的考核对象。"
+        f"考核采用{'、'.join(profile['methods'])}等方式，对各镇街和项目点的评分资料进行汇总分析。",
+    )
+    document.add_heading("2.1 考核对象与范围", level=2)
     rows = []
-    for index, town in enumerate(snapshot.get("towns") or [], 1):
-        records = [item for item in snapshot.get("records") or [] if item.get("town") == town["town"]]
+    for index, town in enumerate(towns, 1):
+        records = [item for item in all_records if item.get("town") == town["town"]]
         scores = [float(item.get("totalScore") or 0) for item in records]
         types = "、".join(REPORT_TYPE_LABELS.get(item, item) for item in (town.get("assessmentTargets") or _facility_types(records)))
         rows.append([index, town["town"], town.get("chapterCode") or "-", types, len(records), f"{(sum(scores) / len(scores) if scores else 0):.2f}"])
     _add_simple_table(document, ["序号", "镇街", "章节号", "考核对象", "记录数", "平均得分"], rows)
-    document.add_heading("附录A 水质评价限值", level=1)
-    _add_paragraph(document, profile["waterStandard"])
-    _add_simple_table(document, ["序号", "对象", "指标", "限值", "单位"], [[index, *row] for index, row in enumerate(profile["waterRows"], 1)])
+    _add_project_results(document, all_records, profile)
+    _add_project_conclusion_and_appendix(document, all_records, profile)
     return document
 
 

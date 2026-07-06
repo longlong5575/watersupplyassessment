@@ -904,7 +904,7 @@ function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Repor
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="生成绩效考核报告" breadcrumbs={["生成报告"]} />
-      <div className="px-8 py-6 max-w-5xl space-y-6">
+      <div className="w-full px-8 py-6 space-y-6">
 
         {/* Hero card */}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
@@ -1113,7 +1113,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="资料包上传" breadcrumbs={["数据上传", "资料包上传"]} />
-      <div className="px-8 py-6 max-w-3xl space-y-5">
+      <div className="w-full px-8 py-6 space-y-5">
 
         {/* Upload zone */}
         <div className="bg-card border border-border rounded-lg">
@@ -1464,7 +1464,7 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="确认生成" breadcrumbs={dataSource === "mobile" ? ["生成报告", "使用数据看板数据", "确认生成"] : ["生成报告", "资料包上传", "确认生成"]} />
-      <div className="px-8 py-6 max-w-3xl space-y-5">
+      <div className="w-full px-8 py-6 space-y-5">
 
         {/* Summary card */}
         <div className="bg-card border border-border rounded-lg">
@@ -1707,7 +1707,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
     <div className="flex-1 overflow-y-auto">
       <TopBar title="自动生成进度" breadcrumbs={["生成报告", "自动生成进度"]} />
       <div className="px-8 py-6">
-        <div className="grid grid-cols-[1fr_300px] gap-5 max-w-5xl">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_300px] gap-5">
 
           {/* Steps */}
           <div className="bg-card border border-border rounded-lg">
@@ -1884,7 +1884,7 @@ function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, 
     <div className="flex-1 overflow-y-auto">
       <TopBar title="报告已生成" breadcrumbs={["生成报告", "成品报告结果"]} />
       <div className="px-8 py-6">
-        <div className="grid grid-cols-[1fr_260px] gap-5 max-w-5xl">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_260px] gap-5">
 
           {/* Main */}
           <div className="space-y-5">
@@ -2028,7 +2028,7 @@ function HistoryPage({ onNav, reports, onPreviewReport }: { onNav: (p: Page) => 
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="历史报告" subtitle="全部生成记录" breadcrumbs={["历史报告"]} />
-      <div className="px-8 py-6 max-w-5xl space-y-4">
+      <div className="w-full px-8 py-6 space-y-4">
 
         {/* Filters */}
         <div className="flex items-center justify-between">
@@ -2388,7 +2388,7 @@ function StandardsPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="评分标准管理" subtitle="维护项目评分条目、满分和扣分规则" breadcrumbs={["标准管理"]} />
-      <div className="px-8 py-6 grid grid-cols-[320px_1fr] gap-5 max-w-6xl">
+      <div className="grid w-full grid-cols-[320px_minmax(0,1fr)] gap-5 px-8 py-6">
         {notice && <div className="col-span-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">{notice}</div>}
         <div className="bg-card border border-border rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-border">
@@ -2714,7 +2714,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="数据复核" breadcrumbs={["数据复核"]} />
-      <div className="px-8 py-6 max-w-6xl">
+      <div className="w-full px-8 py-6">
         {townFilter && (
           <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
             <div>
@@ -3484,7 +3484,7 @@ function TownDetailPage({ town, onNav }: { town: TownSurvey | null; onNav: (p: P
         breadcrumbs={["数据看板", "评分详情"]}
         subtitle="报告周期：2023年下半年度"
       />
-      <div className="px-8 py-6 max-w-5xl space-y-5">
+      <div className="w-full px-8 py-6 space-y-5">
 
         {!selectedFacilityLabel && (
           <div className="rounded-lg border border-yellow-200 bg-[var(--status-warning-bg)] px-5 py-3">
@@ -3728,7 +3728,7 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="数据上传" breadcrumbs={["数据上传"]} />
-      <div className="px-8 py-10 max-w-2xl">
+      <div className="w-full px-8 py-10">
         <p className="text-sm text-muted-foreground mb-6">请选择本次数据来源方式</p>
         <div className="space-y-4">
           {options.map(opt => {
@@ -3836,7 +3836,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="使用数据看板数据" breadcrumbs={["生成报告", "使用数据看板数据"]} />
-      <div className="px-8 py-6 max-w-3xl space-y-5">
+      <div className="w-full px-8 py-6 space-y-5">
 
         <div className="bg-card border border-border rounded-lg px-6 py-4">
           <label className="block text-sm font-semibold text-foreground mb-2">报告所属项目</label>
@@ -4159,7 +4159,7 @@ function AssessmentApp() {
           setPage("home");
         }}
       />
-      <main className="flex-1 flex flex-col overflow-hidden bg-background">
+      <main className="min-w-0 flex-1 flex flex-col overflow-hidden bg-background">
         {renderPage()}
       </main>
       {previewReport && <ReportPreviewModal report={previewReport} onClose={() => setPreviewReport(null)} />}
