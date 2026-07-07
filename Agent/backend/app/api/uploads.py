@@ -25,8 +25,8 @@ def upload(file: UploadFile = File(...), session: Session = Depends(get_session)
 def download_attachment(attachment_id: str, session: Session = Depends(get_session)):
     attachment = session.get(Attachment, attachment_id)
     if attachment is None:
-        raise HTTPException(status_code=404, detail="Attachment not found")
+        raise HTTPException(status_code=404, detail="未找到附件")
     path = Path(attachment.storage_key)
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="Attachment file is missing")
+        raise HTTPException(status_code=404, detail="附件文件不存在")
     return FileResponse(path, filename=attachment.filename, media_type=attachment.content_type)

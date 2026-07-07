@@ -33,7 +33,7 @@ def summarize(payload: dict[str, Any]):
 def analyze_record(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     record = session.get(AssessmentRecord, record_id)
     if record is None:
-        raise HTTPException(status_code=404, detail="Record not found")
+        raise HTTPException(status_code=404, detail="未找到考核记录")
     return serialize_agent_run(create_record_agent_run(session, record))
 
 
@@ -51,7 +51,7 @@ def record_runs(record_id: str, session: Session = Depends(get_session)):
 def analyze_report_task(task_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     task = session.get(ReportTask, task_id)
     if task is None:
-        raise HTTPException(status_code=404, detail="Report task not found")
+        raise HTTPException(status_code=404, detail="未找到报告任务")
     return serialize_agent_run(create_report_task_agent_run(session, task))
 
 
@@ -69,5 +69,5 @@ def report_task_runs(task_id: str, session: Session = Depends(get_session)):
 def confirm_run(run_id: str, payload: AgentConfirmation, session: Session = Depends(get_session), user=Depends(admin_user)):
     run = session.get(AgentRun, run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="Agent run not found")
+        raise HTTPException(status_code=404, detail="未找到智能分析记录")
     return serialize_agent_run(confirm_agent_run(session, run, accepted=payload.accepted, user_id=user.id))

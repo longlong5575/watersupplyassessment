@@ -49,7 +49,7 @@ def list_versions(city_id: str | None = None, cycle_id: str | None = None, sessi
 def get_version(version_id: str, session: Session = Depends(get_session)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
-        raise HTTPException(status_code=404, detail="Indicator version not found")
+        raise HTTPException(status_code=404, detail="未找到评分标准版本")
     indicators = list(session.scalars(select(Indicator).where(Indicator.version_id == version.id, Indicator.enabled.is_(True)).order_by(Indicator.sort_order)).all())
     option_map = {item.id: [] for item in indicators}
     if option_map:
@@ -90,7 +90,7 @@ def get_version(version_id: str, session: Session = Depends(get_session)):
 def update_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
-        raise HTTPException(status_code=404, detail="Indicator version not found")
+        raise HTTPException(status_code=404, detail="未找到评分标准版本")
     name = str(payload.get("name") or "").strip()
     if name:
         version.name = name
@@ -109,7 +109,7 @@ def update_version(version_id: str, payload: dict, session: Session = Depends(ge
             try:
                 indicator.full_score = max(float(raw_item.get("fullScore") or 0), 0)
             except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail="Invalid full score")
+                raise HTTPException(status_code=400, detail="满分值无效")
 
         options = {
             option.id: option
@@ -125,7 +125,7 @@ def update_version(version_id: str, payload: dict, session: Session = Depends(ge
                 try:
                     option.deduction_value = max(float(raw_option.get("deductionValue") or 0), 0)
                 except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail="Invalid deduction value")
+                    raise HTTPException(status_code=400, detail="扣分值无效")
             if "requiresPhoto" in raw_option:
                 option.requires_photo = bool(raw_option.get("requiresPhoto"))
 
@@ -136,7 +136,7 @@ def update_version(version_id: str, payload: dict, session: Session = Depends(ge
 @router.post("/{version_id}/clone")
 def clone_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
     source = session.get(IndicatorVersion, version_id)
-    if source is None: raise HTTPException(status_code=404, detail="Indicator version not found")
+    if source is None: raise HTTPException(status_code=404, detail="未找到评分标准版本")
     target = IndicatorVersion(city_id=source.city_id, cycle_id=source.cycle_id, name=payload.get("name", f"{source.name}副本"), status="draft")
     session.add(target)
     session.flush()
@@ -156,9 +156,9 @@ def clone_version(version_id: str, payload: dict, session: Session = Depends(get
 def publish_version(version_id: str, session: Session = Depends(get_session)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
-        raise HTTPException(status_code=404, detail="Indicator version not found")
+        raise HTTPException(status_code=404, detail="未找到评分标准版本")
     if version.locked:
-        raise HTTPException(status_code=409, detail="Locked version cannot be published")
+        raise HTTPException(status_code=409, detail="已锁定的评分标准版本不能发布")
     for existing in session.scalars(
         select(IndicatorVersion).where(
             IndicatorVersion.city_id == version.city_id,
@@ -179,7 +179,7 @@ def publish_version(version_id: str, session: Session = Depends(get_session)):
 def lock_version(version_id: str, session: Session = Depends(get_session)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
-        raise HTTPException(status_code=404, detail="Indicator version not found")
+        raise HTTPException(status_code=404, detail="未找到评分标准版本")
     version.status = "locked"
     version.locked = True
     session.commit()

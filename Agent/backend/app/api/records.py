@@ -126,7 +126,7 @@ def list_records(status: str | None = None, town: str | None = None, risk: str |
 @router.get("/api/records/{record_id}")
 def get_record(record_id: str, session: Session = Depends(get_session)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     data = serialize(record, session)
     data["surveys"] = [
         {"id": item.id, "surveyType": item.survey_type, "respondent": item.respondent, "score": item.score, "payload": item.payload}
@@ -157,8 +157,8 @@ def get_record(record_id: str, session: Session = Depends(get_session)):
 @router.put("/api/records/{record_id}")
 def update_record(record_id: str, payload: RecordPatch, session: Session = Depends(get_session), user=Depends(admin_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     record.raw_payload = {**record.raw_payload, **payload.data}
     if "entries" in payload.data:
         sync_scores(session, record, payload.data["entries"])
@@ -174,8 +174,8 @@ def update_record(record_id: str, payload: RecordPatch, session: Session = Depen
 @router.put("/api/records/{record_id}/scores")
 def update_record_scores(record_id: str, payload: ScorePatch, session: Session = Depends(get_session), user=Depends(admin_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     before = {
         "scores": [
             {"id": item.id, "score": float(item.score) if item.score is not None else None, "deduction": float(item.deduction), "reason": item.reason}
@@ -185,7 +185,7 @@ def update_record_scores(record_id: str, payload: ScorePatch, session: Session =
     score_ids = {item.id for item in record.scores}
     for item in payload.scores:
         if item.id not in score_ids:
-            raise HTTPException(status_code=422, detail=f"Score {item.id} does not belong to this record")
+            raise HTTPException(status_code=422, detail=f"评分项 {item.id} 不属于当前考核记录")
         score = session.get(AssessmentScore, item.id)
         if score is None:
             continue
@@ -220,8 +220,8 @@ def update_record_scores(record_id: str, payload: ScorePatch, session: Session =
 @router.delete("/api/records/{record_id}")
 def delete_record(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能删除")
     session.delete(record)
     session.commit()
     return {"id": record_id, "deleted": True}

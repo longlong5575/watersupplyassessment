@@ -135,7 +135,7 @@ def villages(town_id: str, city_id: str | None = None, session: Session = Depend
         if city_id:
             statement = statement.where(Town.city_id == city_id)
         town = session.scalar(statement)
-    if town is None: raise HTTPException(status_code=404, detail="Town not found")
+    if town is None: raise HTTPException(status_code=404, detail="未找到所选镇街")
     statement = select(Village).where(Village.town_id == town.id, Village.is_active.is_(True)).order_by(Village.sort_order, Village.name)
     return {"items": [{
         "id": village.id,
@@ -315,8 +315,8 @@ def clear_mobile_records(
 @router.put("/assessment-records/{record_id}/scores")
 def update_scores(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     entries = payload.get("entries", payload)
     record.raw_payload = {**record.raw_payload, "entries": entries}
     sync_scores(session, record, entries)
@@ -327,8 +327,8 @@ def update_scores(record_id: str, payload: dict[str, Any], session: Session = De
 @router.put("/assessment-records/{record_id}/surveys")
 def update_surveys(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     record.raw_payload = {**record.raw_payload, "surveyEntries": payload}
     sync_surveys(session, record, payload)
     session.commit()
@@ -338,8 +338,8 @@ def update_surveys(record_id: str, payload: dict[str, Any], session: Session = D
 @router.put("/assessment-records/{record_id}/water-quality")
 def update_water_quality(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     record.raw_payload = {**record.raw_payload, "waterQuality": payload}
     sync_water_quality(session, record, payload)
     session.commit()
@@ -356,12 +356,12 @@ def upload_attachment(
     user: User = Depends(current_user),
 ):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     if score_id and not any(score.id == score_id for score in record.scores):
-        raise HTTPException(status_code=422, detail="Score not found for this record")
+        raise HTTPException(status_code=422, detail="当前考核记录中未找到对应评分项")
     if deduction_option_id and session.get(DeductionOption, deduction_option_id) is None:
-        raise HTTPException(status_code=422, detail="Deduction option not found")
+        raise HTTPException(status_code=422, detail="未找到对应扣分选项")
     storage_key, size = save_upload(file, "attachments")
     attachment = Attachment(record_id=record_id, score_id=score_id, deduction_option_id=deduction_option_id, filename=file.filename or "attachment", storage_key=storage_key, content_type=file.content_type, size=size)
     session.add(attachment)
@@ -372,8 +372,8 @@ def upload_attachment(
 @router.post("/assessment-records/{record_id}/submit")
 def submit_record(record_id: str, session: Session = Depends(get_session), user: User = Depends(current_user)):
     record = session.get(AssessmentRecord, record_id)
-    if record is None: raise HTTPException(status_code=404, detail="Record not found")
-    if record.status == "locked": raise HTTPException(status_code=409, detail="Record is locked")
+    if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
+    if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     try:
         mark_record_submitted(session, record)
     except ValueError as exc:

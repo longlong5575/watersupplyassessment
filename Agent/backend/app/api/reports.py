@@ -72,7 +72,7 @@ def docx_preview(path: Path) -> dict:
     try:
         document = Document(path)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="Report preview failed") from exc
+        raise HTTPException(status_code=422, detail="报告预览失败，请确认报告文件未损坏") from exc
 
     paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
     tables = []
@@ -120,18 +120,18 @@ def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tupl
             fallback_query = fallback_query.where(AssessmentCycle.city_id == project.id)
         cycle = session.scalar(fallback_query)
     if payload.projectId and project is None:
-        raise HTTPException(status_code=422, detail="Project not found")
+        raise HTTPException(status_code=422, detail="未找到所选项目")
     task_payload = payload.model_dump()
     task_payload["period"] = cycle.name if cycle is not None else payload.period.strip()
     if payload.townIds:
         towns = session.scalars(select(Town).where(Town.id.in_(payload.townIds))).all()
         if project and any(town.city_id != project.id for town in towns):
-            raise HTTPException(status_code=422, detail="Selected towns do not belong to the project")
+            raise HTTPException(status_code=422, detail="所选镇街不属于当前项目")
         task_payload["townNames"] = sorted({*payload.townNames, *(town.name for town in towns)})
     elif project and payload.townNames:
         valid_names = set(session.scalars(select(Town.name).where(Town.city_id == project.id, Town.name.in_(payload.townNames))).all())
         if valid_names != set(payload.townNames):
-            raise HTTPException(status_code=422, detail="Selected towns do not belong to the project")
+            raise HTTPException(status_code=422, detail="所选镇街不属于当前项目")
     return project, cycle, task_payload
 
 
@@ -156,14 +156,14 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
     available = {item.get("town") for item in snapshot.get("towns", [])}
     missing = sorted(name for name in requested if name not in available)
     if missing:
-        errors.append("No reviewed or locked data for: " + ", ".join(missing))
+        errors.append("以下镇街缺少已复核或已锁定数据：" + "、".join(missing))
     for town in snapshot.get("towns", []):
         if town.get("waterQualityCount", 0) <= 0:
-            warnings.append(f"{town.get('town')} has no water quality record.")
+            warnings.append(f"{town.get('town')}缺少水质抽检记录。")
         if town.get("surveyCount", 0) <= 0:
-            warnings.append(f"{town.get('town')} has no survey record.")
+            warnings.append(f"{town.get('town')}缺少问卷记录。")
         if town.get("attachmentCount", 0) <= 0:
-            warnings.append(f"{town.get('town')} has no attachment.")
+            warnings.append(f"{town.get('town')}缺少附件材料。")
     return {
         "ok": not errors,
         "errors": errors,
@@ -217,7 +217,7 @@ def create_task(payload: ReportTaskRequest, session: Session = Depends(get_sessi
 @router.get("/api/report-tasks/{task_id}")
 def get_task(task_id: str, session: Session = Depends(get_session)):
     task = session.get(ReportTask, task_id)
-    if task is None: raise HTTPException(status_code=404, detail="Report task not found")
+    if task is None: raise HTTPException(status_code=404, detail="未找到报告任务")
     reports = session.scalars(select(Report).where(Report.task_id == task.id)).all()
     return serialize_task(task, list(reports))
 
@@ -239,28 +239,28 @@ def reports(session: Session = Depends(get_session)):
 @router.get("/api/reports/{report_id}/download")
 def download(report_id: str, session: Session = Depends(get_session)):
     report = session.get(Report, report_id)
-    if report is None: raise HTTPException(status_code=404, detail="Report not found")
+    if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)
-    if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
+    if not path.is_file(): raise HTTPException(status_code=404, detail="报告文件不存在")
     return FileResponse(path, filename=path.name)
 
 
 @router.get("/api/reports/{report_id}/preview")
 def preview(report_id: str, session: Session = Depends(get_session)):
     report = session.get(Report, report_id)
-    if report is None: raise HTTPException(status_code=404, detail="Report not found")
+    if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)
-    if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
-    if path.suffix.lower() != ".docx": raise HTTPException(status_code=415, detail="Only DOCX reports can be previewed")
+    if not path.is_file(): raise HTTPException(status_code=404, detail="报告文件不存在")
+    if path.suffix.lower() != ".docx": raise HTTPException(status_code=415, detail="只能预览 DOCX 格式报告")
     return {"report": serialize_report(report), "content": docx_preview(path)}
 
 
 @router.post("/api/reports/{report_id}/open-folder")
 def open_report_folder(report_id: str, session: Session = Depends(get_session)):
     report = session.get(Report, report_id)
-    if report is None: raise HTTPException(status_code=404, detail="Report not found")
+    if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)
-    if not path.is_file(): raise HTTPException(status_code=404, detail="Report file is missing")
+    if not path.is_file(): raise HTTPException(status_code=404, detail="报告文件不存在")
     folder = path.parent
     try:
         if sys.platform.startswith("win"):
@@ -270,5 +270,5 @@ def open_report_folder(report_id: str, session: Session = Depends(get_session)):
         else:
             subprocess.Popen(["xdg-open", str(folder)])
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Report folder could not be opened") from exc
+        raise HTTPException(status_code=500, detail="无法打开报告所在文件夹") from exc
     return {"ok": True, "folder": str(folder)}

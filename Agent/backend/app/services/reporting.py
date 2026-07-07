@@ -20,7 +20,7 @@ def _report_project_root() -> Path:
     ):
         if (candidate / SCRIPT_SUFFIX).is_file():
             return candidate
-    raise FileNotFoundError(f"Official report generator was not found below: {settings.project_root}")
+    raise FileNotFoundError(f"未在项目目录下找到正式报告生成器：{settings.project_root}")
 
 
 def _backend_storage_dir() -> Path:
@@ -52,5 +52,5 @@ def generate_official_reports(town_names: set[str] | None = None, include_summar
     )
     if completed.returncode:
         detail = (completed.stderr or completed.stdout).strip()
-        raise RuntimeError(detail or "Official report generation failed.")
+        raise RuntimeError(detail or "正式报告生成失败。")
     return output_dir

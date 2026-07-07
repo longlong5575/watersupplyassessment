@@ -236,13 +236,13 @@ def build_report_dataset(
 
 def validate_report_dataset(snapshot: dict[str, Any]) -> None:
     if not snapshot.get("records"):
-        raise RuntimeError("No reviewed or locked assessment records are available for report generation.")
+        raise RuntimeError("没有可用于生成报告的已复核或已锁定考核记录。")
     missing_versions = [item["id"] for item in snapshot["records"] if not item.get("indicatorVersionId")]
     if missing_versions:
-        raise RuntimeError("Report generation requires every record to bind an indicator version.")
+        raise RuntimeError("生成报告前，每条考核记录都需要绑定评分标准版本。")
     missing_scores = [item["id"] for item in snapshot["records"] if item.get("scoreCount", 0) <= 0]
     if missing_scores:
-        raise RuntimeError("Report generation requires at least one score detail for every selected record.")
+        raise RuntimeError("生成报告前，每条已选择记录都至少需要一条评分明细。")
     incomplete = [item["id"] for item in snapshot["records"] if any(not entry.get("done") for entry in ((item.get("rawPayload") or {}).get("entries") or {}).values())]
     if incomplete:
-        raise RuntimeError("Report generation requires all scoring items to be checked.")
+        raise RuntimeError("生成报告前，所有评分项都需要完成检查。")

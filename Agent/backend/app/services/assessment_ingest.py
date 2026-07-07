@@ -138,16 +138,16 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
     version = resolve_indicator_version(session, raw, city.id, cycle.id)
     facility_type = _raw_facility_type(raw)
     if facility_type not in (town.assessment_targets or []):
-        raise ValueError("The selected assessment type is not configured for this town")
+        raise ValueError("当前镇街未配置所选考核类型")
     if facility_type == "rural_treatment" and village is None:
-        raise ValueError("A rural treatment assessment requires a valid village facility")
+        raise ValueError("农村污水处理设施考核必须选择有效的村级项目点")
     if facility_type != "rural_treatment" and village is not None:
-        raise ValueError("Town plant and network assessments must not bind a village")
+        raise ValueError("镇污水厂和镇污水收集管网考核不能绑定村级项目点")
     if version is None:
-        raise ValueError("A published indicator version is required")
+        raise ValueError("需要先发布对应评分标准版本")
     record = find_existing_record(session, raw, city.id, cycle.id, town.id, village.id if village else None, version.id if version else None)
     if record is not None and record.status == "locked":
-        raise ValueError("Assessment record is locked")
+        raise ValueError("考核记录已锁定，不能修改")
     requested_status = raw.get("status")
     next_status = requested_status if requested_status in {"draft", "submitted"} else "draft"
     if record is None:
@@ -429,6 +429,8 @@ def apply_survey_backfill(session: Session, record: AssessmentRecord, survey_ite
             indicator is None
             or indicator.version_id != record.indicator_version_id
             or indicator.facility_type != expected_type
+            or indicator.level != 3
+            or not indicator.enabled
             or average_score is None
         ):
             continue
@@ -479,7 +481,7 @@ def sync_water_quality(session: Session, record: AssessmentRecord, payload: Any)
 
 def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecord:
     if record.status == "locked":
-        raise ValueError("Assessment record is locked")
+        raise ValueError("考核记录已锁定，不能修改")
     if record.status == "reviewed":
         raise ValueError("Reviewed records must be returned before resubmission")
     facility_type = _raw_facility_type(record.raw_payload or {})
@@ -498,7 +500,7 @@ def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecor
     }
     missing_ids = expected_ids - completed_ids
     if missing_ids:
-        raise ValueError(f"Assessment has {len(missing_ids)} unchecked scoring items")
+        raise ValueError(f"还有 {len(missing_ids)} 个评分项未完成检查")
     if expected_ids and {score.indicator_id for score in record.scores} != expected_ids:
         raise ValueError("Assessment score details are incomplete")
     record.status = "submitted"

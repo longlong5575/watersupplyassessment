@@ -15,7 +15,7 @@ def login(payload: dict, session: Session = Depends(get_session)):
     username = payload.get("username", "")
     user = session.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
     if user is None:
-        raise HTTPException(status_code=401, detail="Invalid account")
+        raise HTTPException(status_code=401, detail="账号无效")
     return {"token": f"dev-{user.id}", "user": {"id": user.id, "name": user.display_name, "role": user.role}}
 
 

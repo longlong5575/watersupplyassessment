@@ -11,7 +11,7 @@ def current_user(authorization: str | None = Header(default=None), session: Sess
     user_id = authorization.removeprefix("Bearer dev-")
     user = session.get(User, user_id)
     if user is None or not user.is_active:
-        raise HTTPException(status_code=401, detail="Invalid account")
+        raise HTTPException(status_code=401, detail="账号无效")
     return user
 
 

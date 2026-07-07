@@ -39,6 +39,52 @@ RESPONDENT_LABELS = {
     "implementation_org": "实施机构",
 }
 
+REPORT_BODY_FONT = "宋体"
+REPORT_HEADING_FONT = "黑体"
+REPORT_LATIN_FONT = "Times New Roman"
+REPORT_BODY_SIZE_PT = 10.5
+REPORT_TABLE_SIZE_PT = 9
+REPORT_BODY_LINE_SPACING_PT = 24
+
+
+def _apply_run_font(run, font_name: str, size_pt: float, *, bold: bool | None = None) -> None:
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    run.font.name = font_name
+    run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+    run._element.rPr.rFonts.set(qn("w:ascii"), REPORT_LATIN_FONT)
+    run._element.rPr.rFonts.set(qn("w:hAnsi"), REPORT_LATIN_FONT)
+    run.font.size = Pt(size_pt)
+    if bold is not None:
+        run.bold = bold
+
+
+def _apply_paragraph_format(paragraph, *, indent: bool = False, table: bool = False) -> None:
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.shared import Pt
+
+    fmt = paragraph.paragraph_format
+    fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    fmt.line_spacing = Pt(16 if table else REPORT_BODY_LINE_SPACING_PT)
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    if indent:
+        fmt.first_line_indent = Pt(21)
+
+
+def _set_style_font(style, font_name: str, size_pt: float, *, bold: bool = False) -> None:
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    style.font.name = font_name
+    style._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
+    style._element.rPr.rFonts.set(qn("w:ascii"), REPORT_LATIN_FONT)
+    style._element.rPr.rFonts.set(qn("w:hAnsi"), REPORT_LATIN_FONT)
+    style.font.size = Pt(size_pt)
+    style.font.bold = bold
+    style.font.color.rgb = RGBColor(0, 0, 0)
+
 PROJECT_REPORT_PROFILES = {
     "郁南项目": {
         "shortName": "郁南",
@@ -75,15 +121,12 @@ PROJECT_REPORT_PROFILES = {
 
 
 def _set_cell_text(cell, value: Any, *, bold: bool = False) -> None:
-    from docx.shared import Pt
-
     text = "" if value is None else str(value)
     cell.text = text
     for paragraph in cell.paragraphs:
+        _apply_paragraph_format(paragraph, table=True)
         for run in paragraph.runs:
-            run.font.name = "宋体"
-            run.font.size = Pt(9)
-            run.bold = bold
+            _apply_run_font(run, REPORT_BODY_FONT, REPORT_TABLE_SIZE_PT, bold=bold)
 
 
 def _prepare_document(title: str):
@@ -99,23 +142,21 @@ def _prepare_document(title: str):
     section.left_margin = Cm(2.6)
     section.right_margin = Cm(2.4)
     normal = document.styles["Normal"]
-    normal.font.name = "宋体"
-    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
-    normal.font.size = Pt(10.5)
+    _set_style_font(normal, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT)
+    normal.paragraph_format.line_spacing = Pt(REPORT_BODY_LINE_SPACING_PT)
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(0)
     for style_name, size in (("Heading 1", 16), ("Heading 2", 14), ("Heading 3", 12)):
         style = document.styles[style_name]
-        style.font.name = "黑体"
-        style._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-        style.font.size = Pt(size)
-        style.font.bold = True
-        style.font.color.rgb = RGBColor(0, 0, 0)
+        _set_style_font(style, REPORT_HEADING_FONT, size, bold=True)
+        style.paragraph_format.line_spacing = Pt(REPORT_BODY_LINE_SPACING_PT)
+        style.paragraph_format.space_before = Pt(12 if style_name == "Heading 1" else 6)
+        style.paragraph_format.space_after = Pt(6)
     heading = document.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _apply_paragraph_format(heading)
     run = heading.add_run(title)
-    run.bold = True
-    run.font.name = "黑体"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-    run.font.size = Pt(18)
+    _apply_run_font(run, REPORT_HEADING_FONT, 18, bold=True)
     return document
 
 
@@ -126,7 +167,7 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
     for facility_type in town_data.get("assessmentTargets") or []:
         item = objects.get(facility_type) or {}
         document.add_heading(item.get("title") or REPORT_TYPE_LABELS.get(facility_type, facility_type), level=2)
-        document.add_paragraph(item.get("description") or "本次考核对象以系统项目目录及经复核的现场资料为准。")
+        _add_paragraph(document, item.get("description") or "本次考核对象以系统项目目录及经复核的现场资料为准。")
 
     villages: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -146,21 +187,14 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
 
 
 def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, indent: bool = True) -> None:
-    from docx.shared import Pt
-
     paragraph = document.add_paragraph()
-    paragraph.paragraph_format.line_spacing = 1.5
-    if indent:
-        paragraph.paragraph_format.first_line_indent = Pt(21)
+    _apply_paragraph_format(paragraph, indent=indent)
     if bold_prefix and text.startswith(bold_prefix):
         run = paragraph.add_run(bold_prefix)
-        run.bold = True
-        run.font.name = "宋体"
-        run.font.size = Pt(10.5)
+        _apply_run_font(run, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT, bold=True)
         text = text[len(bold_prefix):]
     run = paragraph.add_run(text)
-    run.font.name = "宋体"
-    run.font.size = Pt(10.5)
+    _apply_run_font(run, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT, bold=False)
 
 
 def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
@@ -412,20 +446,15 @@ def _add_source_cover(document, *, project_name: str, cycle_name: str, title: st
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(project_name)
-    run.bold = True
-    run.font.name = "黑体"
-    run.font.size = Pt(20)
+    _apply_run_font(run, REPORT_HEADING_FONT, 20, bold=True)
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(report_type)
-    run.bold = True
-    run.font.name = "黑体"
-    run.font.size = Pt(18)
+    _apply_run_font(run, REPORT_HEADING_FONT, 18, bold=True)
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = p.add_run(cycle_name)
-    run.font.name = "宋体"
-    run.font.size = Pt(14)
+    _apply_run_font(run, REPORT_BODY_FONT, 14, bold=False)
     for _ in range(8):
         document.add_paragraph("")
     _add_paragraph(document, f"项目名称：{project_name}", indent=False)
@@ -1074,7 +1103,7 @@ def _add_record_results(document, records: list[dict[str, Any]]) -> None:
                 deductions.append((record, score))
     document.add_heading("扣分明细", level=2)
     if not deductions:
-        document.add_paragraph("本次已复核数据未记录扣分项。")
+        _add_paragraph(document, "本次已复核数据未记录扣分项。")
         return
     table = document.add_table(rows=1, cols=6)
     table.style = "Table Grid"
@@ -1214,7 +1243,7 @@ def run_report_task(task_id: str) -> None:
                     continue
                 output_paths.append(path)
             if not output_paths:
-                raise RuntimeError("Official report generator did not produce any matching DOCX files.")
+                raise RuntimeError("正式报告生成器没有产出匹配的 DOCX 文件。")
             task.progress = 90
             for path in output_paths:
                 report_town = path.stem.split("-", 1)[0]
