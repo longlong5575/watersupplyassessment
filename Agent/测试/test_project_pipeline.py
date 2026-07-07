@@ -532,9 +532,13 @@ def main():
             assert result["status"] == "completed", result.get("error")
             assert result["dataSnapshot"]["towns"][0]["assessmentObject"]
             summary_report = next(item for item in result["reports"] if "汇总报告" in item["name"])
+            snapshot_towns = {item["town"] for item in result["dataSnapshot"]["towns"]}
+            if project["name"] == "郁南项目":
+                assert len(snapshot_towns) == len(yunan_towns)
+                assert {item["name"] for item in yunan_towns}.issubset(snapshot_towns), "郁南汇总报告必须覆盖项目目录内全部镇街"
             if project["name"] == "茂南项目":
-                snapshot_towns = {item["town"] for item in result["dataSnapshot"]["towns"]}
-                assert {"金塘镇", "茂南区"}.issubset(snapshot_towns), "汇总报告必须覆盖当前项目和季度的全部可用镇街"
+                assert len(snapshot_towns) == len(maonan_towns)
+                assert {item["name"] for item in maonan_towns}.issubset(snapshot_towns), "茂南汇总报告必须覆盖项目目录内全部镇街"
             town_report = next(item for item in result["reports"] if item.get("town") == town)
             from app.core.database import SessionLocal
             from app.models import Report
@@ -543,13 +547,14 @@ def main():
                 summary_path = Path(session.get(Report, summary_report["id"]).storage_key)
             assert path.is_file() and path.stat().st_size > 10000
             assert summary_path.is_file() and summary_path.stat().st_size > 10000
-            if project["name"] == "茂南项目":
-                summary_doc = Document(str(summary_path))
-                summary_text = "\n".join(
-                    [paragraph.text for paragraph in summary_doc.paragraphs]
-                    + ["\t".join(cell.text for cell in row.cells) for table in summary_doc.tables for row in table.rows]
-                )
-                assert "金塘镇" in summary_text and "茂南区" in summary_text
+            summary_doc = Document(str(summary_path))
+            summary_text = "\n".join(
+                [paragraph.text for paragraph in summary_doc.paragraphs]
+                + ["\t".join(cell.text for cell in row.cells) for table in summary_doc.tables for row in table.rows]
+            )
+            expected_names = [item["name"] for item in (yunan_towns if project["name"] == "郁南项目" else maonan_towns)]
+            assert all(name in summary_text for name in expected_names)
+            assert "未提交/未复核" in summary_text
             check_docx(path, town, project["name"])
             preview = assert_ok(client.get(f"/api/reports/{town_report['id']}/preview"), f"report preview {town}")
             assert preview["content"]["paragraphCount"] > 0
@@ -564,7 +569,7 @@ def main():
         assert summary_only_result["status"] == "completed", summary_only_result.get("error")
         assert len(summary_only_result["reports"]) == 1
         assert "汇总报告" in summary_only_result["reports"][0]["name"]
-        assert {"金塘镇", "茂南区"}.issubset({item["town"] for item in summary_only_result["dataSnapshot"]["towns"]})
+        assert {item["name"] for item in maonan_towns}.issubset({item["town"] for item in summary_only_result["dataSnapshot"]["towns"]})
 
         dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": yunan["id"]}), "dashboard")
         assert any(item["name"] == "桂圩镇" and item["recordCount"] >= 1 for item in dashboard["items"])

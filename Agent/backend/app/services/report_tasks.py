@@ -483,6 +483,64 @@ def _add_town_type_sections(document, *, records: list[dict[str, Any]], project_
                 _add_paragraph(document, "本类别未记录扣分问题。")
 
 
+
+def _town_status_label(town: dict[str, Any], records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "\u672a\u63d0\u4ea4/\u672a\u590d\u6838"
+    if town.get("lockedCount", 0) and town.get("lockedCount") == len(records):
+        return STATUS_LABELS.get("locked", "\u5df2\u9501\u5b9a")
+    if town.get("reviewedCount", 0) or records:
+        return STATUS_LABELS.get("reviewed", "\u5df2\u590d\u6838")
+    return "\u5f85\u590d\u6838"
+
+
+def _towns_for_report(records: list[dict[str, Any]], towns: list[dict[str, Any]] | None) -> list[tuple[str, dict[str, Any] | None, list[dict[str, Any]]]]:
+    by_town = _records_by_town(records)
+    if towns:
+        result = [(town.get("town") or "-", town, by_town.get(town.get("town") or "", [])) for town in towns]
+        known = {name for name, _, _ in result}
+        for name, items in by_town.items():
+            if name not in known:
+                result.append((name, None, items))
+        return result
+    return [(name, None, items) for name, items in by_town.items()]
+
+
+def _add_summary_town_type_sections(document, *, records: list[dict[str, Any]], project_name: str, towns: list[dict[str, Any]]) -> None:
+    for town_index, (town_name, town_data, town_records) in enumerate(_towns_for_report(records, towns), 1):
+        document.add_heading(f"{town_index}. {town_name}\u8003\u6838\u60c5\u51b5", level=2)
+        if not town_records:
+            _add_paragraph(document, f"{town_name}\u672c\u671f\u7cfb\u7edf\u672a\u8bb0\u5f55\u5df2\u590d\u6838\u6216\u5df2\u9501\u5b9a\u6570\u636e\uff0c\u6c47\u603b\u62a5\u544a\u4fdd\u7559\u8be5\u9547\u8857\u4f4d\u7f6e\uff0c\u5f85\u79fb\u52a8\u7aef\u63d0\u4ea4\u5e76\u7ecf\u5e73\u53f0\u7aef\u590d\u6838\u540e\u8865\u5165\u8bc4\u5206\u548c\u95ee\u9898\u660e\u7ec6\u3002")
+            _add_simple_table(
+                document,
+                ["\u5e8f\u53f7", "\u9547\u8857", "\u8003\u6838\u5bf9\u8c61\u6570", "\u72b6\u6001", "\u8bf4\u660e"],
+                [[1, town_name, town_data.get("recordCount", 0) if town_data else 0, "\u672a\u63d0\u4ea4/\u672a\u590d\u6838", "\u672a\u7eb3\u5165\u672c\u671f\u8bc4\u5206\u7edf\u8ba1"]],
+            )
+            continue
+        _add_town_type_sections(document, records=town_records, project_name=project_name)
+
+
+def _add_yunan_summary_score_overview(document, records: list[dict[str, Any]], towns: list[dict[str, Any]]) -> None:
+    town_rows = []
+    for index, (town_name, town_data, items) in enumerate(_towns_for_report(records, towns), 1):
+        if items:
+            stats = _score_stats(items)
+            town_rows.append([index, town_name, len(items), f"{stats['average']:.2f}", f"{stats['max']:.2f}", f"{stats['min']:.2f}", f"{stats['deduction']:.2f}", _town_status_label(town_data or {}, items)])
+        else:
+            town_rows.append([index, town_name, 0, "-", "-", "-", "-", "\u672a\u63d0\u4ea4/\u672a\u590d\u6838"])
+    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u8003\u6838\u5bf9\u8c61\u6570", "\u5e73\u5747\u5f97\u5206", "\u6700\u9ad8\u5f97\u5206", "\u6700\u4f4e\u5f97\u5206", "\u7d2f\u8ba1\u6263\u5206", "\u72b6\u6001"], town_rows)
+
+    type_rows = []
+    by_type = _records_by_type(records)
+    for index, (facility_type, items) in enumerate(by_type.items(), 1):
+        stats = _score_stats(items)
+        type_rows.append([index, REPORT_TYPE_LABELS.get(facility_type, facility_type), len(items), f"{stats['average']:.2f}", f"{stats['deduction']:.2f}"])
+    _add_simple_table(document, ["\u5e8f\u53f7", "\u8003\u6838\u5bf9\u8c61\u7c7b\u522b", "\u8bb0\u5f55\u6570", "\u5e73\u5747\u5f97\u5206", "\u7d2f\u8ba1\u6263\u5206"], type_rows)
+
+    _add_paragraph(document, "\u6c47\u603b\u62a5\u544a\u6309\u9879\u76ee\u76ee\u5f55\u5217\u793a\u5168\u90e8\u9547\u8857\uff0c\u672a\u63d0\u4ea4\u6216\u672a\u590d\u6838\u9547\u8857\u4ec5\u4f5c\u4e3a\u8986\u76d6\u8303\u56f4\u5c55\u793a\uff0c\u4e0d\u53c2\u4e0e\u672c\u671f\u5e73\u5747\u5f97\u5206\u3001\u6700\u9ad8\u5f97\u5206\u3001\u6700\u4f4e\u5f97\u5206\u548c\u7d2f\u8ba1\u6263\u5206\u8ba1\u7b97\u3002")
+    _add_paragraph(document, "\u5bf9\u5f97\u5206\u8f83\u4f4e\u6216\u6263\u5206\u8f83\u96c6\u4e2d\u7684\u9879\u76ee\u70b9\uff0c\u5e94\u7ed3\u5408\u73b0\u573a\u7167\u7247\u3001\u6c34\u8d28\u62bd\u68c0\u3001\u8fd0\u884c\u53f0\u8d26\u548c\u6574\u6539\u8bb0\u5f55\u9010\u9879\u590d\u6838\uff0c\u5f62\u6210\u4e0b\u4e00\u5468\u671f\u91cd\u70b9\u8ddf\u8e2a\u6e05\u5355\u3002")
+
+
 def _add_yunan_work_section(document, *, project_name: str, cycle_name: str, scope_name: str, records: list[dict[str, Any]], profile: dict[str, Any], is_summary: bool) -> None:
     _add_paragraph(document, f"根据镇级污水处理厂、镇区污水收集管网及农村污水处理设施建设和运营情况，以及{project_name}绩效考核工作安排，考核组对{scope_name}开展{cycle_name}绩效考核。")
     _add_paragraph(document, f"本次考核依据项目合同、补充协议、考核标准及有关法律、法规、标准、规范等文件要求，通过{'、'.join(profile['methods'])}等方式，对项目公司提供的运行维护资料、现场检查情况、水质检测结果和移动端填报数据进行核查。")
@@ -965,7 +1023,7 @@ def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dic
         ])
         _add_chapter_one(document, project_name=project_name, cycle_name=cycle_name, scope_name=scope_name, profile=profile, is_summary=True)
         document.add_heading("第二章 城镇水质净化设施考核结果", level=1)
-        _add_town_type_sections(document, records=all_records, project_name=project_name)
+        _add_summary_town_type_sections(document, records=all_records, project_name=project_name, towns=towns)
         document.add_heading("第四章 绩效付费计算", level=1)
         _add_chapter_four(document, records=all_records, profile=profile)
         document.add_heading("第五章 主要改进点、主要问题和整改工作建议", level=1)
@@ -987,8 +1045,8 @@ def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dic
         document.add_heading("一、考核工作开展情况", level=1)
         _add_yunan_work_section(document, project_name=project_name, cycle_name=cycle_name, scope_name=scope_name, records=all_records, profile=profile, is_summary=True)
         document.add_heading("二、考核评分情况", level=1)
-        _add_yunan_score_overview(document, all_records)
-        _add_town_type_sections(document, records=all_records, project_name=project_name)
+        _add_yunan_summary_score_overview(document, all_records, towns)
+        _add_summary_town_type_sections(document, records=all_records, project_name=project_name, towns=towns)
         document.add_heading("三、发现的主要问题", level=1)
         _add_yunan_problem_section(document, all_records)
         document.add_heading("四、建议", level=1)
@@ -1033,12 +1091,19 @@ def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Pat
     output_dir.mkdir(parents=True, exist_ok=True)
     project_name = snapshot.get("projectName") or "项目"
     cycle_name = snapshot.get("cycleName") or task.payload.get("period") or "本期"
-    for town_data in snapshot.get("towns") or []:
-        town_name = town_data["town"]
-        records = [item for item in snapshot.get("records") or [] if item.get("town") == town_name]
-        profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
-        document = _generate_town_document(project_name, cycle_name, town_data, records)
-        document.save(output_dir / f"{town_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}（正文）.docx")
+    outputs = set(task.payload.get("outputs", []))
+    requested_towns = set(task.payload.get("townNames", []) or [])
+    if "separate" in outputs:
+        for town_data in snapshot.get("towns") or []:
+            town_name = town_data["town"]
+            if requested_towns and town_name not in requested_towns:
+                continue
+            records = [item for item in snapshot.get("records") or [] if item.get("town") == town_name]
+            if not records:
+                continue
+            profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["\u90c1\u5357\u9879\u76ee"]
+            document = _generate_town_document(project_name, cycle_name, town_data, records)
+            document.save(output_dir / f"{town_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}\uff08\u6b63\u6587\uff09.docx")
 
     if "summary" in task.payload.get("outputs", []):
         profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]

@@ -168,8 +168,27 @@ def build_report_dataset(
     by_town: dict[str, list[dict[str, Any]]] = {}
     for record in record_payloads:
         by_town.setdefault(record["town"], []).append(record)
-    for town_name, town_records in sorted(by_town.items()):
-        town = session.scalar(select(Town).where(Town.name == town_name, Town.city_id == project_id)) if project_id else session.scalar(select(Town).where(Town.name == town_name))
+
+    if town_names:
+        town_query = select(Town).where(Town.name.in_(town_names))
+        if project_id:
+            town_query = town_query.where(Town.city_id == project_id)
+        catalog_towns = list(session.scalars(town_query).all())
+    elif project_id:
+        catalog_towns = list(session.scalars(select(Town).where(Town.city_id == project_id)).all())
+    elif by_town:
+        catalog_towns = list(session.scalars(select(Town).where(Town.name.in_(by_town.keys()))).all())
+    else:
+        catalog_towns = []
+
+    catalog_by_name = {town.name: town for town in catalog_towns}
+    ordered_town_names = sorted(
+        {*catalog_by_name.keys(), *by_town.keys()},
+        key=lambda name: ((catalog_by_name.get(name).chapter_code if catalog_by_name.get(name) else "") or "", name),
+    )
+    for town_name in ordered_town_names:
+        town_records = by_town.get(town_name, [])
+        town = catalog_by_name.get(town_name)
         town_payloads.append(
             {
                 "town": town_name,
@@ -192,10 +211,6 @@ def build_report_dataset(
         session.get(IndicatorVersion, version_id)
         for version_id in version_ids
     ]
-    town_queries = [select(Town).where(Town.name == name) for name in sorted(town_names or by_town.keys())]
-    if project_id:
-        town_queries = [query.where(Town.city_id == project_id) for query in town_queries]
-    towns = [session.scalar(query) for query in town_queries]
     project = session.get(City, project_id) if project_id else None
     snapshot = {
         "cycleId": cycle.id if cycle else None,
@@ -212,7 +227,7 @@ def build_report_dataset(
             for item in versions
             if item is not None
         ],
-        "townIds": [item.id for item in towns if item is not None],
+        "townIds": [catalog_by_name[name].id for name in ordered_town_names if catalog_by_name.get(name) is not None],
     }
     normalized = _normalize(snapshot)
     normalized["hash"] = _hash_payload(normalized)
