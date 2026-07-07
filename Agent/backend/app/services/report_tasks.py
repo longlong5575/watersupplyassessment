@@ -619,6 +619,9 @@ def run_report_task(task_id: str) -> None:
         session.commit()
         try:
             town_names = set(task.payload.get("townNames", []))
+            outputs = set(task.payload.get("outputs", []))
+            include_separate = "separate" in outputs
+            include_summary = "summary" in outputs
             project_id = task.payload.get("projectId")
             cycle = session.get(AssessmentCycle, task.cycle_id) if task.cycle_id else None
             record_query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
@@ -627,15 +630,15 @@ def run_report_task(task_id: str) -> None:
             if task.cycle_id:
                 record_query = record_query.where(AssessmentRecord.cycle_id == task.cycle_id)
             records = list(session.scalars(record_query))
-            if town_names:
+            if town_names and not include_summary:
                 records = [record for record in records if record.town.name in town_names]
-            snapshot = build_report_dataset(session, cycle=cycle, town_names=town_names or None, city_id=project_id)
+            dataset_town_names = None if include_summary else (town_names or None)
+            snapshot = build_report_dataset(session, cycle=cycle, town_names=dataset_town_names, city_id=project_id)
             if task.payload.get("source") == "dashboard":
                 validate_report_dataset(snapshot)
             task.data_snapshot = snapshot
             task.dataset_hash = snapshot.get("hash")
             session.commit()
-            include_summary = "summary" in task.payload.get("outputs", [])
             output_dir = _generate_project_reports(task, snapshot)
             task.progress = 80
             names = town_names
@@ -643,6 +646,14 @@ def run_report_task(task_id: str) -> None:
             for path in output_dir.glob("*.docx"):
                 report_town = path.stem.split("-", 1)[0]
                 is_summary = path.stem.endswith("汇总报告")
+                if is_summary:
+                    if not include_summary:
+                        continue
+                else:
+                    if not include_separate:
+                        continue
+                    if names and report_town not in names:
+                        continue
                 if names and report_town not in names and not (include_summary and is_summary):
                     continue
                 output_paths.append(path)

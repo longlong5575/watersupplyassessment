@@ -137,6 +137,8 @@ def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tupl
 
 def build_task_snapshot(session: Session, project: City | None, cycle: AssessmentCycle | None, task_payload: dict) -> dict:
     town_names = set(task_payload.get("townNames", []) or []) or None
+    if "summary" in set(task_payload.get("outputs", []) or []):
+        town_names = None
     return build_report_dataset(session, cycle=cycle, town_names=town_names, city_id=project.id if project else None)
 
 
