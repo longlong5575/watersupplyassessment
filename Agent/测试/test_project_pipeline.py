@@ -138,20 +138,27 @@ def check_docx(path: Path, town: str, project_name: str):
     assert town in all_text
     assert "考核对象" in all_text
     assert "考核结果" in all_text
-    assert "附录A 水质评价限值" in all_text
+    assert "摘要" in all_text
+    assert "目录" in all_text
+    assert "第一章 考核工作概述" in all_text
+    assert "第二章 考核对象及实施情况" in all_text
+    assert "第三章 绩效考核结果" in all_text
+    assert "第四章 绩效付费计算及结果应用" in all_text
+    assert "第五章 主要问题和整改工作建议" in all_text
+    assert "附件2 水质抽检及限值依据" in all_text
     if project_name == "郁南项目":
         assert "镇村污水处理设施绩效考核报告" in all_text
         assert "问卷调查（村级考核有）" in all_text
         assert "农村污水处理设施" in all_text
         assert "DB44/2208-2019" in all_text
-        assert "公众调查分析" in all_text
+        assert "问卷调查及公众反馈" in all_text
     if project_name == "茂南项目":
         assert "城镇设施绩效考核报告" in all_text
         assert "水质净化厂" in all_text
         assert "问卷调查（村级考核有）" not in all_text
-    assert "证据附件目录" in all_text
+    assert "附件3 现场照片及资料清单" in all_text
     assert "考核实施情况" in all_text
-    assert "综合评价" in all_text
+    assert "评分结果汇总" in all_text
     assert "主要问题及扣分分析" in all_text
     assert "fixture-photo.jpg" in all_text
     assert "Agent辅助校验" not in all_text

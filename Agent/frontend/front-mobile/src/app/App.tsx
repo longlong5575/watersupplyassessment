@@ -10,10 +10,11 @@ import {
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
 let API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+const API_BASE_URL_STORAGE_KEY = "assessment-api-base-url-v1";
 
 async function probeApiBaseUrl(baseUrl: string): Promise<boolean> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 600);
+  const timeout = window.setTimeout(() => controller.abort(), 1500);
   try {
     const healthUrl = `${baseUrl.replace(/\/api\/?$/, "")}/health`;
     const response = await fetch(healthUrl, { signal: controller.signal, cache: "no-store" });
@@ -26,13 +27,22 @@ async function probeApiBaseUrl(baseUrl: string): Promise<boolean> {
 }
 
 async function discoverApiBaseUrl(): Promise<string> {
-  const preferred = [...new Set([API_BASE_URL, "http://127.0.0.1:8000/api"])];
+  const cached = localStorage.getItem(API_BASE_URL_STORAGE_KEY) || "";
+  const preferred = [...new Set([API_BASE_URL, cached, "http://127.0.0.1:8000/api"].filter(Boolean))];
   for (const candidate of preferred) {
-    if (await probeApiBaseUrl(candidate)) return candidate;
+    if (await probeApiBaseUrl(candidate)) {
+      localStorage.setItem(API_BASE_URL_STORAGE_KEY, candidate);
+      return candidate;
+    }
   }
-  const fallback = Array.from({ length: 100 }, (_, index) => `http://127.0.0.1:${8100 + index}/api`);
-  const results = await Promise.all(fallback.map(async candidate => await probeApiBaseUrl(candidate) ? candidate : null));
-  return results.find((candidate): candidate is string => candidate !== null) ?? API_BASE_URL;
+  const fallback = Array.from({ length: 30 }, (_, index) => `http://127.0.0.1:${8100 + index}/api`);
+  for (const candidate of fallback) {
+    if (await probeApiBaseUrl(candidate)) {
+      localStorage.setItem(API_BASE_URL_STORAGE_KEY, candidate);
+      return candidate;
+    }
+  }
+  return API_BASE_URL;
 }
 const DRAFT_STORAGE_KEY = "assessment-mobile-draft-v1";
 const SUBMITTED_STORAGE_KEY = "assessment-mobile-submitted-v1";

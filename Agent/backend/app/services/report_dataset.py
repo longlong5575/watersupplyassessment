@@ -53,6 +53,7 @@ def _score_payload(session: Session, score: AssessmentScore) -> dict[str, Any]:
     return {
         "id": score.id,
         "indicatorId": score.indicator_id,
+        "indicatorCode": indicator.code if indicator else None,
         "indicatorName": indicator.name if indicator else None,
         "indicatorFullScore": indicator.full_score if indicator else None,
         "deductionOptionId": score.deduction_option_id,

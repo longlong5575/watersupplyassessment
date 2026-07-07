@@ -10,8 +10,8 @@ from docx import Document
 
 BAD_TOKENS = ["None", "nan", "NaN", "Decimal(", "reviewed", "submitted", "locked", "returned", "E+", "e+"]
 PROJECT_EXPECTATIONS = {
-    "郁南": ["镇村污水处理设施绩效考核报告", "问卷调查（村级考核有）", "农村污水处理设施", "DB44/2208-2019", "TP", "1"],
-    "茂南": ["城镇设施绩效考核报告", "水质净化厂", "城镇污水处理设施", "TP", "0.5"],
+    "郁南": ["镇村污水处理设施绩效考核报告", "问卷调查", "农村污水处理设施", "DB44/2208-2019", "TP", "附件1 绩效考核评分明细"],
+    "茂南": ["城镇设施绩效考核报告", "水质净化厂", "城镇污水处理设施", "TP", "附件1 绩效考核评分明细"],
 }
 
 
@@ -66,10 +66,11 @@ def inspect_report(path: Path) -> dict[str, object]:
     bad_tokens = [token for token in BAD_TOKENS if token in text]
     replacement_chars = text.count("\ufffd")
     sequence_errors = serial_errors(document)
-    required_sections = ["考核实施情况", "考核对象", "考核结果", "综合评价", "主要问题及扣分分析", "证据附件目录", "附录A 水质评价限值"]
+    required_sections = ["摘要", "目录", "第一章 考核工作概述", "第二章 考核对象及实施情况", "第三章 绩效考核结果", "第四章 绩效付费计算及结果应用", "第五章 主要问题和整改工作建议", "附件1 绩效考核评分明细", "附件2 水质抽检及限值依据"]
     missing_sections = [item for item in required_sections if item not in text]
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
-    passed = not missing and not bad_tokens and replacement_chars == 0 and not sequence_errors and not missing_sections and not weird_numbers
+    too_short = len(document.paragraphs) < 55 or len(document.tables) < 10
+    passed = not missing and not bad_tokens and replacement_chars == 0 and not sequence_errors and not missing_sections and not weird_numbers and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -80,6 +81,7 @@ def inspect_report(path: Path) -> dict[str, object]:
         "replacementChars": replacement_chars,
         "serialErrors": sequence_errors,
         "overlongDecimals": weird_numbers[:20],
+        "tooShort": too_short,
         "tableCount": len(document.tables),
         "paragraphCount": len(document.paragraphs),
     }
