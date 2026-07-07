@@ -24,6 +24,7 @@ from app.services.assessment_ingest import (
     unwrap_payload,
 )
 from app.services.project_catalog import PROJECT_CATALOG, project_by_name
+from app.services.standard_catalog import load_standard_groups
 from app.services.standard_names import clean_standard_name
 
 
@@ -153,6 +154,15 @@ def indicator_standards(city_id: str | None = None, cycle_id: str | None = None,
     if cycle_id: version_query = version_query.where(IndicatorVersion.cycle_id == cycle_id)
     version = session.scalar(version_query.order_by(IndicatorVersion.created_at.desc()))
     if version is None: return {"version": None, "items": []}
+    city = session.get(City, version.city_id)
+    project_key = "maonan" if city and "茂南" in city.name else "yunan"
+    knowledge_map = {
+        catalog_item.get("id"): catalog_item
+        for groups in load_standard_groups(project_key).values()
+        for level1 in groups
+        for level2 in level1.get("children", [])
+        for catalog_item in level2.get("items", [])
+    }
     indicators = list(session.scalars(select(Indicator).where(Indicator.version_id == version.id, Indicator.enabled.is_(True)).order_by(Indicator.sort_order)))
     option_map = {item.id: [] for item in indicators}
     for option in session.scalars(select(DeductionOption).where(DeductionOption.indicator_id.in_(option_map))).all():
@@ -166,9 +176,27 @@ def indicator_standards(city_id: str | None = None, cycle_id: str | None = None,
                 "requiresPhoto": option.requires_photo,
                 "unit": meta.get("unit"),
                 "maxInstances": meta.get("maxInstances"),
+                "min": meta.get("min"),
+                "max": meta.get("max"),
             }
         )
-    items = [{"id": item.id, "parentId": item.parent_id, "code": item.code, "name": item.name, "level": item.level, "fullScore": item.full_score, "facilityType": item.facility_type, "deductionOptions": option_map[item.id]} for item in indicators if not facility_type or not item.facility_type or item.facility_type == facility_type]
+    items = []
+    for item in indicators:
+        if facility_type and item.facility_type and item.facility_type != facility_type:
+            continue
+        knowledge = knowledge_map.get(item.code, {}) if item.level == 3 else {}
+        items.append({
+            "id": item.id, "parentId": item.parent_id, "code": item.code,
+            "name": item.name, "level": item.level, "fullScore": item.full_score,
+            "facilityType": item.facility_type,
+            "description": knowledge.get("dataSource") or "",
+            "evaluationStandard": knowledge.get("evaluationStandard") or "",
+            "standardText": knowledge.get("standardText") or "",
+            "scoringMethod": knowledge.get("scoringMethod") or "",
+            "dataSource": knowledge.get("dataSource") or "",
+            "calculationMethod": knowledge.get("calculationMethod") or "",
+            "deductionOptions": option_map[item.id],
+        })
     return {"version": {"id": version.id, "name": clean_standard_name(version.name)}, "items": items}
 
 

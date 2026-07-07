@@ -214,6 +214,9 @@ def main():
         for _, leaves in standards.values():
             option_names = [option["name"] for item in leaves for option in item.get("deductionOptions", [])]
             assert not any("检查单元" in name or "抽查5个井段" in name for name in option_names), "抽检规则不应成为扣分选项"
+            assert all(item.get("evaluationStandard") or item.get("description") for item in leaves), "每个评分点必须有知识库说明"
+            missing_options = [item["name"] for item in leaves if not item.get("deductionOptions")]
+            assert not missing_options, f"每个评分点必须有可选择的扣分原因: {missing_options}"
         maonan_network = standards[("茂南项目", "town_network")][1]
         overflow_item = next(item for item in maonan_network if "无污水冒出" in item["name"])
         overflow_options = [option["name"] for option in overflow_item["deductionOptions"]]

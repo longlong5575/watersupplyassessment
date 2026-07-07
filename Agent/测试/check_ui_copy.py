@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 CHECKED_FILES = [
+    ROOT / "frontend" / "front" / "index.html",
     ROOT / "frontend" / "front" / "src" / "app" / "App.tsx",
+    ROOT / "frontend" / "front" / "src" / "app" / "assessmentStandards.ts",
+    ROOT / "frontend" / "front-mobile" / "index.html",
     ROOT / "frontend" / "front-mobile" / "src" / "app" / "App.tsx",
+    ROOT / "frontend" / "front-mobile" / "src" / "app" / "assessmentStandards.ts",
 ]
 
 FORBIDDEN_SNIPPETS = [
@@ -26,6 +31,21 @@ FORBIDDEN_SNIPPETS = [
     "各村点得分",
     "record_review_assist",
     "知识库入口已预留",
+    "????",
+    "Automates generation",
+    "Enables field assessors",
+    '<html lang="en"',
+    "Web后台原型设计",
+    "admin / inspector",
+    "inspector / admin",
+    "账号不存在，请使用",
+    "Agent 辅助",
+    "尚未生成 Agent",
+]
+
+FORBIDDEN_PATTERNS = [
+    re.compile(r'placeholder="[^"]*[A-Za-z]{3,}[^"]*"'),
+    re.compile(r'setError\("[^"]*[A-Za-z]{3,}'),
 ]
 
 
@@ -37,6 +57,10 @@ def main() -> None:
             if snippet in text:
                 rel = path.relative_to(ROOT)
                 failures.append(f"{rel}: contains forbidden UI text {snippet!r}")
+        for pattern in FORBIDDEN_PATTERNS:
+            if pattern.search(text):
+                rel = path.relative_to(ROOT)
+                failures.append(f"{rel}: contains forbidden visible English pattern {pattern.pattern!r}")
     if failures:
         raise SystemExit("\n".join(failures))
     print("PASS: frontend UI copy guard")

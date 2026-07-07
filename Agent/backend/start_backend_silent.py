@@ -72,7 +72,7 @@ def _clean_env() -> dict[str, str]:
     return env
 
 
-def _wait_until_ready(timeout: float = 12.0) -> None:
+def _wait_until_ready(timeout: float = 45.0) -> None:
     deadline = time.time() + timeout
     last_error: Exception | None = None
     while time.time() < deadline:

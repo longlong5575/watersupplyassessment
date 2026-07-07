@@ -14,6 +14,9 @@ def _option_value(option: dict) -> float:
 
 def _option_meta(option: dict) -> dict:
     meta = {}
+    if option.get("type") == "range":
+        meta["min"] = float(option.get("min") or 0)
+        meta["max"] = float(option.get("max") or option.get("min") or 0)
     if option.get("unit"):
         meta["unit"] = option["unit"]
     if option.get("maxInstances"):
@@ -71,6 +74,17 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion, project_k
             for item in level2.get("items", [])
             for option in item.get("options", [])
             if option.get("unit")
+        )
+        for facility_type, groups in standards.items()
+    }
+    expected_range_counts = {
+        facility_type: sum(
+            1
+            for level1 in groups
+            for level2 in level1.get("children", [])
+            for item in level2.get("items", [])
+            for option in item.get("options", [])
+            if option.get("type") == "range"
         )
         for facility_type, groups in standards.items()
     }
@@ -133,7 +147,25 @@ def _seed_standard_groups(session: Session, version: IndicatorVersion, project_k
             )
             for facility_type in existing_types
         }
-        if totals == expected_totals and actual_option_counts == expected_option_counts and actual_unit_counts == expected_unit_counts:
+        actual_range_counts = {
+            facility_type: sum(
+                1
+                for item in session.scalars(
+                    select(DeductionOption)
+                    .join(Indicator, DeductionOption.indicator_id == Indicator.id)
+                    .where(
+                        Indicator.version_id == version.id,
+                        Indicator.level == 3,
+                        Indicator.facility_type == facility_type,
+                        Indicator.enabled.is_(True),
+                        DeductionOption.deduction_type == "range",
+                    )
+                ).all()
+                if isinstance(item.meta, dict) and "min" in item.meta and "max" in item.meta
+            )
+            for facility_type in existing_types
+        }
+        if totals == expected_totals and actual_option_counts == expected_option_counts and actual_unit_counts == expected_unit_counts and actual_range_counts == expected_range_counts:
             return
 
     for indicator in session.scalars(select(Indicator).where(Indicator.version_id == version.id)).all():

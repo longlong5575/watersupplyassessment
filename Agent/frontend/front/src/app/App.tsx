@@ -857,7 +857,7 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
     } catch {
-      setError("账号不存在，请使用 admin 或 inspector");
+      setError("账号不存在，请检查账号是否已初始化");
     } finally {
       setLoading(false);
     }
@@ -876,7 +876,7 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
           onChange={event => { setUsername(event.target.value); setError(""); }}
           onKeyDown={event => { if (event.key === "Enter") submit(); }}
           className="w-full border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-          placeholder="admin / inspector"
+          placeholder="请输入员工账号"
           style={{ background: "var(--input-background)" }}
         />
         {error && <p className="mt-2 text-xs text-[var(--status-error)]">{error}</p>}
@@ -1644,20 +1644,20 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
         });
         if (!response.ok) {
           const detail = await response.json().catch(() => null);
-          throw new Error(localizeBackendMessage(detail?.detail ?? `Report task failed: ${response.status}`));
+          throw new Error(localizeBackendMessage(detail?.detail ?? `报告任务提交失败，状态码：${response.status}`));
         }
         const task = await response.json();
         const pollTask = async () => {
           if (cancelled) return;
           const statusResponse = await fetch(`${API_BASE_URL}/report-tasks/${task.id}`);
-          if (!statusResponse.ok) throw new Error(localizeBackendMessage(`Report task polling failed: ${statusResponse.status}`));
+          if (!statusResponse.ok) throw new Error(localizeBackendMessage(`报告任务状态查询失败，状态码：${statusResponse.status}`));
           const latest = await statusResponse.json();
           if (latest.status === "completed") {
             onReportsReady(mapBackendReports(latest.reports ?? []));
             setBackendDone(true);
             return;
           }
-          if (latest.status === "failed") throw new Error(localizeBackendMessage(latest.error ?? "Report generation failed"));
+          if (latest.status === "failed") throw new Error(localizeBackendMessage(latest.error ?? "报告生成失败"));
           window.setTimeout(() => { void pollTask(); }, 1500);
         };
         await pollTask();
@@ -2906,7 +2906,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
                   <div className="flex items-center gap-2">
                     <Cpu size={14} className="text-primary" />
                     <div>
-                      <h4 className="text-xs font-semibold text-foreground">Agent 辅助分析</h4>
+                      <h4 className="text-xs font-semibold text-foreground">智能辅助分析</h4>
                       <p className="text-[11px] text-muted-foreground mt-0.5">只做问题归纳和语义提示，不改分数、不算金额</p>
                     </div>
                   </div>
@@ -2978,7 +2978,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
                     </div>
                   </div>
                 ) : (
-                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">尚未生成 Agent 辅助分析</div>
+                    <div className="px-4 py-8 text-center text-xs text-muted-foreground">尚未生成智能辅助分析</div>
                 )}
               </div>
             </div>

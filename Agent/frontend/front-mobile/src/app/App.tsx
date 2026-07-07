@@ -342,7 +342,7 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
 let TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
 let NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
 
-function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType; unit?: string; maxInstances?: number }> }>) {
+function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; description?: string; evaluationStandard?: string; standardText?: string; scoringMethod?: string; dataSource?: string; calculationMethod?: string; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType; unit?: string; maxInstances?: number; min?: number; max?: number }> }>) {
   const l1 = items.filter(item => item.level === 1);
   const l2 = items.filter(item => item.level === 2);
   const l3 = items.filter(item => item.level === 3);
@@ -357,15 +357,20 @@ function applyBackendStandards(type: "treatment" | "network", items: Array<{ id:
         id: item.id,
         name: item.name,
         maxScore: item.fullScore,
-        description: "以已发布考核标准为准",
+        description: item.description || item.dataSource || "",
+        evaluationStandard: item.evaluationStandard,
+        standardText: item.standardText,
+        scoringMethod: item.scoringMethod,
+        dataSource: item.dataSource,
+        calculationMethod: item.calculationMethod,
         options: (item.deductionOptions ?? []).map(option => ({
           id: option.id,
           name: option.name,
           reason: option.name,
           type: option.type === "range" ? "range" as const : "fixed" as const,
           value: option.deduction,
-          min: option.type === "range" ? 0 : undefined,
-          max: option.type === "range" ? option.deduction : undefined,
+          min: option.type === "range" ? (option.min ?? 0) : undefined,
+          max: option.type === "range" ? (option.max ?? option.deduction) : undefined,
           unit: option.unit || undefined,
           maxInstances: option.maxInstances || undefined,
         })),
@@ -668,7 +673,7 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
     } catch {
-      setError("账号不存在，请使用 inspector 或 admin");
+      setError("账号不存在，请检查账号是否已初始化");
     } finally {
       setLoading(false);
     }
@@ -688,7 +693,7 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
         <input
           value={username}
           onChange={event => { setUsername(event.target.value); setError(""); }}
-          placeholder="inspector / admin"
+          placeholder="请输入员工账号"
           className="w-full px-3 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
         />
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
