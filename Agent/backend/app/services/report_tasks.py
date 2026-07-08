@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.models import AssessmentCycle, AssessmentRecord, Attachment, Report, ReportTask, SurveyRecord, Town, WaterQualityRecord
 from app.models.entities import utcnow
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
+from app.services.payment import maonan_operation_coefficient, town_average_coefficient
 
 
 REPORT_TYPE_LABELS = {
@@ -1101,7 +1102,14 @@ def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], tow
         present_types = [item for item in ["town_plant", "town_network", "rural_treatment"] if any(record.get("facilityType") == item for record in town_records)]
         for offset, facility_type in enumerate(present_types, 2):
             document.add_heading(f"{code}.{offset} {type_map[facility_type]}", level=3)
-            _add_facility_result_table(document, [record for record in town_records if record.get("facilityType") == facility_type])
+            typed_records = [record for record in town_records if record.get("facilityType") == facility_type]
+            _add_facility_result_table(document, typed_records)
+            coefficient = town_average_coefficient(
+                [float(record.get("totalScore") or 0) for record in typed_records],
+                project="yunan",
+            )
+            if coefficient is not None:
+                _add_paragraph(document, f"按郁南项目例文口径，考核得分不低于90分时运维绩效考核系数取1，低于90分时按得分除以90计算。本项运维绩效考核系数为{coefficient:.3f}。")
 
 
 def _add_maonan_result_sections(document, *, records: list[dict[str, Any]], towns: list[dict[str, Any]], is_summary: bool) -> None:
@@ -1281,12 +1289,31 @@ def _source_toc_rows(project_name: str, *, is_summary: bool) -> list[list[Any]]:
 
 def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None:
     document.add_heading("第三章 绩效付费计算", level=1)
-    stats = _score_stats(records)
-    _add_simple_table(document, ["序号", "项目", "结果", "说明"], [
-        [1, "平均得分", f"{stats['average']:.2f}", "按本期已复核记录计算。"],
-        [2, "累计扣分", f"{stats['deduction']:.2f}", "按评分明细扣分合计。"],
-        [3, "付费应用", "按合同约定核定", "绩效付费金额应结合本期考核结果及经确认的金额基础资料计算。"],
+    document.add_heading("3.1 运维考核系数", level=2)
+    _add_paragraph(document, "按茂南项目原例文表1-4口径，考核得分W不低于70分时，运维考核系数E1取1；低于70分时，E1=W/70。")
+    coefficient_rows = []
+    for index, record in enumerate(records, 1):
+        score = float(record.get("totalScore") or 0)
+        coefficient_rows.append([
+            index,
+            _record_point_name(record),
+            REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
+            f"{score:.2f}",
+            f"{maonan_operation_coefficient(score):.3f}",
+        ])
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "考核得分W", "运维考核系数E1"], coefficient_rows)
+
+    document.add_heading("3.2 付费公式", level=2)
+    _add_paragraph(document, "城镇水质净化厂月服务费Pz=Py×QB×(3/5+Kq/10+3E1/10)+Pk/12×(2/3+E1/3)。其中Py为污水处理运营服务费单价，QB为当月处理水量，Kq为水质浓度系数，Pk为水质净化设施可用性付费。")
+    _add_paragraph(document, "管网月运营维护费按年运营维护费×(3/5+Kq/10+3E1/10)/12计算。项目服务费由可用性付费和运营维护费组成，具体付费范围及基数优先采用本期经确认资料；未提供新资料时，沿用茂南项目既有例文和历史付费表，不引用其他项目或通用金额基础表。")
+
+    document.add_heading("3.3 金额核定条件", level=2)
+    _add_simple_table(document, ["序号", "必需输入", "当前状态", "处理原则"], [
+        [1, "经确认的可用性付费及运营维护费基数", "未提供新表时沿用本项目历史表", "不得引用其他项目基数代算。"],
+        [2, "各月实际处理水量QB", "需由本期数据或本项目历史付费资料提供", "按出水计量数据并结合合同上下限核定。"],
+        [3, "各月平均进、出水COD浓度", "需由本期数据或本项目历史付费资料提供", "用于逐月计算Kq。"],
     ])
+    _add_paragraph(document, "上述金额输入由本期资料或茂南项目既有历史表支撑时，可按例文口径测算服务费；若本项目自身资料仍不完整，本报告仅核定考核得分和运维考核系数，不输出具体应付金额，避免形成未经依据确认的金额结果。")
 
 
 def _add_problem_and_suggestion_chapter(document, records: list[dict[str, Any]], *, maonan: bool) -> None:

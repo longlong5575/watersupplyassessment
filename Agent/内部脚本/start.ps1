@@ -155,6 +155,23 @@ function Set-FrontendEnv([string]$directory, [int]$BackendPort) {
   "VITE_API_BASE_URL=http://127.0.0.1:$BackendPort/api" | Out-File -LiteralPath (Join-Path $directory ".env.local") -Encoding utf8
 }
 
+function Close-OldAppBrowserWindows {
+  $titlePatterns = @(
+    "*PPP农村污水考核系统*",
+    "*农村污水考核录入工具*"
+  )
+  $browserNames = @("chrome", "msedge", "firefox", "iexplore", "brave", "opera")
+  foreach ($process in Get-Process -ErrorAction SilentlyContinue | Where-Object { $browserNames -contains $_.ProcessName -and $_.MainWindowTitle }) {
+    foreach ($pattern in $titlePatterns) {
+      if ($process.MainWindowTitle -like $pattern) {
+        try { $process.CloseMainWindow() | Out-Null } catch {}
+        break
+      }
+    }
+  }
+  Start-Sleep -Milliseconds 500
+}
+
 try {
   $launchLockAcquired = $launchMutex.WaitOne(0)
   if (-not $launchLockAcquired) { return }
@@ -164,6 +181,7 @@ try {
   $env:WATERSUPPLY_BUILD_ID = $appBuildId
   if ((Test-BackendBuild "http://127.0.0.1:8000" $appBuildId) -and (Test-UrlReady "http://127.0.0.1:5173") -and (Test-UrlReady "http://127.0.0.1:5174")) {
     Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:8000"; platformUrl = "http://127.0.0.1:5173"; mobileUrl = "http://127.0.0.1:5174" }
+    Close-OldAppBrowserWindows
     Start-Process "http://127.0.0.1:5173"
     Start-Process "http://127.0.0.1:5174"
     return
@@ -200,6 +218,7 @@ try {
   Wait-ForUrl "http://127.0.0.1:$frontPort"
   Wait-ForUrl "http://127.0.0.1:$mobilePort"
   Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:$backendPort"; platformUrl = "http://127.0.0.1:$frontPort"; mobileUrl = "http://127.0.0.1:$mobilePort" }
+  Close-OldAppBrowserWindows
   Start-Process "http://127.0.0.1:$frontPort"
   Start-Process "http://127.0.0.1:$mobilePort"
 } catch {

@@ -1,11 +1,41 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
 _DEDUCTION_RE = re.compile(r"扣\s*(\d+(?:\.\d+)?)(?:\s*(?:至|到|-|~|～)\s*(\d+(?:\.\d+)?))?\s*分")
 _LEADING_NUMBER_RE = re.compile(r"^\s*(?:\d+[\.\、)]|[（(]\d+[）)]|[①②③④⑤⑥⑦⑧⑨⑩])\s*")
+
+_COUNT_UNIT_HINTS = (
+    ("每一岗位", "岗位"),
+    ("每个岗位", "岗位"),
+    ("每增加1天", "天"),
+    ("每增加一天", "天"),
+    ("每缺少1名", "名"),
+    ("每缺少一名", "名"),
+    ("每缺一项次", "项次"),
+    ("每缺一项", "项"),
+    ("每缺失损坏一项", "项"),
+    ("每缺失一项", "项"),
+    ("每发现1处", "处"),
+    ("每发现一处", "处"),
+    ("发现1处", "处"),
+    ("发现一处", "处"),
+    ("每处", "处"),
+    ("每项次", "项次"),
+    ("每项", "项"),
+    ("每次", "次"),
+    ("每座", "座"),
+    ("每一个", "个"),
+    ("每个", "个"),
+    ("每名", "名"),
+    ("按处", "处"),
+    ("逐处", "处"),
+    ("按项", "项"),
+    ("按次", "次"),
+)
 
 
 def _clean_clause(value: str) -> str:
@@ -14,19 +44,38 @@ def _clean_clause(value: str) -> str:
 
 def _split_rule_clauses(rule: str) -> list[str]:
     clauses: list[str] = []
-    for section in re.split(r"[；;]\s*", rule):
+    for section in re.split(r"[；;\r\n]+", rule):
         section = _clean_clause(section)
         if not section:
             continue
         comma_parts = [_clean_clause(part) for part in re.split(r"[、，,]\s*", section)]
         deductible_parts = [part for part in comma_parts if part and "扣" in part and "不扣分" not in part]
-        if len(deductible_parts) >= 2:
+        if deductible_parts:
             clauses.extend(deductible_parts)
         else:
             clauses.append(section)
 
     deductible = [clause for clause in clauses if "扣" in clause and "不扣分" not in clause]
     return deductible or clauses or [rule]
+
+
+def _count_unit(text: str) -> str | None:
+    normalized = re.sub(r"\s+", "", text)
+    for hint, unit in _COUNT_UNIT_HINTS:
+        if hint in normalized:
+            return unit
+    return None
+
+
+def _max_instances(score: float, value: float) -> int:
+    if value <= 0:
+        return 1
+    try:
+        score_decimal = Decimal(str(score))
+        value_decimal = Decimal(str(value))
+        return max(1, int(score_decimal // value_decimal))
+    except (InvalidOperation, ZeroDivisionError, ValueError):
+        return max(1, int(float(score) / value))
 
 
 def split_deduction_options(rule: str, score: float) -> list[dict[str, Any]]:
@@ -43,9 +92,21 @@ def split_deduction_options(rule: str, score: float) -> list[dict[str, Any]]:
             if match.group(2):
                 options.append({"reason": reason, "type": "range", "min": min_value, "max": max_value})
             else:
-                options.append({"reason": reason, "type": "fixed", "value": max_value})
+                option: dict[str, Any] = {"reason": reason, "type": "fixed", "value": max_value}
+                unit = _count_unit(text)
+                if unit:
+                    option["unit"] = unit
+                    option["maxInstances"] = _max_instances(float(score), max_value)
+                options.append(option)
         else:
-            options.append({"reason": reason, "type": "fixed", "value": min(float(score), 1.0)})
+            options.append(
+                {
+                    "reason": f"{reason}（原标准未写明固定扣分值，需人工按标准选择扣分）",
+                    "type": "range",
+                    "min": 0.0,
+                    "max": max(float(score), 0.0),
+                }
+            )
     return options
 
 

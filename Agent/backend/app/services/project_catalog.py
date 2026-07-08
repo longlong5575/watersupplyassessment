@@ -204,7 +204,7 @@ PROJECT_CATALOG: list[dict[str, Any]] = [
         "name": "郁南项目",
         "fullName": "郁南县整县生活污水处理设施捆绑PPP项目",
         "cycle": "2026年第2季度",
-        "standard": "郁南镇村绩效考核标准（资料报告版）",
+        "standard": "郁南项目绩效考核标准",
         "sourceReport": "2025年郁南第2季度镇村考核报告",
         "towns": YUNAN_TOWNS,
     },
@@ -213,7 +213,7 @@ PROJECT_CATALOG: list[dict[str, Any]] = [
         "name": "茂南项目",
         "fullName": "茂南区水质净化处理设施全区捆绑PPP项目",
         "cycle": "2026年第2季度",
-        "standard": "茂南城镇设施绩效考核标准（第八、九周期报告版）",
+        "standard": "茂南项目绩效考核标准",
         "sourceReport": "茂南区城镇设施第八、九周期绩效考核报告",
         "towns": MAONAN_TOWNS,
     },
@@ -222,4 +222,3 @@ PROJECT_CATALOG: list[dict[str, Any]] = [
 
 def project_by_name(name: str) -> dict[str, Any] | None:
     return next((item for item in PROJECT_CATALOG if item["name"] == name), None)
-

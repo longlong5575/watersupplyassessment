@@ -454,6 +454,41 @@ function itemKnowledgeText(item: L3Item): string {
   return `${item.name} ${item.description} ${item.evaluationStandard ?? ""} ${item.standardText ?? ""} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""} ${optionText}`;
 }
 
+function normalizeDisplayText(value?: string): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function comparisonText(value?: string): string {
+  return normalizeDisplayText(value)
+    .replace(/(^|\s)\d+[.、．)]\s*/g, " ")
+    .replace(/[，。；：、“”‘’（）()\[\]【】\s]/g, "");
+}
+
+function uniqueDisplayTexts(values: Array<string | undefined>): string[] {
+  const result: string[] = [];
+  values.forEach(value => {
+    const text = normalizeDisplayText(value);
+    if (!text || result.some(existing => existing === text || existing.includes(text))) return;
+    const shorterIndexes = result
+      .map((existing, index) => text.includes(existing) ? index : -1)
+      .filter(index => index >= 0)
+      .reverse();
+    shorterIndexes.forEach(index => result.splice(index, 1));
+    result.push(text);
+  });
+  return result;
+}
+
+function uniqueDeductionOptions(options: DeductionOption[]): DeductionOption[] {
+  const seen = new Set<string>();
+  return options.filter(option => {
+    const key = normalizeDisplayText(option.reason);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function isMonthlyUnqualifiedRuleItem(item: L3Item): boolean {
   const text = itemKnowledgeText(item);
   return text.includes("全月不合格") || (text.includes("化验") && text.includes("判定为不合格"));
@@ -784,10 +819,17 @@ function PPortal({ onField, onKnowledge }: { onField: () => void; onKnowledge: (
 
 function PKnowledge({ onBack }: { onBack: () => void }) {
   const [keyword, setKeyword] = useState("");
-  const items = [
+  const allItems = [
     ...getAllItems(TREATMENT_STANDARDS as unknown as L1Group[]).map(item => ({ item, type: "污水处理设施" })),
     ...getAllItems(NETWORK_STANDARDS as unknown as L1Group[]).map(item => ({ item, type: "管网设施" })),
   ];
+  const itemKeys = new Set<string>();
+  const items = allItems.filter(({ item, type }) => {
+    const key = `${type}:${item.id}`;
+    if (itemKeys.has(key)) return false;
+    itemKeys.add(key);
+    return true;
+  });
   const normalizedKeyword = keyword.trim();
   const filtered = items.filter(({ item, type }) => {
     if (!normalizedKeyword) return true;
@@ -815,7 +857,18 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {filtered.map(({ item, type }) => {
-          const tips = knowledgeGuidanceForItem(item);
+          const knowledgeText = uniqueDisplayTexts([
+            item.options.length === 0 ? item.evaluationStandard : undefined,
+            item.description,
+            item.options.length === 0 ? item.scoringMethod : undefined,
+            item.dataSource,
+          ]);
+          const knowledgeTextSet = new Set(knowledgeText.map(normalizeDisplayText));
+          const tips = uniqueDisplayTexts(knowledgeGuidanceForItem(item))
+            .filter(tip => !knowledgeTextSet.has(normalizeDisplayText(tip)));
+          const combinedKnowledgeText = comparisonText(knowledgeText.join(" "));
+          const deductionOptions = uniqueDeductionOptions(item.options)
+            .filter(option => !combinedKnowledgeText.includes(comparisonText(option.reason)));
           return (
           <div key={`${type}-${item.id}`} className="rounded-xl border border-border bg-white p-4">
             <div className="flex items-start justify-between gap-3">
@@ -834,12 +887,14 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
                 ))}
               </div>
             )}
-            <div className="mt-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-              {item.evaluationStandard || item.description}
-            </div>
-            {item.options.length > 0 && (
+            {knowledgeText.length > 0 && (
+              <div className="mt-3 space-y-1.5 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
+                {knowledgeText.map(text => <p key={text}>{text}</p>)}
+              </div>
+            )}
+            {deductionOptions.length > 0 && (
               <div className="mt-3 space-y-1.5">
-                {item.options.map(option => (
+                {deductionOptions.map(option => (
                   <div key={option.id} className="rounded-lg bg-muted px-3 py-2 text-xs text-foreground leading-relaxed">
                     {option.reason}
                   </div>
@@ -862,8 +917,8 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
 function P0City({ onBack, onNext }: { onBack: () => void; onNext: (c: CityOption) => void }) {
   const [selectedId, setSelectedId] = useState("");
   const [cities, setCities] = useState<CityOption[]>([
-    { id: "yunan", name: "郁南项目", sub: "郁南考核标准" },
-    { id: "maonan", name: "茂南项目", sub: "茂南考核标准" },
+    { id: "yunan", name: "郁南项目", sub: "郁南项目绩效考核标准" },
+    { id: "maonan", name: "茂南项目", sub: "茂南项目绩效考核标准" },
   ]);
   useEffect(() => {
     fetch(`${API_BASE_URL}/mobile/projects`)
@@ -2514,7 +2569,7 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                   <div className="space-y-2.5">
                     <p className="text-xs font-medium text-muted-foreground">扣分原因选择</p>
                     {([
-                      { sel: "standard" as SelectionType, label: opt.reason, color: "#1a3a52" },
+                      { sel: "standard" as SelectionType, label: "按此原因扣分", color: "#1a3a52" },
                       { sel: "no_deduction" as SelectionType, label: "不扣分", color: "#16a34a" },
                       { sel: "custom" as SelectionType, label: "其他原因", color: "#d97706" },
                     ]).map(row => (

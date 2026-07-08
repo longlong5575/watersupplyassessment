@@ -111,6 +111,8 @@ interface TownSurvey {
 type CityOption = { id: string; name: string };
 
 type DashboardOverview = {
+  year?: number | null;
+  quarter?: number | null;
   townCount: number;
   completedTownCount: number;
   inprogressTownCount: number;
@@ -119,6 +121,14 @@ type DashboardOverview = {
   completedVillageCount: number;
   pendingVillageCount: number;
 };
+
+function currentDashboardPeriod() {
+  const now = new Date();
+  return {
+    year: String(now.getFullYear()),
+    quarter: String(Math.floor(now.getMonth() / 3) + 1),
+  };
+}
 
 type ReportPrecheck = {
   ok: boolean;
@@ -184,7 +194,10 @@ function authHeaders(): HeadersInit {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TOWNS = ["北陡镇", "白沙镇", "大江镇", "赤溪镇", "广海镇", "沙堆镇", "古井镇", "潮连镇", "新会区", "双水镇", "崖门镇", "司前镇", "大泽镇", "三江镇", "罗坑镇", "田头镇", "睦洲镇"];
+const TOWNS = [
+  "桂圩镇", "罗顺片区", "建城镇", "宝珠镇", "通门镇", "千官镇", "大湾镇", "大方镇", "河口镇", "宋桂镇", "东坝镇", "历洞镇", "南江口镇", "连滩镇", "平台镇", "都城镇",
+  "金塘镇", "山阁镇", "镇盛镇", "袂花镇", "鳌头镇", "茂南区", "中科云粤西产业园",
+];
 
 const HISTORY_REPORTS: Report[] = [];
 
@@ -373,15 +386,12 @@ function surveyDisplayValue(s: TownSurvey["surveys"][number]): string {
 }
 
 const DASHBOARD_TOWNS: TownSurvey[] = [
-  { name: "北陡镇", status: "completed", facilityType: "treatment", surveys: makeDashboardSurveys(1) },
-  { name: "白沙镇", status: "completed", facilityType: "network", surveys: makeDashboardSurveys(1) },
-  { name: "大江镇", status: "completed", facilityType: "treatment", surveys: makeDashboardSurveys(1) },
-  { name: "赤溪镇", status: "inprogress", facilityType: "network", surveys: makeDashboardSurveys([0.7, 0.5, 0.6]) },
-  { name: "广海镇", status: "inprogress", facilityType: "treatment", surveys: makeDashboardSurveys([0.3, 0.2, 0.4]) },
-  { name: "沙堆镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
-  { name: "古井镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
-  { name: "潮连镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
-  { name: "双水镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
+  { name: "建城镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
+  { name: "都城镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
+  { name: "桂圩镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
+  { name: "金塘镇", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
+  { name: "山阁镇", status: "pending", facilityType: "network", surveys: makeDashboardSurveys(0) },
+  { name: "茂南区", status: "pending", facilityType: "treatment", surveys: makeDashboardSurveys(0) },
 ];
 
 type BackendTownRow = {
@@ -535,7 +545,7 @@ const PROGRESS_STEPS = [
   { id: 1, label: "读取资料包", desc: "解压并索引全部附件" },
   { id: 2, label: "识别镇街和附件", desc: "按镇街归档原始附件" },
   { id: 3, label: "抽取考核数据", desc: "识别运营记录与考核指标" },
-  { id: 4, label: "核算金额", desc: "使用默认金额计算方法" },
+  { id: 4, label: "核算金额", desc: "使用本项目金额口径" },
   { id: 5, label: "生成正文", desc: "按模板逐镇生成报告正文" },
   { id: 6, label: "检查报告", desc: "格式校验与数据核对" },
   { id: 7, label: "输出成品报告", desc: "打包 DOCX 文件" },
@@ -553,8 +563,8 @@ function DefaultMethodModal({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card">
           <div>
-            <h2 className="text-sm font-semibold text-foreground">默认金额计算方法</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">系统内置计算规则 · 如需调整请在下方上传新方法</p>
+            <h2 className="text-sm font-semibold text-foreground">本项目金额口径</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">仅使用郁南/茂南本项目资料 · 不使用通用金额基础表</p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X size={18} />
@@ -565,15 +575,15 @@ function DefaultMethodModal({ onClose }: { onClose: () => void }) {
           <section className="space-y-2">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">一、考核基准金额</h3>
             <div className="bg-muted rounded px-4 py-3 space-y-1.5 text-xs text-foreground leading-relaxed">
-              <p>年度合同服务费按合同约定的固定单价计算，基准公式如下：</p>
+              <p>未提供新的合同金额基础表或付费测算表时，系统沿用所选项目既有例文和历史付费表，并在报告中标注来源周期。</p>
               <div className="font-mono bg-card border border-border rounded px-3 py-2 text-xs mt-2">
-                基准金额 = 合同单价 × 核定处理水量（吨）
+                郁南/茂南项目金额 = 本项目历史基数 × 当期水量、Kq、E1/E2等合同系数
               </div>
             </div>
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">二、绩效扣减规则</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">二、金额核算边界</h3>
             <table className="w-full text-xs border border-border rounded overflow-hidden">
               <thead>
                 <tr className="bg-muted text-muted-foreground font-mono">
@@ -584,11 +594,9 @@ function DefaultMethodModal({ onClose }: { onClose: () => void }) {
               </thead>
               <tbody>
                 {[
-                  ["设施运行率不达标", "每降低 1%，扣减月服务费 2%", "当月扣减上限 20%"],
-                  ["出水水质超标", "每次扣减月服务费 5%", "每月最多计 3 次"],
-                  ["运维记录缺失", "每缺 1 份扣减月服务费 1%", "当月扣减上限 10%"],
-                  ["应急响应超时", "每次扣减月服务费 3%", "不设上限"],
-                  ["设备故障未及时报告", "每次扣减月服务费 2%", "当月扣减上限 10%"],
+                  ["郁南项目", "按郁南例文的W、E2、Kq及合同付费口径计算", "不得混入其他项目基数"],
+                  ["茂南项目", "按茂南例文的E1、Kq、Py、Pk、QB和管网付费口径计算", "不得混入其他项目基数"],
+                  ["缺少资料", "本项目自身历史表或当期水量、水质数据缺失时，只写公式和缺失条件", "不得编造最终金额"],
                 ].map(([item, rule, cap]) => (
                   <tr key={item} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-3 py-2 text-foreground">{item}</td>
@@ -601,25 +609,24 @@ function DefaultMethodModal({ onClose }: { onClose: () => void }) {
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">三、奖励条款</h3>
-            <div className="bg-muted rounded px-4 py-3 text-xs text-foreground leading-relaxed space-y-1.5">
-              <p>连续 6 个月考核达标（扣减率 &lt; 5%）可申请季度奖励金，奖励额度不超过季度服务费的 <strong>3%</strong>。</p>
-              <p>全年零超标记录额外奖励年服务费的 <strong>1%</strong>。</p>
-            </div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">三、资料优先级</h3>
+              <div className="bg-muted rounded px-4 py-3 text-xs text-foreground leading-relaxed space-y-1.5">
+                <p>优先使用本次上传的新合同、补充协议或金额计算表；未提供新表时，使用所选项目既有例文和历史付费表。</p>
+                <p>发现通用金额基础表、旧项目资料或其他项目基数时，系统只保留金额公式和边界说明，不输出最终应付金额。</p>
+              </div>
           </section>
 
           <section className="space-y-2">
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">四、最终结算公式</h3>
-            <div className="font-mono bg-muted border border-border rounded px-4 py-3 text-xs leading-loose">
-              <p>实付金额 = 基准金额</p>
-              <p className="pl-4">− Σ 各项扣减金额</p>
-              <p className="pl-4">+ 奖励金额（如适用）</p>
-            </div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest font-mono">四、报告呈现方式</h3>
+              <div className="font-mono bg-muted border border-border rounded px-4 py-3 text-xs leading-loose">
+                <p>金额章节按例文写法呈现公式、系数、来源周期和测算结果。</p>
+                <p>资料不足时写明“金额核定条件未完备”。</p>
+              </div>
           </section>
 
           <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5 text-xs text-muted-foreground">
             <Info size={13} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
-            以上为系统默认规则。如本期合同有补充协议或特殊约定，请在上传页面提供新的金额计算方法，系统将优先采用。
+            以上不是通用测算模板。如本期合同有补充协议或特殊约定，请在上传页面提供新的金额资料，系统将优先采用。
           </div>
         </div>
       </div>
@@ -636,7 +643,7 @@ function DefaultMethodLink() {
         className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-75 transition-opacity font-normal"
         style={{ fontSize: "inherit" }}
       >
-        默认金额计算方法
+        本项目金额口径
         <Eye size={11} className="ml-0.5 opacity-70" />
       </button>
       {open && <DefaultMethodModal onClose={() => setOpen(false)} />}
@@ -1320,7 +1327,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
             className="w-full flex items-center justify-between px-6 py-4 text-left"
           >
             <div>
-              <span className="text-sm font-semibold text-foreground">新的金额计算方法</span>
+              <span className="text-sm font-semibold text-foreground">新的金额资料</span>
               <span className="ml-2 text-xs text-muted-foreground">选填</span>
             </div>
             {methodOpen ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
@@ -1380,7 +1387,7 @@ function UploadPage({ onNav, packageFiles, setPackageFiles, selectedTowns, setSe
                   onChange={(e) => setMethodText(e.target.value)}
                   className="w-full border border-border rounded px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
                   style={{ background: "var(--input-background)" }}
-                  placeholder="例如：本期按合同单价下浮 5% 结算，超期罚款按每日 0.05% 扣减……"
+                  placeholder="例如：本期沿用2025年度付费测算表，或本期补充协议调整了某项基数……"
                 />
               </div>
             </div>
@@ -1506,7 +1513,7 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
               <>
                 <div className="h-px bg-border" />
                 <Row
-                  label="新的金额计算方法"
+                  label="新的金额资料"
                   value={hasMethod ? "已提供" : "未提供"}
                   valueClass={hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}
                 />
@@ -1528,7 +1535,7 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
                   <div className="flex items-start gap-2 bg-[var(--status-warning-bg)] border border-yellow-200 rounded px-3 py-2.5">
                     <AlertCircle size={14} className="text-[var(--status-warning)] mt-0.5 shrink-0" />
                     <p className="text-xs text-muted-foreground">
-                      未提供新的金额计算方法，系统将使用 <DefaultMethodLink /> 继续生成报告。
+                      未提供新的金额资料，系统将使用 <DefaultMethodLink /> 继续生成报告。
                     </p>
                   </div>
                 )}
@@ -1613,7 +1620,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
   const isMobile = dataSource === "mobile";
-  const calcMethodLabel = isMobile ? "使用数据看板数据，无需选择金额计算方法" : (hasMethod ? "已使用提供的金额计算方法" : "已使用默认金额计算方法");
+  const calcMethodLabel = isMobile ? "使用数据看板数据，无需选择金额资料" : (hasMethod ? "已使用提供的金额资料" : "已使用本项目金额口径");
 
   const steps = PROGRESS_STEPS.map(s => s.id === 1
     ? { ...s, label: isMobile ? "读取数据看板数据" : "读取资料包", desc: isMobile ? "载入看板已完成调研数据" : "解压并索引全部附件" }
@@ -1629,10 +1636,10 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
   const [logs, setLogs] = useState<string[]>(() => [
     "任务初始化完成",
     isMobile
-      ? "使用数据看板数据，无需选择金额计算方法。"
+      ? "使用数据看板数据，无需选择金额资料。"
       : hasMethod
-        ? "已读取提供的金额计算方法。"
-        : "未提供新的金额计算方法，已使用默认金额计算方法。",
+        ? "已读取提供的金额资料。"
+        : "未提供新的金额资料，已使用本项目金额口径。",
   ]);
 
   useEffect(() => {
@@ -1736,7 +1743,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
                     <div className="flex-1">
                       <p className={`text-sm font-medium ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{s.label}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {s.id === 4 && !isMobile ? (hasMethod ? "使用提供的金额计算方法" : "使用默认金额计算方法") : s.desc}
+                        {s.id === 4 && !isMobile ? (hasMethod ? "使用提供的金额资料" : "使用本项目金额口径") : s.desc}
                       </p>
                     </div>
                     <div className="text-xs font-mono">
@@ -1784,7 +1791,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
                   <div className="space-y-1.5">
                     <div className={`flex items-start gap-2 text-xs ${isMobile || hasMethod ? "text-[var(--status-success)]" : "text-muted-foreground"}`}>
                       <Info size={12} className={`mt-0.5 shrink-0 ${isMobile || hasMethod ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"}`} />
-                      {isMobile ? "已读取数据看板考核结果。" : hasMethod ? "已读取提供的金额计算方法。" : "未提供新的金额计算方法，已使用默认金额计算方法。"}
+                      {isMobile ? "已读取数据看板考核结果。" : hasMethod ? "已读取提供的金额资料。" : "未提供新的金额资料，已使用本项目金额口径。"}
                     </div>
                     {step >= 4 && (
                       <div className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -1840,14 +1847,6 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
 }
 
 // ─── Page 5: Result ───────────────────────────────────────────────────────────
-
-const TOWN_REPORTS: Report[] = [
-  { id: "r1", name: "北陡镇2023年下半年度村级设施考核报告（正文）", town: "北陡镇", period: "2023年下半年度", status: "completed", size: "1.2 MB", createdAt: "2024-01-15 15:32" },
-  { id: "r2", name: "白沙镇2023年下半年度村级设施考核报告（正文）", town: "白沙镇", period: "2023年下半年度", status: "completed", size: "1.1 MB", createdAt: "2024-01-15 15:32" },
-  { id: "r3", name: "大江镇2023年下半年度村级设施考核报告（正文）", town: "大江镇", period: "2023年下半年度", status: "completed", size: "1.3 MB", createdAt: "2024-01-15 15:32" },
-  { id: "r4", name: "赤溪镇2023年下半年度村级设施考核报告（正文）", town: "赤溪镇", period: "2023年下半年度", status: "completed", size: "0.9 MB", createdAt: "2024-01-15 15:32" },
-];
-const SUMMARY_REPORT: Report = { id: "r5", name: "2023年下半年度村级设施绩效考核综合报告（汇总）", town: "全区汇总", period: "2023年下半年度", status: "completed", size: "4.8 MB", createdAt: "2024-01-15 15:33" };
 
 function formatElapsed(s: number): string {
   if (s < 60) return `${s} 秒`;
@@ -2000,8 +1999,8 @@ function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, 
                   isMobile
                     ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用数据看板数据" }
                     : hasMethod
-                    ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用提供的金额计算方法" }
-                    : { icon: Info, color: "text-[var(--status-warning)]", text: "使用默认金额计算方法" },
+                    ? { icon: CheckCircle2, color: "text-[var(--status-success)]", text: "使用提供的金额资料" }
+                    : { icon: Info, color: "text-[var(--status-warning)]", text: "使用本项目金额口径" },
                 ].map(({ icon: Icon, color, text }) => (
                   <div key={text} className={`flex items-center gap-2 text-xs ${color}`}>
                     <Icon size={13} className="shrink-0" />
@@ -3011,13 +3010,17 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   );
 }
 
-function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, cities, selectedCityId, setSelectedCityId, selectedTownId, setSelectedTownId, overview }: {
+function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, cities, selectedYear, setSelectedYear, selectedQuarter, setSelectedQuarter, selectedCityId, setSelectedCityId, selectedTownId, setSelectedTownId, overview }: {
   onNav: (p: Page) => void;
   onViewTown: (t: TownSurvey) => void;
   onReviewTown?: (townName: string) => void;
   towns: TownSurvey[];
   setTowns: React.Dispatch<React.SetStateAction<TownSurvey[]>>;
   cities: CityOption[];
+  selectedYear: string;
+  setSelectedYear: (year: string) => void;
+  selectedQuarter: string;
+  setSelectedQuarter: (quarter: string) => void;
   selectedCityId: string;
   setSelectedCityId: (id: string) => void;
   selectedTownId: string;
@@ -3029,6 +3032,7 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
   const [addingNew, setAddingNew] = useState(false);
   const [newDraft, setNewDraft] = useState<TownSurvey>({ name: "", status: "pending", facilityType: "treatment", surveys: DEFAULT_SURVEYS() });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const dashboardYears = Array.from({ length: 7 }, (_, index) => String(2024 + index));
 
   const completed = towns.filter(t => t.status === "completed");
   const inprogress = towns.filter(t => t.status === "inprogress");
@@ -3120,7 +3124,27 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
       <TopBar title="数据看板" subtitle="调研进度总览" breadcrumbs={["数据看板"]} />
       <div className="px-8 py-6 space-y-6 w-full">
         <div className="bg-card border border-border rounded-lg px-5 py-4">
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-3 items-end">
+          <div className="grid grid-cols-[0.75fr_0.75fr_1fr_1fr_auto] gap-3 items-end">
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">年度</span>
+              <select
+                value={selectedYear}
+                onChange={event => setSelectedYear(event.target.value)}
+                className="h-9 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+              >
+                {dashboardYears.map(year => <option key={year} value={year}>{year}年</option>)}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">季度</span>
+              <select
+                value={selectedQuarter}
+                onChange={event => setSelectedQuarter(event.target.value)}
+                className="h-9 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+              >
+                {[1, 2, 3, 4].map(quarter => <option key={quarter} value={String(quarter)}>第{quarter}季度</option>)}
+              </select>
+            </label>
             <label className="space-y-1">
               <span className="block text-xs text-muted-foreground">项目</span>
               <select
@@ -3144,14 +3168,20 @@ function DataDashboardPage({ onNav, onViewTown, onReviewTown, towns, setTowns, c
               </select>
             </label>
             <button
-              onClick={() => { setSelectedCityId(""); setSelectedTownId(""); }}
+              onClick={() => {
+                const current = currentDashboardPeriod();
+                setSelectedYear(current.year);
+                setSelectedQuarter(current.quarter);
+                setSelectedCityId("");
+                setSelectedTownId("");
+              }}
               className="h-9 rounded border border-border px-3 text-xs text-muted-foreground hover:text-foreground"
             >
               清除筛选
             </button>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            当前统计范围：{selectedProjectName}。核心口径为项目下镇街完成情况，再下钻到各镇街项目点完成情况。
+            当前统计范围：{selectedYear}年第{selectedQuarter}季度，{selectedProjectName}。核心口径为项目下镇街完成情况，再下钻到各镇街项目点完成情况。
           </p>
         </div>
 
@@ -3956,6 +3986,7 @@ function AssessmentApp() {
   const [recordTownFilter, setRecordTownFilter] = useState<string | null>(null);
   const [towns, setTowns] = useState<TownSurvey[]>(DASHBOARD_TOWNS.map(t => ({ ...t, surveys: t.surveys.map(s => ({ ...s })) })));
   const [cities, setCities] = useState<CityOption[]>([]);
+  const [dashboardPeriod, setDashboardPeriod] = useState(() => currentDashboardPeriod());
   const [dashboardCityId, setDashboardCityId] = useState("");
   const [reportProjectId, setReportProjectId] = useState("");
   const [dashboardTownId, setDashboardTownId] = useState("");
@@ -4003,6 +4034,8 @@ function AssessmentApp() {
     async function loadDashboardTowns() {
       try {
         const params = new URLSearchParams();
+        params.set("year", dashboardPeriod.year);
+        params.set("quarter", dashboardPeriod.quarter);
         if (dashboardCityId) params.set("city_id", dashboardCityId);
         if (dashboardTownId) params.set("town_id", dashboardTownId);
         const query = params.toString() ? `?${params.toString()}` : "";
@@ -4029,7 +4062,7 @@ function AssessmentApp() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [dashboardCityId, dashboardTownId]);
+  }, [dashboardPeriod.year, dashboardPeriod.quarter, dashboardCityId, dashboardTownId]);
 
   function toggleOutput(id: string) {
     setOutputSelected(prev => {
@@ -4055,6 +4088,10 @@ function AssessmentApp() {
           towns={towns}
           setTowns={setTowns}
           cities={cities}
+          selectedYear={dashboardPeriod.year}
+          setSelectedYear={(year) => setDashboardPeriod(period => ({ ...period, year }))}
+          selectedQuarter={dashboardPeriod.quarter}
+          setSelectedQuarter={(quarter) => setDashboardPeriod(period => ({ ...period, quarter }))}
           selectedCityId={dashboardCityId}
           setSelectedCityId={setDashboardCityId}
           selectedTownId={dashboardTownId}

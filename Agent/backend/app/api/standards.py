@@ -147,7 +147,16 @@ def clone_version(version_id: str, payload: dict, session: Session = Depends(get
         session.flush()
         id_map[item.id] = copied.id
         for option in session.scalars(select(DeductionOption).where(DeductionOption.indicator_id == item.id)).all():
-            session.add(DeductionOption(indicator_id=copied.id, name=option.name, deduction_type=option.deduction_type, deduction_value=option.deduction_value, requires_photo=option.requires_photo))
+            session.add(
+                DeductionOption(
+                    indicator_id=copied.id,
+                    name=option.name,
+                    deduction_type=option.deduction_type,
+                    deduction_value=option.deduction_value,
+                    requires_photo=option.requires_photo,
+                    meta=option.meta,
+                )
+            )
     session.commit()
     return {"id": target.id, "name": target.name, "status": target.status}
 

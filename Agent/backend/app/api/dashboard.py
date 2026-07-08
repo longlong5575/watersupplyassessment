@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_session
-from app.models import AssessmentRecord, AssessmentScore, Attachment, City, SurveyRecord, Town, Village, WaterQualityRecord
+from app.models import AssessmentCycle, AssessmentRecord, AssessmentScore, Attachment, City, SurveyRecord, Town, Village, WaterQualityRecord
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -22,13 +22,25 @@ def _has_missing_deduction_photo(record: AssessmentRecord, attachments: list[Att
 
 
 @router.get("/towns")
-def towns(city_id: str | None = None, town_id: str | None = None, session: Session = Depends(get_session)):
+def towns(
+    city_id: str | None = None,
+    town_id: str | None = None,
+    year: int | None = None,
+    quarter: int | None = None,
+    session: Session = Depends(get_session),
+):
     query = select(Town).where(Town.is_active.is_(True)).order_by(Town.sort_order, Town.name)
     if city_id:
         query = query.where(Town.city_id == city_id)
     if town_id:
         query = query.where(Town.id == town_id)
     rows = session.scalars(query).all()
+    cycle_ids: list[str] | None = None
+    if year is not None and quarter is not None:
+        cycle_query = select(AssessmentCycle.id).where(AssessmentCycle.name == f"{year}年第{quarter}季度")
+        if city_id:
+            cycle_query = cycle_query.where(AssessmentCycle.city_id == city_id)
+        cycle_ids = list(session.scalars(cycle_query).all())
     items = []
     completed_town_count = 0
     inprogress_town_count = 0
@@ -36,14 +48,12 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
     total_villages = 0
     completed_villages = 0
     for town in rows:
-        records = list(session.scalars(select(AssessmentRecord).where(AssessmentRecord.town_id == town.id)).all())
+        records_query = select(AssessmentRecord).where(AssessmentRecord.town_id == town.id)
+        if cycle_ids is not None:
+            records_query = records_query.where(AssessmentRecord.cycle_id.in_(cycle_ids))
+        records = list(session.scalars(records_query).all())
         record_ids = [record.id for record in records]
-        completed_count = session.scalar(
-            select(func.count(AssessmentRecord.id)).where(
-                AssessmentRecord.town_id == town.id,
-                AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]),
-            )
-        ) or 0
+        completed_count = sum(1 for record in records if record.status in {"submitted", "reviewed", "locked"})
         village_count = session.scalar(select(func.count(Village.id)).where(Village.town_id == town.id, Village.is_active.is_(True))) or 0
         project_point_count = village_count or len(town.assessment_targets or []) or 1
         deduction_total = 0
@@ -115,6 +125,8 @@ def towns(city_id: str | None = None, town_id: str | None = None, session: Sessi
     return {
         "overview": {
             "cityId": city_id,
+            "year": year,
+            "quarter": quarter,
             "townCount": len(rows),
             "completedTownCount": completed_town_count,
             "inprogressTownCount": inprogress_town_count,

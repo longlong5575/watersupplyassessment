@@ -230,7 +230,7 @@ def main():
         maonan_network = standards[("茂南项目", "town_network")][1]
         overflow_item = next(item for item in maonan_network if "无污水冒出" in item["name"])
         overflow_options = [option["name"] for option in overflow_item["deductionOptions"]]
-        assert overflow_options == ["发现管道（渠箱）有污水冒出，每处扣0.2分"], overflow_options
+        assert overflow_options == ["发现一处扣0.2分"], overflow_options
         unit_options = [
             option
             for _, leaves in standards.values()

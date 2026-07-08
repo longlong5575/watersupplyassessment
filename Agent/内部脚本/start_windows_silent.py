@@ -229,6 +229,33 @@ def is_available(url: str) -> bool:
         return False
 
 
+def close_old_app_browser_windows() -> None:
+    script = r"""
+$browserNames = @("chrome", "msedge", "firefox", "iexplore", "brave", "opera")
+$titlePatterns = @("*PPP农村污水考核系统*", "*农村污水考核录入工具*")
+foreach ($process in Get-Process -ErrorAction SilentlyContinue | Where-Object { $browserNames -contains $_.ProcessName -and $_.MainWindowTitle }) {
+  foreach ($pattern in $titlePatterns) {
+    if ($process.MainWindowTitle -like $pattern) {
+      try { $process.CloseMainWindow() | Out-Null } catch {}
+      break
+    }
+  }
+}
+"""
+    try:
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
 def main() -> None:
     try:
         LOG_DIR.mkdir(exist_ok=True)
@@ -261,10 +288,9 @@ def main() -> None:
         wait_for("http://127.0.0.1:8000/health")
         wait_for("http://127.0.0.1:5173")
         wait_for("http://127.0.0.1:5174")
-        if not front_running:
-            webbrowser.open("http://127.0.0.1:5173")
-        if not mobile_running:
-            webbrowser.open("http://127.0.0.1:5174")
+        close_old_app_browser_windows()
+        webbrowser.open("http://127.0.0.1:5173")
+        webbrowser.open("http://127.0.0.1:5174")
         log("Startup completed")
     except Exception as exc:
         log(f"Startup failed: {exc}")
