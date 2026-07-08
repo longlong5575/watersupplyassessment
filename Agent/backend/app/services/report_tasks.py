@@ -12,6 +12,7 @@ from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models import AssessmentCycle, AssessmentRecord, Attachment, Report, ReportTask, SurveyRecord, Town, WaterQualityRecord
 from app.models.entities import utcnow
+from app.services.payment_basis import payment_source_summary
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
 from app.services.payment import maonan_operation_coefficient, town_average_coefficient
 
@@ -1306,6 +1307,7 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
     document.add_heading("3.2 付费公式", level=2)
     _add_paragraph(document, "城镇水质净化厂月服务费Pz=Py×QB×(3/5+Kq/10+3E1/10)+Pk/12×(2/3+E1/3)。其中Py为污水处理运营服务费单价，QB为当月处理水量，Kq为水质浓度系数，Pk为水质净化设施可用性付费。")
     _add_paragraph(document, "管网月运营维护费按年运营维护费×(3/5+Kq/10+3E1/10)/12计算。项目服务费由可用性付费和运营维护费组成，具体付费范围及基数优先采用本期经确认资料；未提供新资料时，沿用茂南项目既有例文和历史付费表，不引用其他项目或通用金额基础表。")
+    _add_paragraph(document, payment_source_summary("茂南项目"))
 
     document.add_heading("3.3 金额核定条件", level=2)
     _add_simple_table(document, ["序号", "必需输入", "当前状态", "处理原则"], [

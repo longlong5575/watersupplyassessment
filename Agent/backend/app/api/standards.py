@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_session
 from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion
 from app.services.standard_names import clean_standard_name
+from app.services.standard_validation import validate_standard_payload
 
 
 router = APIRouter(prefix="/api/indicator-versions", tags=["standards"])
@@ -94,6 +95,11 @@ def update_version(version_id: str, payload: dict, session: Session = Depends(ge
     name = str(payload.get("name") or "").strip()
     if name:
         version.name = name
+
+    raw_items = payload.get("items") or []
+    validation_errors = validate_standard_payload(raw_items)
+    if validation_errors:
+        raise HTTPException(status_code=400, detail={"message": "评分标准保存失败，请先修正校验问题。", "errors": validation_errors[:20]})
 
     indicators = {
         item.id: item

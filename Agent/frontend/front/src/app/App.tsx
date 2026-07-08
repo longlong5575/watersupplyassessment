@@ -723,7 +723,7 @@ function ReportPreviewModal({ report, onClose }: { report: Report; onClose: () =
           </div>
         </div>
 
-        <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+        <div className="max-h-[72vh] overflow-y-auto bg-slate-100 px-5 py-5">
           {loading && (
             <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
               <Loader2 size={16} className="animate-spin" /> 正在加载报告预览
@@ -749,31 +749,35 @@ function ReportPreviewModal({ report, onClose }: { report: Report; onClose: () =
                 </div>
               </div>
 
-              <div className="space-y-2">
-                {content.paragraphs.slice(0, 40).map((paragraph, index) => (
-                  <p key={`${index}-${paragraph.slice(0, 12)}`} className="text-sm leading-7 text-foreground">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-
-              {content.tables.map((table, tableIndex) => (
-                <div key={tableIndex} className="overflow-x-auto rounded border border-border">
-                  <table className="min-w-full text-xs">
-                    <tbody>
-                      {table.map((row, rowIndex) => (
-                        <tr key={rowIndex} className="border-b border-border last:border-0">
-                          {row.map((cell, cellIndex) => (
-                            <td key={cellIndex} className="max-w-[240px] whitespace-pre-wrap px-3 py-2 align-top text-foreground">
-                              {cell}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div className="mx-auto min-h-[920px] w-full max-w-[794px] bg-white px-16 py-14 shadow-sm ring-1 ring-slate-200">
+                <div className="space-y-2 font-['SimSun','宋体',serif] text-[14px] leading-7 text-slate-950">
+                  {content.paragraphs.slice(0, 48).map((paragraph, index) => (
+                    <p key={`${index}-${paragraph.slice(0, 12)}`} className={index === 0 ? "text-center text-[18px] font-semibold leading-9" : "text-justify indent-8"}>
+                      {paragraph}
+                    </p>
+                  ))}
                 </div>
-              ))}
+
+                <div className="mt-6 space-y-4">
+                  {content.tables.map((table, tableIndex) => (
+                    <div key={tableIndex} className="overflow-x-auto">
+                      <table className="min-w-full border-collapse font-['SimSun','宋体',serif] text-[12px] text-slate-950">
+                        <tbody>
+                          {table.map((row, rowIndex) => (
+                            <tr key={rowIndex}>
+                              {row.map((cell, cellIndex) => (
+                                <td key={cellIndex} className={`max-w-[220px] whitespace-pre-wrap border border-slate-700 px-2 py-1.5 align-top ${rowIndex === 0 ? "bg-slate-100 text-center font-semibold" : ""}`}>
+                                  {cell}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -2301,6 +2305,45 @@ function cleanStandardName(name: string): string {
     .trim();
 }
 
+function validateStandardDetail(detail: IndicatorVersionDetail): string[] {
+  const errors: string[] = [];
+  const childrenByParent = new Map<string, IndicatorVersionDetail["items"]>();
+  for (const item of detail.items) {
+    if (item.parentId) childrenByParent.set(item.parentId, [...(childrenByParent.get(item.parentId) ?? []), item]);
+    if (!item.name.trim()) errors.push("存在未命名指标。");
+  }
+
+  const scoreOf = (item: IndicatorVersionDetail["items"][number]) => Number(item.fullScore || 0);
+  for (const item of detail.items) {
+    const children = childrenByParent.get(item.id) ?? [];
+    if (children.length > 0) {
+      const childTotal = children.reduce((sum, child) => sum + scoreOf(child), 0);
+      if (Math.abs(scoreOf(item) - childTotal) > 0.01) {
+        errors.push(`${item.name}满分应等于下级合计${Number(childTotal.toFixed(2))}。`);
+      }
+    }
+    if (item.level === 3) {
+      if (!item.options?.length) errors.push(`${item.name}缺少扣分选项。`);
+      for (const option of item.options ?? []) {
+        if (!option.name.trim()) errors.push(`${item.name}存在未命名扣分选项。`);
+        if (Number(option.deductionValue || 0) > scoreOf(item) + 0.01) {
+          errors.push(`${item.name}的扣分值不能超过单项满分。`);
+        }
+      }
+    }
+  }
+
+  const totals = new Map<string, number>();
+  for (const item of detail.items.filter(item => item.level === 3)) {
+    const key = item.facilityType || "未分类";
+    totals.set(key, (totals.get(key) ?? 0) + scoreOf(item));
+  }
+  totals.forEach((total, key) => {
+    if (Math.abs(total - 100) > 0.01) errors.push(`${key}评分项满分合计为${Number(total.toFixed(2))}，应为100。`);
+  });
+  return Array.from(new Set(errors));
+}
+
 function StandardsPage() {
   const [versions, setVersions] = useState<IndicatorVersionRow[]>([]);
   const [selected, setSelected] = useState<IndicatorVersionDetail | null>(null);
@@ -2352,6 +2395,11 @@ function StandardsPage() {
 
   const saveStandard = async () => {
     if (!selected || !draft) return;
+    const validationErrors = validateStandardDetail(draft);
+    if (validationErrors.length) {
+      setNotice(`保存前检查未通过：${validationErrors.slice(0, 4).join("；")}`);
+      return;
+    }
     setBusy("save");
     try {
       const response = await fetch(`${API_BASE_URL}/indicator-versions/${selected.id}`, {
@@ -2361,8 +2409,11 @@ function StandardsPage() {
           name: draft.name,
           items: draft.items.map(item => ({
             id: item.id,
+            parentId: item.parentId,
             name: item.name,
+            level: item.level,
             fullScore: item.fullScore,
+            facilityType: item.facilityType,
             options: (item.options ?? []).map(option => ({
               id: option.id,
               name: option.name,
@@ -2372,7 +2423,15 @@ function StandardsPage() {
           })),
         }),
       });
-      if (!response.ok) throw new Error("标准保存失败");
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        const message = typeof detail?.detail === "string"
+          ? detail.detail
+          : detail?.detail?.message
+            ? `${detail.detail.message}${Array.isArray(detail.detail.errors) ? ` ${detail.detail.errors.slice(0, 4).join("；")}` : ""}`
+            : "标准保存失败";
+        throw new Error(message);
+      }
       const detail = await response.json();
       setSelected(detail);
       setDraft(null);

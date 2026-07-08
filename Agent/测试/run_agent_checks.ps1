@@ -95,6 +95,7 @@ $summary.projectPipeline = $true
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_calculation_rules.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_option_generation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_integrity.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_save_validation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_no_taishan_residue.py") }
 
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_report_quality.py") }
