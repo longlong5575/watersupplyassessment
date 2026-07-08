@@ -136,29 +136,32 @@ def check_docx(path: Path, town: str, project_name: str):
     table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
     all_text = f"{text}\n{table_text}"
     assert town in all_text
-    assert "摘要" in all_text
+    assert ("摘要" in all_text) or ("摘  要" in all_text)
     assert "目录" in all_text
     assert "附件1 考核标准" in all_text
-    assert "附件2 绩效考核评分表" in all_text
-    assert "附件3 现场检查照片" in all_text
-    assert "附件5 水质抽检汇总" in all_text
+    assert "附件1 考核标准" in all_text
     if project_name == "郁南项目":
-        assert "镇村污水处理设施绩效考核报告" in all_text
-        assert "问卷调查（村级考核有）" in all_text
+        assert "镇级及农村设施考核报告" in all_text
+        assert "公众调查" in all_text
         assert "农村污水处理设施" in all_text
         assert "DB44/2208-2019" in all_text
-        assert "一、考核工作开展情况" in all_text
-        assert "二、考核评分情况" in all_text
-        assert "三、发现的主要问题" in all_text
-        assert "四、建议" in all_text
+        assert "第一章 考核工作概述" in all_text
+        assert "第二章 镇级设施运维考核情况" in all_text
+        assert "第三章 主要问题及整改建议" in all_text
+        assert "附件2 考核评分表" in all_text
+        assert "附件3 现场照片" in all_text
+        assert "附件5 水质抽检情况汇总表" in all_text
     if project_name == "茂南项目":
         assert "城镇设施绩效考核报告" in all_text
         assert "水质净化厂" in all_text
         assert "问卷调查（村级考核有）" not in all_text
         assert "第一章 考核工作概述" in all_text
-        assert "第二章" in all_text
-        assert "第四章 绩效付费计算" in all_text
-        assert "第五章 主要改进点、主要问题和整改工作建议" in all_text
+        assert "第二章 城镇水质净化设施考核结果" in all_text
+        assert "第三章 绩效付费计算" in all_text
+        assert "第四章 主要改进点、主要问题和整改工作建议" in all_text
+        assert "附件2 周期评分表" in all_text
+        assert "附件3 现场检查照片" in all_text
+        assert "附件5 水质抽检汇总" in all_text
         assert "附件8 月平均值统计" in all_text
     assert "fixture-photo.jpg" in all_text
     assert "Agent辅助校验" not in all_text

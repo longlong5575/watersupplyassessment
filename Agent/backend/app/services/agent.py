@@ -138,7 +138,7 @@ def build_record_agent_output(session: Session, record: AssessmentRecord) -> dic
         "draftParagraphs": [
             {
                 "title": "问题归纳",
-                "text": f"根据系统采集和复核数据，{town}主要需关注{issue_names}等事项。上述表述仅为报告草稿，正式分数、扣分和金额以数据库确定性结果为准。",
+                "text": f"根据现场填报、平台复核及附件资料，{town}主要需关注{issue_names}等事项。上述表述仅为报告草稿，正式分数、扣分和金额以数据库确定性结果为准。",
                 "evidenceRefs": evidence_refs[:8],
             }
         ],

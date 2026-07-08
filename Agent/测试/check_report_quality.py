@@ -10,7 +10,7 @@ from docx import Document
 
 BAD_TOKENS = ["None", "nan", "NaN", "Decimal(", "reviewed", "submitted", "locked", "returned", "E+", "e+"]
 PROJECT_EXPECTATIONS = {
-    "郁南": ["镇村污水处理设施绩效考核报告", "问卷调查", "农村污水处理设施", "DB44/2208-2019", "TP", "附件1 考核标准", "附件2 绩效考核评分表"],
+    "郁南": ["镇级及农村设施考核报告", "公众调查", "农村污水处理设施", "DB44/2208-2019", "TP", "附件1 考核标准", "附件2 考核评分表"],
     "茂南": ["城镇设施绩效考核报告", "水质净化厂", "城镇污水处理设施", "TP", "附件1 考核标准", "附件8 月平均值统计"],
 }
 
@@ -67,13 +67,14 @@ def inspect_report(path: Path) -> dict[str, object]:
     replacement_chars = text.count("\ufffd")
     sequence_errors = serial_errors(document)
     if project_key == "茂南":
-        required_sections = ["摘要", "目录", "第一章 考核工作概述", "第二章", "第四章 绩效付费计算", "第五章 主要改进点、主要问题和整改工作建议", "附件1 考核标准", "附件2 绩效考核评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
+        required_sections = ["摘  要", "目录", "第一章 考核工作概述", "第二章 城镇水质净化设施考核结果", "第三章 绩效付费计算", "第四章 主要改进点、主要问题和整改工作建议", "附件1 考核标准", "附件2 周期评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
     else:
-        required_sections = ["摘要", "目录", "一、考核工作开展情况", "二、考核评分情况", "三、发现的主要问题", "四、建议", "附件1 考核标准", "附件2 绩效考核评分表", "附件3 现场检查照片", "附件5 水质抽检汇总"]
+        required_sections = ["摘要", "目录", "第一章 考核工作概述", "第二章 镇级设施运维考核情况", "第三章 主要问题及整改建议", "附件1 考核标准", "附件2 考核评分表", "附件3 现场照片", "附件5 水质抽检情况汇总表"]
     missing_sections = [item for item in required_sections if item not in text]
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
-    min_tables = 18 if project_key == "茂南" else 20
-    min_paragraphs = 75 if project_key == "茂南" else 70
+    is_summary = "汇总" in path.name
+    min_tables = (30 if project_key == "茂南" else 35) if is_summary else 12
+    min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
     passed = not missing and not bad_tokens and replacement_chars == 0 and not sequence_errors and not missing_sections and not weird_numbers and not too_short
     return {
