@@ -111,7 +111,7 @@ def build_record_agent_output(session: Session, record: AssessmentRecord) -> dic
         warnings.append(f"{len(water_unqualified)} 条水质记录未判定为合格，建议作为报告佐证。")
         evidence_refs.extend(_evidence("water_quality", item.id, item.conclusion or "水质记录") for item in water_unqualified[:5])
     if not logs:
-        warnings.append("尚无复核日志，Agent 结果只能作为复核前辅助提示。")
+        warnings.append("尚无复核记录，当前分析仅供复核前参考。")
 
     town = record.town.name
     issue_names = "、".join(item["title"] for item in issues[:3]) or "暂无明显扣分问题"
@@ -120,8 +120,8 @@ def build_record_agent_output(session: Session, record: AssessmentRecord) -> dic
         {"title": "报告表述建议", "text": f"报告问题段落可围绕{issue_names}展开，并引用复核后的确定性评分数据。", "evidenceRefs": evidence_refs[:5]},
     ]
     semantic_checks = [
-        {"name": "分数边界", "passed": True, "message": "Agent 未改写分数，分数仍来自数据库。"},
-        {"name": "金额边界", "passed": True, "message": "Agent 未参与金额计算。"},
+        {"name": "分数边界", "passed": True, "message": "辅助分析未改动评分结果，分数以已确认的评分明细为准。"},
+        {"name": "金额边界", "passed": True, "message": "辅助分析不参与金额计算。"},
         {"name": "证据引用", "passed": bool(evidence_refs) or not issues, "message": "发现问题均已绑定来源引用。" if evidence_refs or not issues else "部分问题缺少来源引用。"},
     ]
     summary = (
@@ -138,7 +138,7 @@ def build_record_agent_output(session: Session, record: AssessmentRecord) -> dic
         "draftParagraphs": [
             {
                 "title": "问题归纳",
-                "text": f"根据现场填报、平台复核及附件资料，{town}主要需关注{issue_names}等事项。上述表述仅为报告草稿，正式分数、扣分和金额以数据库确定性结果为准。",
+                "text": f"根据现场检查记录、复核意见及附件资料，{town}主要需关注{issue_names}等事项。具体分数、扣分和金额以经确认的评分结果及合同约定为准。",
                 "evidenceRefs": evidence_refs[:8],
             }
         ],
@@ -199,15 +199,15 @@ def create_report_task_agent_run(session: Session, task: ReportTask) -> AgentRun
             for item in towns
         ],
         "suggestions": [
-            {"title": "生成前复核", "text": "确认报告范围、数据快照哈希和评分标准版本后再采用 Agent 草稿段落。", "evidenceRefs": evidence_refs[:3]}
+            {"title": "生成前复核", "text": "正式采用前应核对报告范围、评分标准和支撑资料，确保文字表述与考核结论一致。", "evidenceRefs": evidence_refs[:3]}
         ],
         "draftParagraphs": [
-            {"title": "报告生成说明", "text": "本报告基于后台已复核或已锁定数据生成，Agent 仅进行问题归纳和语义校验，不参与分数及金额计算。", "evidenceRefs": evidence_refs[:3]}
+            {"title": "报告生成说明", "text": "本报告依据已复核或已确认的考核资料编制，辅助分析仅用于归纳问题和核对文字，不参与分数及金额计算。", "evidenceRefs": evidence_refs[:3]}
         ],
         "semanticChecks": [
             {"name": "数据快照", "passed": bool(task.dataset_hash), "message": "报告任务已绑定数据快照哈希。" if task.dataset_hash else "报告任务缺少数据快照哈希。"},
             {"name": "记录范围", "passed": bool(snapshot.get("recordIds")), "message": "报告任务已保存记录范围。" if snapshot.get("recordIds") else "报告任务缺少记录范围。"},
-            {"name": "确定性边界", "passed": True, "message": "Agent 未参与分数、金额和锁定状态判断。"},
+            {"name": "确定性边界", "passed": True, "message": "辅助分析不参与分数、金额及审核状态判断。"},
         ],
         "evidenceRefs": evidence_refs,
         "warnings": warnings,
