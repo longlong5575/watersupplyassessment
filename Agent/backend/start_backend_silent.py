@@ -51,7 +51,7 @@ def _system_python(windowed: bool = True) -> Path:
                 if pythonw.exists():
                     return pythonw
             return candidate
-    raise RuntimeError("Python 3.12 was not found.")
+    raise RuntimeError("未找到 Python 3.12，请先安装 Python 3.12。")
 
 
 def _clean_env() -> dict[str, str]:
@@ -83,7 +83,7 @@ def _wait_until_ready(timeout: float = 45.0) -> None:
         except Exception as exc:
             last_error = exc
             time.sleep(0.5)
-    raise RuntimeError(f"Backend did not become ready: {last_error}")
+    raise RuntimeError(f"后端服务未能正常启动：{last_error}")
 
 
 def main() -> None:

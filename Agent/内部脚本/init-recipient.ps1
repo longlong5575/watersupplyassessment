@@ -14,7 +14,7 @@ $runtimeFront = Join-Path (Join-Path $runtimeRoot "frontend") "front"
 $runtimeMobile = Join-Path (Join-Path $runtimeRoot "frontend") "front-mobile"
 
 function Require-Command([string]$name) {
-  if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { throw "Missing required command: $name" }
+  if (-not (Get-Command $name -ErrorAction SilentlyContinue)) { throw "缺少必要命令：$name" }
 }
 
 function Invoke-Pnpm {
@@ -48,7 +48,7 @@ function Initialize-Frontend([string]$directory) {
 function Sync-RuntimeFrontend([string]$source, [string]$target) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
   robocopy $source $target /MIR /XD node_modules dist .vite /XF .env.local *.log *.pid /R:2 /W:1 | Out-Null
-  if ($LASTEXITCODE -gt 7) { throw "Failed to prepare frontend runtime copy: $source" }
+  if ($LASTEXITCODE -gt 7) { throw "准备前端运行副本失败：$source" }
 }
 
 function Install-PythonRequirements {

@@ -9,7 +9,7 @@ from zipfile import ZipFile
 from docx import Document
 
 
-BAD_TOKENS = ["None", "nan", "NaN", "Decimal(", "reviewed", "submitted", "locked", "returned", "E+", "e+", "原文例文", "模板版", "系统生成版"]
+BAD_TOKENS = ["None", "nan", "NaN", "Decimal(", "reviewed", "submitted", "locked", "returned", "E+", "e+", "原文例文", "例文口径", "原文镇名", "原文报告", "模板版", "系统生成版"]
 BAD_AMOUNT_TEXT = ["使用通用金额基础表", "按通用金额基础表", "合同单价 × 核定处理水量", "奖励金额", "季度奖励金"]
 PROJECT_EXPECTATIONS = {
     "郁南": ["镇级及农村设施考核报告", "项目人员组成", "公众调查", "农村污水处理设施", "DB44/2208-2019", "TP", "附件1 考核标准", "附件2 考核评分表"],

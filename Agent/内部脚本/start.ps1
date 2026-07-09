@@ -65,7 +65,7 @@ function Add-CommonRuntimePaths {
 
 function Install-Node {
   if (Get-Command "node" -ErrorAction SilentlyContinue) { return }
-  if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) { throw "Node.js is required and Windows App Installer is unavailable." }
+  if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) { throw "缺少 Node.js，且当前系统无法使用 Windows 应用安装器自动安装。" }
   & winget install --id OpenJS.NodeJS.LTS --exact --silent --accept-package-agreements --accept-source-agreements
   Add-CommonRuntimePaths
 }
@@ -96,7 +96,7 @@ function Wait-ForUrl([string]$url) {
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
     try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 | Out-Null; return } catch { $lastError = $_.Exception.Message; Start-Sleep -Seconds 1 }
   }
-  throw "Service startup timed out: $url ($lastError)"
+  throw "服务启动超时：$url（$lastError）"
 }
 
 function Test-UrlReady([string]$url) {

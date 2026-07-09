@@ -782,7 +782,7 @@ def _add_town_type_sections(document, *, records: list[dict[str, Any]], project_
     for town_index, (town_name, town_records) in enumerate(by_town.items(), 1):
         document.add_heading(f"{town_index}. {town_name}考核情况", level=2)
         _add_town_basic_intro(document, town_name=town_name, town_data=town_lookup.get(town_name), records=town_records)
-        _add_paragraph(document, f"{town_name}本期纳入{len(town_records)}个考核对象。以下按原文报告“基本情况、运维考核情况、扣分情况、整改建议”的顺序展开。")
+        _add_paragraph(document, f"{town_name}本期纳入{len(town_records)}个考核对象。以下按正式报告“基本情况、运维考核情况、扣分情况、整改建议”的顺序展开。")
         town_types = _records_by_type(town_records)
         for type_index, (facility_type, items) in enumerate(town_types.items(), 1):
             label = REPORT_TYPE_LABELS.get(facility_type, facility_type)

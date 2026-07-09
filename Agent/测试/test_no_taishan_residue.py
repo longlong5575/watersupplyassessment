@@ -35,6 +35,13 @@ FORBIDDEN = [
     "\u7530\u5934\u9547",
     "\u7766\u6d32\u9547",
     "common_" "amount_" "basis",
+    "httpx2",
+    "Node.js is required",
+    "Python 3.12 was not found",
+    "Backend did not become ready",
+    "Service startup timed out",
+    "Missing required command",
+    "Failed to prepare frontend runtime copy",
 ]
 
 

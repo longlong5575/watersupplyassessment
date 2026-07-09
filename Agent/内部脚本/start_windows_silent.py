@@ -96,7 +96,7 @@ def find_python() -> Path:
         ).strip()
         if completed:
             return Path(completed)
-    raise RuntimeError("Python 3.12 was not found. Please install Python 3.12 first.")
+    raise RuntimeError("未找到 Python 3.12，请先安装 Python 3.12。")
 
 
 def find_pythonw(python: Path) -> Path:
@@ -114,7 +114,7 @@ def find_pnpm() -> str:
     npx = shutil.which("npx.cmd") or shutil.which("npx")
     if npx:
         return npx
-    raise RuntimeError("pnpm or npx was not found. Please install Node.js first.")
+    raise RuntimeError("未找到 pnpm 或 npx，请先安装 Node.js。")
 
 
 def ensure_env_file(directory: Path) -> None:

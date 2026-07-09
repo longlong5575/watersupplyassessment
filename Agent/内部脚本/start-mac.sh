@@ -69,7 +69,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if ! command -v node >/dev/null 2>&1; then
-  log "Node.js is required."
+  log "缺少 Node.js，请先安装 Node.js。"
   exit 1
 fi
 
