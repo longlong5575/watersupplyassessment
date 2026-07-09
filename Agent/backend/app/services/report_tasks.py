@@ -88,6 +88,16 @@ def _set_style_font(style, font_name: str, size_pt: float, *, bold: bool = False
     style.font.bold = bold
     style.font.color.rgb = RGBColor(0, 0, 0)
 
+
+def _fmt_score_value(value: Any) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return str(value or "0")
+    if abs(number - round(number)) < 0.0001:
+        return str(int(round(number)))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
 PROJECT_REPORT_PROFILES = {
     "郁南项目": {
         "shortName": "郁南",
@@ -300,7 +310,13 @@ def _add_deduction_narrative(document, records: list[dict[str, Any]], *, limit: 
         total = sum(float(item[4] or 0) for item in items)
         points = "、".join(dict.fromkeys(str(item[1]) for item in items))
         reasons = "；".join(dict.fromkeys(str(item[5]) for item in items if item[5] and str(item[5]) != "-"))
-        text = f"{index}、{points}在“{indicator}”方面存在不符合考核要求的情况，合计扣{total:.2f}分"
+        if total >= 5:
+            degree = "对本项得分影响较明显"
+        elif len(items) > 1:
+            degree = "属于同类问题重复出现"
+        else:
+            degree = "问题相对单一"
+        text = f"{index}、{points}在“{indicator}”方面存在不符合考核要求的情况，合计扣{_fmt_score_value(total)}分，{degree}"
         if reasons:
             text += f"，主要表现为：{reasons}"
         _add_paragraph(document, text + "。")

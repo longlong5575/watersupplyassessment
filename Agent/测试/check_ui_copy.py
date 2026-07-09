@@ -17,6 +17,7 @@ CHECKED_FILES = [
 
 FORBIDDEN_SNIPPETS = [
     "全部城市",
+    "城市：",
     "江门市",
     "系统设置",
     "交付前检查",

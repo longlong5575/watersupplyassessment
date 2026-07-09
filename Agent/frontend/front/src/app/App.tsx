@@ -2871,7 +2871,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
               <div><p className="text-xs text-muted-foreground">照片附件</p><p className="text-lg font-semibold">{selected.attachments?.length ?? 0}</p></div>
             </div>
             <div className="grid grid-cols-4 gap-3 px-5 py-3 border-b border-border text-xs text-muted-foreground">
-              <p>城市：<span className="text-foreground">{selected.cityName || "-"}</span></p>
+              <p>项目：<span className="text-foreground">{selected.cityName || "-"}</span></p>
               <p>周期：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
             <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
               <p>提交：<span className="text-foreground">{formatPlatformTime(selected.submittedAt)}</span></p>
@@ -3943,6 +3943,10 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
             <option value="">请选择项目</option>
             {cities.map(city => <option key={city.id} value={city.id}>{city.name}</option>)}
           </select>
+          <div className="mt-3 rounded border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            报告周期将自动使用当前看板筛选周期：
+            <span className="ml-1 font-semibold text-foreground">{reportPeriod || precheck?.summary?.cycleName || "当前考核周期"}</span>
+          </div>
         </div>
 
         {/* Data overview */}

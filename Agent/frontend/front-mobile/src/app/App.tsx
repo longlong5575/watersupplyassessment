@@ -489,6 +489,14 @@ function uniqueDeductionOptions(options: DeductionOption[]): DeductionOption[] {
   });
 }
 
+function knowledgeRowsForItem(item: L3Item): Array<{ label: string; text: string }> {
+  return [
+    { label: "评价标准", text: item.evaluationStandard ?? "" },
+    { label: "评分方法", text: item.scoringMethod ?? "" },
+    { label: "资料来源", text: item.dataSource ?? "" },
+  ].filter(row => normalizeDisplayText(row.text));
+}
+
 function isMonthlyUnqualifiedRuleItem(item: L3Item): boolean {
   const text = itemKnowledgeText(item);
   return text.includes("全月不合格") || (text.includes("化验") && text.includes("判定为不合格"));
@@ -857,16 +865,11 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {filtered.map(({ item, type }) => {
-          const knowledgeText = uniqueDisplayTexts([
-            item.options.length === 0 ? item.evaluationStandard : undefined,
-            item.description,
-            item.options.length === 0 ? item.scoringMethod : undefined,
-            item.dataSource,
-          ]);
-          const knowledgeTextSet = new Set(knowledgeText.map(normalizeDisplayText));
+          const knowledgeRows = knowledgeRowsForItem(item);
+          const knowledgeTextSet = new Set(knowledgeRows.map(row => normalizeDisplayText(row.text)));
           const tips = uniqueDisplayTexts(knowledgeGuidanceForItem(item))
             .filter(tip => !knowledgeTextSet.has(normalizeDisplayText(tip)));
-          const combinedKnowledgeText = comparisonText(knowledgeText.join(" "));
+          const combinedKnowledgeText = comparisonText(knowledgeRows.map(row => row.text).join(" "));
           const deductionOptions = uniqueDeductionOptions(item.options)
             .filter(option => !combinedKnowledgeText.includes(comparisonText(option.reason)));
           return (
@@ -887,13 +890,19 @@ function PKnowledge({ onBack }: { onBack: () => void }) {
                 ))}
               </div>
             )}
-            {knowledgeText.length > 0 && (
-              <div className="mt-3 space-y-1.5 text-xs text-muted-foreground leading-relaxed whitespace-pre-line">
-                {knowledgeText.map(text => <p key={text}>{text}</p>)}
+            {knowledgeRows.length > 0 && (
+              <div className="mt-3 space-y-2 text-xs leading-relaxed">
+                {knowledgeRows.map(row => (
+                  <div key={`${row.label}-${row.text}`} className="rounded-lg border border-border bg-muted/30 px-3 py-2">
+                    <div className="mb-1 text-[11px] font-medium text-muted-foreground">{row.label}</div>
+                    <p className="whitespace-pre-line text-foreground">{row.text}</p>
+                  </div>
+                ))}
               </div>
             )}
             {deductionOptions.length > 0 && (
               <div className="mt-3 space-y-1.5">
+                <div className="text-[11px] font-medium text-muted-foreground">扣分选项</div>
                 {deductionOptions.map(option => (
                   <div key={option.id} className="rounded-lg bg-muted px-3 py-2 text-xs text-foreground leading-relaxed">
                     {option.reason}
