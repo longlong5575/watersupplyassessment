@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import base64
 from pathlib import Path
 
 
@@ -56,7 +57,7 @@ def leaf_standards(client: TestClient, project_id: str, cycle_id: str, facility_
     return data, leaves
 
 
-def record_payload(*, project, cycle, town, village, facility_type, indicator, note="极端重复扣分"):
+def record_payload(*, project, cycle, town, village, facility_type, indicator, note="现场复核发现该项存在不符合评分标准要求的情况"):
     indicators = INDICATOR_GROUPS.get(indicator["id"], [indicator])
     payload = {
         "schemaVersion": "1.0",
@@ -87,8 +88,8 @@ def record_payload(*, project, cycle, town, village, facility_type, indicator, n
                     "done": True,
                     "options": ([
                         {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": note},
-                        {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": "第二原因"},
-                    ] if item.get("deductionOptions") else []),
+                        {"optionId": item["deductionOptions"][0]["id"], "selection": "standard", "instances": 99, "note": "资料记录与现场情况不一致，需整改闭环"},
+                    ] if item["id"] == indicator["id"] and item.get("deductionOptions") else []),
                 }
                 for item in indicators
             },
@@ -168,7 +169,7 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "附件3 现场检查照片" in all_text
         assert "附件5 水质抽检汇总" in all_text
         assert "附件8 月平均值统计" in all_text
-    assert "fixture-photo.jpg" in all_text
+    assert "fixture-photo.png" in all_text
     assert "Agent辅助校验" not in all_text
     assert "系统采集" not in all_text
     for table in document.tables:
@@ -315,7 +316,8 @@ def main():
         )
         count_payload["villages"][0]["entries"][count_indicator["id"]]["options"] = [{
             "optionId": count_option["id"], "selection": "standard",
-            "instances": int(count_option["maxInstances"]) + 1000, "note": "超量项数封顶验证",
+            "instances": int(count_option["maxInstances"]) + 1000, "rangeValue": 0,
+            "note": "现场发现多处同类问题，按评分标准上限扣分",
         }]
         count_created = assert_ok(client.post("/api/mobile/assessment-records", json=count_payload, headers=inspector), "count overflow assessment")
         count_detail = assert_ok(client.get(f"/api/records/{count_created['recordIds'][0]}"), "count overflow detail")
@@ -331,7 +333,7 @@ def main():
         )
         adjusted_payload["villages"][0]["entries"][count_indicator["id"]]["options"] = [{
             "optionId": count_option["id"], "selection": "standard", "instances": 999,
-            "adjustedScore": 0.7, "note": "调整值应直接覆盖标准扣分",
+            "adjustedScore": 0.7, "note": "经复核按实际影响程度调整扣分",
         }]
         adjusted_created = assert_ok(client.post("/api/mobile/assessment-records", json=adjusted_payload, headers=inspector), "adjusted score assessment")
         assert adjusted_created["recordIds"] == count_created["recordIds"]
@@ -352,7 +354,7 @@ def main():
         }
         water_payload["villages"][0]["entries"][water_indicator["id"]]["options"] = [{
             "optionId": water_option["id"], "selection": "standard", "instances": 1,
-            "note": "水质不合格判定：极端超限",
+            "note": "水质抽检结果不符合本项考核要求",
         }]
         water_created = assert_ok(client.post("/api/mobile/assessment-records", json=water_payload, headers=inspector), "water-quality assessment")
         water_detail = assert_ok(client.get(f"/api/records/{water_created['recordIds'][0]}"), "water-quality detail")
@@ -363,7 +365,7 @@ def main():
         review_score_id = legacy_score["id"]
         reviewed_scores = assert_ok(client.put(
             f"/api/records/{legacy_created['recordIds'][0]}/scores", headers=admin,
-            json={"scores": [{"id": review_score_id, "deduction": 999999, "reason": "后台极端改分"}], "reason": "封顶验证"},
+            json={"scores": [{"id": review_score_id, "deduction": 999999, "reason": "后台复核按评分标准上限扣分"}], "reason": "复核扣分上限"},
         ), "review score cap")
         reviewed_item = next(item for item in reviewed_scores["scores"] if item["id"] == review_score_id)
         assert float(reviewed_item["deduction"]) == float(reviewed_item["indicatorFullScore"])
@@ -379,7 +381,7 @@ def main():
             facility_type="rural_treatment", indicators=rural_leaves,
         )
         survey_payload["villages"][0]["surveyEntries"] = {
-            f"{category}_{respondent}": {"score": score, "comment": "极端问卷回填", "completed": True}
+            f"{category}_{respondent}": {"score": score, "comment": "问卷结果已按评分规则回填", "completed": True}
             for category, respondents, score in [
                 ("sewage_collection", ["villager1", "villager2", "gov_rep", "assessment_team"], 1),
                 ("overall_effect", ["villager1", "villager2", "gov_rep", "assessment_team"], 3),
@@ -475,13 +477,16 @@ def main():
         # A fresh browser/device must recover all submitted targets from the backend.
         maonan_plant = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator)
         maonan_network = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_network", indicator=maonan_network_indicator)
+        maonan_submitted_only = create_record(client, inspector, project=maonan, cycle=maonan_cycle, town="镇盛镇", village="", facility_type="town_plant", indicator=maonan_indicator)
+        submitted_only_detail = assert_ok(client.get(f"/api/records/{maonan_submitted_only}"), "submitted-only detail")
+        assert submitted_only_detail["status"] == "submitted"
         restored = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore mobile records")["items"]
         restored_maonan = [item for item in restored if item["town"] == "茂南区"]
         assert {item["raw"]["primaryFacilityType"] for item in restored_maonan} == {"town_plant", "town_network"}
         assert all(item["editable"] is True for item in restored_maonan)
 
         # Re-submitting an editable target updates the same record instead of creating a duplicate.
-        updated_payload = record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator, note="修改后再次同步")
+        updated_payload = record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator, note="复核后已更新现场检查记录")
         updated = assert_ok(client.post("/api/mobile/assessment-records", json=updated_payload, headers=inspector), "update existing assessment")
         assert updated["recordIds"] == [maonan_plant]
         restored_after_update = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore updated records")["items"]
@@ -510,13 +515,17 @@ def main():
                 f"/api/mobile/assessment-records/{record_id}/attachments",
                 headers=inspector,
                 data={"score_id": manual_score["id"], "deduction_option_id": manual_score["deductionOptionId"] or ""},
-                files={"file": ("fixture-photo.jpg", b"fake image bytes", "image/jpeg")},
+                files={"file": (
+                    "fixture-photo.png",
+                    base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+                    "image/png",
+                )},
             )
             assert_ok(upload, "upload attachment")
             assert_ok(client.post(f"/api/records/{record_id}/review", headers=admin), "review")
             blocked = client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector)
             assert blocked.status_code == 409
-            assert_ok(client.post(f"/api/records/{record_id}/return", headers=admin, json={"reason": "补充退回重提验证", "data": {}}), "return")
+            assert_ok(client.post(f"/api/records/{record_id}/return", headers=admin, json={"reason": "资料需补充后重新提交", "data": {}}), "return")
             returned_items = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector), "restore returned record")["items"]
             returned_record = next(item for item in returned_items if item["id"] == record_id)
             assert returned_record["status"] == "returned" and returned_record["editable"] is True
@@ -542,11 +551,12 @@ def main():
             summary_report = next(item for item in result["reports"] if "汇总报告" in item["name"])
             snapshot_towns = {item["town"] for item in result["dataSnapshot"]["towns"]}
             if project["name"] == "郁南项目":
-                assert len(snapshot_towns) == len(yunan_towns)
-                assert {item["name"] for item in yunan_towns}.issubset(snapshot_towns), "郁南汇总报告必须覆盖项目目录内全部镇街"
+                expected_summary_towns = {"桂圩镇"}
+                excluded_summary_towns = {item["name"] for item in yunan_towns} - expected_summary_towns
             if project["name"] == "茂南项目":
-                assert len(snapshot_towns) == len(maonan_towns)
-                assert {item["name"] for item in maonan_towns}.issubset(snapshot_towns), "茂南汇总报告必须覆盖项目目录内全部镇街"
+                expected_summary_towns = {"金塘镇", "镇盛镇", "茂南区"}
+                excluded_summary_towns = {item["name"] for item in maonan_towns} - expected_summary_towns
+            assert snapshot_towns == expected_summary_towns, "汇总报告只能包含本期已提交、已复核或已锁定的镇街"
             town_report = next(item for item in result["reports"] if item.get("town") == town)
             from app.core.database import SessionLocal
             from app.models import Report
@@ -560,9 +570,9 @@ def main():
                 [paragraph.text for paragraph in summary_doc.paragraphs]
                 + ["\t".join(cell.text for cell in row.cells) for table in summary_doc.tables for row in table.rows]
             )
-            expected_names = [item["name"] for item in (yunan_towns if project["name"] == "郁南项目" else maonan_towns)]
-            assert all(name in summary_text for name in expected_names)
-            assert "未提交/未复核" in summary_text
+            assert all(name in summary_text for name in expected_summary_towns)
+            assert all(name not in summary_text for name in excluded_summary_towns)
+            assert "未提交/未复核" not in summary_text
             check_docx(path, town, project["name"])
             preview = assert_ok(client.get(f"/api/reports/{town_report['id']}/preview"), f"report preview {town}")
             assert preview["content"]["paragraphCount"] > 0
@@ -577,7 +587,34 @@ def main():
         assert summary_only_result["status"] == "completed", summary_only_result.get("error")
         assert len(summary_only_result["reports"]) == 1
         assert "汇总报告" in summary_only_result["reports"][0]["name"]
-        assert {item["name"] for item in maonan_towns}.issubset({item["town"] for item in summary_only_result["dataSnapshot"]["towns"]})
+        assert {item["town"] for item in summary_only_result["dataSnapshot"]["towns"]} == {"金塘镇", "镇盛镇", "茂南区"}
+
+        dynamic_cycle_payload = complete_payload(
+            project=maonan,
+            cycle=maonan_cycle,
+            town="山阁镇",
+            village="",
+            facility_type="town_plant",
+            indicators=standards[("茂南项目", "town_plant")][1],
+        )
+        dynamic_cycle_payload.pop("cycleId", None)
+        dynamic_cycle_payload["period"] = "2030年第4季度"
+        dynamic_created = assert_ok(
+            client.post("/api/mobile/assessment-records", json=dynamic_cycle_payload, headers=inspector),
+            "dynamic cycle assessment",
+        )
+        dynamic_record_id = dynamic_created["recordIds"][0]
+        assert_ok(client.post(f"/api/mobile/assessment-records/{dynamic_record_id}/submit", headers=inspector), "submit dynamic cycle")
+        dynamic_detail = assert_ok(client.get(f"/api/records/{dynamic_record_id}"), "dynamic cycle detail")
+        assert dynamic_detail["cycleName"] == "2030年第4季度"
+        dynamic_cycles = assert_ok(client.get("/api/mobile/assessment-cycles", params={"city_id": maonan["id"]}), "dynamic cycles")["items"]
+        assert any(item["name"] == "2030年第4季度" for item in dynamic_cycles)
+        dynamic_cleared = assert_ok(client.delete(
+            "/api/mobile/assessment-records",
+            headers=inspector,
+            params={"city_id": maonan["id"], "period": "2030年第4季度"},
+        ), "clear dynamic cycle")
+        assert dynamic_cleared["recordCount"] == 1
 
         dashboard = assert_ok(client.get("/api/dashboard/towns", params={"city_id": yunan["id"]}), "dashboard")
         assert any(item["name"] == "桂圩镇" and item["recordCount"] >= 1 for item in dashboard["items"])

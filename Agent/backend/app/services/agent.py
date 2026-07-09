@@ -84,7 +84,10 @@ def build_record_agent_output(session: Session, record: AssessmentRecord) -> dic
     high_deduction = sorted(deduction_scores, key=lambda item: item["deduction"], reverse=True)[:5]
     water_unqualified = [item for item in water if (item.conclusion or "").lower() not in {"qualified", "合格", ""}]
 
-    evidence_refs: list[dict[str, str]] = []
+    evidence_refs: list[dict[str, str]] = [
+        _evidence("attachment", item.id, item.filename or "现场附件")
+        for item in attachments
+    ]
     issues: list[dict[str, Any]] = []
     for score in high_deduction:
         refs = [_evidence("score", score["id"], score["indicatorName"], "deduction")]

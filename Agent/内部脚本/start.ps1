@@ -6,6 +6,7 @@ $agentParent = Split-Path -Parent $agentRoot
 $workspaceRoot = if ((Split-Path -Leaf $agentParent) -eq "watersupplyassessment") { Split-Path -Parent $agentParent } else { $agentParent }
 $runScriptsName = -join ([char[]](0x8fd0, 0x884c, 0x811a, 0x672c))
 $runtimeRoot = if ($env:WATERSUPPLY_RUNTIME_DIR) { $env:WATERSUPPLY_RUNTIME_DIR } else { Join-Path (Join-Path $workspaceRoot $runScriptsName) "watersupply-agent-runtime" }
+$env:WATERSUPPLY_RUNTIME_DIR = $runtimeRoot
 $logDir = Join-Path $runtimeRoot "logs"
 $logPath = Join-Path $logDir "startup.log"
 $statusPath = Join-Path $logDir "startup-status.txt"

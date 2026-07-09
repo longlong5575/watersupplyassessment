@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import json
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -26,8 +27,14 @@ from app.models import AssessmentCycle, City, DeductionOption, Indicator, Indica
 from app.services.seed import _seed_standard_groups
 
 
-BASE_URL = "http://127.0.0.1:8000"
+STATUS_PATH = WORKSPACE / "运行脚本" / "watersupply-agent-runtime" / "logs" / "startup-status.json"
+BASE_URL = os.environ.get("WATERSUPPLY_BACKEND_URL") or "http://127.0.0.1:8000"
 PERIOD = "2030年第4季度"
+if not os.environ.get("WATERSUPPLY_BACKEND_URL") and STATUS_PATH.exists():
+    try:
+        BASE_URL = json.loads(STATUS_PATH.read_text(encoding="utf-8")).get("backendUrl") or BASE_URL
+    except Exception:
+        pass
 
 
 def require(response: httpx.Response, label: str):

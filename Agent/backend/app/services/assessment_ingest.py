@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,9 +51,17 @@ def resolve_cycle(session: Session, raw: dict[str, Any], city_id: str) -> Assess
     cycle_id = raw.get("cycleId") or raw.get("cycle_id")
     cycle_name = raw.get("period") or raw.get("cycle") or raw.get("cycleName")
     cycle = session.get(AssessmentCycle, cycle_id) if cycle_id else None
+    if cycle is not None and (cycle.city_id != city_id or (cycle_name and cycle.name != cycle_name)):
+        cycle = None
     if cycle is None and cycle_name:
         cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city_id, AssessmentCycle.name == cycle_name))
-    if cycle is None:
+    if cycle is None and cycle_name:
+        if not re.fullmatch(r"(?:202[4-9]|2030)年(?:第[1-4]季度|上半年度|下半年度)", str(cycle_name)):
+            raise ValueError("考核周期格式无效")
+        cycle = AssessmentCycle(city_id=city_id, name=str(cycle_name), status="active")
+        session.add(cycle)
+        session.flush()
+    if cycle is None and not cycle_name:
         cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city_id, AssessmentCycle.status == "active"))
     if cycle is None:
         raise ValueError("A valid assessment cycle is required")
@@ -102,6 +111,12 @@ def resolve_indicator_version(session: Session, raw: dict[str, Any], city_id: st
                 IndicatorVersion.cycle_id == cycle_id,
                 IndicatorVersion.status == "published",
             )
+        )
+    if version is None:
+        version = session.scalar(
+            select(IndicatorVersion)
+            .where(IndicatorVersion.city_id == city_id, IndicatorVersion.status == "published")
+            .order_by(IndicatorVersion.updated_at.desc())
         )
     return version
 
@@ -164,6 +179,7 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
         session.add(record)
     else:
         record.status = next_status if record.status in {"draft", "returned"} else record.status
+        record.indicator_version_id = version.id if version else None
         record.total_score = raw.get("currentScore")
         record.raw_payload = raw
     session.flush()
@@ -193,7 +209,6 @@ def find_existing_record(
         AssessmentRecord.cycle_id == cycle_id,
         AssessmentRecord.town_id == town_id,
         AssessmentRecord.village_id == village_id,
-        AssessmentRecord.indicator_version_id == version_id,
     )
     facility_type = _raw_facility_type(raw)
     for record in session.scalars(statement).all():
@@ -230,13 +245,14 @@ def _score_option(session: Session, option_entry: dict[str, Any]) -> tuple[str |
     elif option_entry.get("adjustedScore") not in (None, ""):
         deduction = _to_float(option_entry.get("adjustedScore"))
         use_instances = False
-    elif option_entry.get("rangeValue") not in (None, ""):
-        deduction = _to_float(option_entry.get("rangeValue"))
-        use_instances = False
     else:
         option = session.get(DeductionOption, option_id) if option_id else None
-        deduction = _to_float(option.deduction_value if option else option_entry.get("deduction"))
-        use_instances = True
+        if option is not None and option.deduction_type == "range":
+            deduction = _to_float(option_entry.get("rangeValue"))
+            use_instances = False
+        else:
+            deduction = _to_float(option.deduction_value if option else option_entry.get("deduction"))
+            use_instances = True
     instances = max(1, int(_to_float(option_entry.get("instances"), 1)))
     option = session.get(DeductionOption, option_id) if option_id else None
     option_meta = option.meta if option is not None and isinstance(option.meta, dict) else {}

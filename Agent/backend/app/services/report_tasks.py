@@ -309,7 +309,12 @@ def _add_deduction_narrative(document, records: list[dict[str, Any]], *, limit: 
     for index, (indicator, items) in enumerate(grouped.items(), 1):
         total = sum(float(item[4] or 0) for item in items)
         points = "、".join(dict.fromkeys(str(item[1]) for item in items))
-        reasons = "；".join(dict.fromkeys(str(item[5]) for item in items if item[5] and str(item[5]) != "-"))
+        reason_parts = []
+        for item in items:
+            if not item[5] or str(item[5]) == "-":
+                continue
+            reason_parts.extend(part.strip() for part in str(item[5]).replace(";", "；").split("；") if part.strip())
+        reasons = "；".join(dict.fromkeys(reason_parts))
         if total >= 5:
             degree = "对本项得分影响较明显"
         elif len(items) > 1:
@@ -702,7 +707,7 @@ def _add_assessment_summary_text(document, *, project_name: str, cycle_name: str
         document.add_heading("一、考核工作开展情况", level=2)
         _add_paragraph(document, f"根据《PPP项目合同》等文件规定的考核标准和原则，以及各城镇水质净化厂和污水收集管网批复转运营时间，本报告对{cycle_name}纳入考核范围的城镇水质净化厂、配套管网及相关运维资料开展绩效考核。现场考核完成后，考核组结合现场检查情况、水质检测结果和资料复核意见，对本期绩效情况作出客观、公正、全面的评价。")
         document.add_heading("二、考核评分情况", level=2)
-        _add_paragraph(document, f"本期覆盖{town_count}个镇街、{len(records)}个已复核或已锁定考核对象，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
+        _add_paragraph(document, f"本期覆盖{town_count}个镇街、{len(records)}个已提交、已复核或已锁定考核对象，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
         document.add_heading("三、主要改进点", level=2)
         _add_paragraph(document, "本期重点评价设施运行、现场管理、在线监测、管网巡查和问题整改等工作，并结合现场检查记录、运维资料和复核意见，分别说明各镇街考核对象的得分情况。")
         document.add_heading("四、发现的主要问题", level=2)
@@ -711,7 +716,7 @@ def _add_assessment_summary_text(document, *, project_name: str, cycle_name: str
         document.add_heading("一、考核工作开展情况", level=2)
         _add_paragraph(document, f"根据镇级污水处理厂及污水收集管网建设完成情况，以及郁南县住房和城乡建设局工作安排及合同相关约定，考核组对{town_count}个镇街纳入本期考核范围的镇级污水处理厂、镇区污水收集管网和农村污水处理设施开展现场考核、资料核查、问卷调查、水质检测和评分复核。")
         document.add_heading("二、考核评分情况", level=2)
-        _add_paragraph(document, f"本期纳入报告的已复核或已锁定考核对象共{len(records)}个，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。各镇级设施、镇区管网和农村设施的具体评分情况见正文及附件评分表。")
+        _add_paragraph(document, f"本期纳入报告的已提交、已复核或已锁定考核对象共{len(records)}个，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。各镇级设施、镇区管网和农村设施的具体评分情况见正文及附件评分表。")
         document.add_heading("三、发现的主要问题", level=2)
     if deductions:
         leading = _deduction_rows(records)[:8]
@@ -802,15 +807,15 @@ def _town_status_label(town: dict[str, Any], records: list[dict[str, Any]]) -> s
         return "\u672a\u63d0\u4ea4/\u672a\u590d\u6838"
     if town.get("lockedCount", 0) and town.get("lockedCount") == len(records):
         return STATUS_LABELS.get("locked", "\u5df2\u9501\u5b9a")
-    if town.get("reviewedCount", 0) or records:
+    if town.get("reviewedCount", 0) + town.get("lockedCount", 0) == len(records):
         return STATUS_LABELS.get("reviewed", "\u5df2\u590d\u6838")
-    return "\u5f85\u590d\u6838"
+    return STATUS_LABELS.get("submitted", "\u5df2\u63d0\u4ea4")
 
 
 def _towns_for_report(records: list[dict[str, Any]], towns: list[dict[str, Any]] | None) -> list[tuple[str, dict[str, Any] | None, list[dict[str, Any]]]]:
     by_town = _records_by_town(records)
     if towns:
-        result = [(town.get("town") or "-", town, by_town.get(town.get("town") or "", [])) for town in towns]
+        result = [(town.get("town") or "-", town, by_town.get(town.get("town") or "", [])) for town in _ordered_towns(towns)]
         known = {name for name, _, _ in result}
         for name, items in by_town.items():
             if name not in known:
@@ -850,7 +855,44 @@ def _add_yunan_summary_score_overview(document, records: list[dict[str, Any]], t
         type_rows.append([index, REPORT_TYPE_LABELS.get(facility_type, facility_type), len(items), f"{stats['average']:.2f}", f"{stats['deduction']:.2f}"])
     _add_simple_table(document, ["\u5e8f\u53f7", "\u8003\u6838\u5bf9\u8c61\u7c7b\u522b", "\u8bb0\u5f55\u6570", "\u5e73\u5747\u5f97\u5206", "\u7d2f\u8ba1\u6263\u5206"], type_rows)
 
-    _add_paragraph(document, "\u6c47\u603b\u62a5\u544a\u6309\u9879\u76ee\u76ee\u5f55\u5217\u793a\u5168\u90e8\u9547\u8857\uff0c\u672a\u63d0\u4ea4\u6216\u672a\u590d\u6838\u9547\u8857\u4ec5\u4f5c\u4e3a\u8986\u76d6\u8303\u56f4\u5c55\u793a\uff0c\u4e0d\u53c2\u4e0e\u672c\u671f\u5e73\u5747\u5f97\u5206\u3001\u6700\u9ad8\u5f97\u5206\u3001\u6700\u4f4e\u5f97\u5206\u548c\u7d2f\u8ba1\u6263\u5206\u8ba1\u7b97\u3002")
+    object_rows = []
+    for index, record in enumerate(records, 1):
+        object_rows.append([
+            index,
+            record.get("town") or "-",
+            REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
+            _record_point_name(record),
+            f"{float(record.get('totalScore') or 0):.2f}",
+            STATUS_LABELS.get(record.get("status"), record.get("status") or "-"),
+        ])
+    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u8003\u6838\u5bf9\u8c61", "\u9879\u76ee\u70b9", "\u5f97\u5206", "\u72b6\u6001"], object_rows)
+
+    deduction_rows = []
+    for index, (facility_type, items) in enumerate(by_type.items(), 1):
+        rows = _deduction_rows(items)
+        stats = _score_stats(items)
+        deduction_rows.append([
+            index,
+            REPORT_TYPE_LABELS.get(facility_type, facility_type),
+            len(rows),
+            f"{stats['deduction']:.2f}",
+            "有扣分事项，详见附件2考核评分表" if rows else "本期未记录扣分事项",
+        ])
+    _add_simple_table(document, ["\u5e8f\u53f7", "\u8003\u6838\u5bf9\u8c61\u7c7b\u522b", "\u6263\u5206\u9879\u6570", "\u7d2f\u8ba1\u6263\u5206", "\u8bf4\u660e"], deduction_rows)
+
+    support_rows = []
+    for index, record in enumerate(records, 1):
+        support_rows.append([
+            index,
+            record.get("town") or "-",
+            _record_point_name(record),
+            len(record.get("scores") or []),
+            len(record.get("waterQuality") or []),
+            len(record.get("attachments") or []),
+        ])
+    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u9879\u76ee\u70b9", "\u8bc4\u5206\u6761\u76ee", "\u6c34\u8d28\u8bb0\u5f55", "\u73b0\u573a\u9644\u4ef6"], support_rows)
+
+    _add_paragraph(document, "\u6c47\u603b\u62a5\u544a\u4ec5\u5217\u793a\u5f53\u524d\u9879\u76ee\u3001\u5f53\u524d\u5468\u671f\u5185\u5df2\u63d0\u4ea4\u3001\u5df2\u590d\u6838\u6216\u5df2\u9501\u5b9a\u5e76\u7eb3\u5165\u62a5\u544a\u7684\u9547\u8857\u6570\u636e\uff1b\u8349\u7a3f\u3001\u9000\u56de\u548c\u672a\u63d0\u4ea4\u7684\u9547\u8857\u4e0d\u8fdb\u5165\u6c47\u603b\u8868\u3001\u6b63\u6587\u7ae0\u8282\u548c\u7edf\u8ba1\u8ba1\u7b97\u3002")
     _add_paragraph(document, "\u5bf9\u5f97\u5206\u8f83\u4f4e\u6216\u6263\u5206\u8f83\u96c6\u4e2d\u7684\u9879\u76ee\u70b9\uff0c\u5e94\u7ed3\u5408\u73b0\u573a\u7167\u7247\u3001\u6c34\u8d28\u62bd\u68c0\u3001\u8fd0\u884c\u53f0\u8d26\u548c\u6574\u6539\u8bb0\u5f55\u9010\u9879\u590d\u6838\uff0c\u5f62\u6210\u4e0b\u4e00\u5468\u671f\u91cd\u70b9\u8ddf\u8e2a\u6e05\u5355\u3002")
 
 
@@ -861,7 +903,7 @@ def _add_yunan_work_section(document, *, project_name: str, cycle_name: str, sco
     _add_simple_table(document, ["序号", "考核对象", "一级指标数", "评分项数", "满分"], _standards_overview_rows(project_name, records))
     _add_simple_table(document, ["序号", "考核方法", "资料或工作内容"], [[index, method, "按本次考核工作安排实施，并形成相应检查记录和支撑资料。"] for index, method in enumerate(profile["methods"], 1)])
     if is_summary:
-        _add_paragraph(document, "汇总报告覆盖当前项目和当前周期内全部已复核或已锁定镇街数据；未复核数据不纳入本次评分和报告结论。")
+        _add_paragraph(document, "汇总报告覆盖当前项目和当前周期内全部已提交、已复核或已锁定的镇街数据；草稿、退回和未提交数据不纳入本次评分和报告结论。")
     _add_paragraph(document, "报告先说明考核工作开展情况，再按考核对象汇总评分，随后分析发现的主要问题并提出整改建议；评分标准、评分明细、现场照片、水质资料和资料清单列入附件。")
     _add_paragraph(document, "现场考核和资料核查以项目公司提交资料、现场检查记录、复核意见及水质抽检资料为依据，涉及扣分的事项均在评分表中对应到具体评分条目。")
 
@@ -1076,7 +1118,7 @@ def run_report_task(task_id: str) -> None:
             include_summary = "summary" in outputs
             project_id = task.payload.get("projectId")
             cycle = session.get(AssessmentCycle, task.cycle_id) if task.cycle_id else None
-            record_query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
+            record_query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]))
             if project_id:
                 record_query = record_query.where(AssessmentRecord.city_id == project_id)
             if task.cycle_id:
@@ -1214,8 +1256,39 @@ def _town_chapter_code(town_data: dict[str, Any] | None, index: int) -> str:
     return str(code) if code else f"2.{index + 1}"
 
 
+def _chapter_sort_key(town_data: dict[str, Any] | None, fallback_index: int) -> tuple[int, ...]:
+    code = (town_data or {}).get("chapterCode")
+    if not code:
+        return (9999, fallback_index)
+    parts: list[int] = []
+    for part in str(code).split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(9999)
+    parts.append(fallback_index)
+    return tuple(parts)
+
+
+def _ordered_towns(towns: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [
+        town
+        for index, town in sorted(
+            enumerate(towns or []),
+            key=lambda item: _chapter_sort_key(item[1], item[0]),
+        )
+    ]
+
+
 def _records_for_town(records: list[dict[str, Any]], town_name: str) -> list[dict[str, Any]]:
     return [record for record in records if record.get("town") == town_name]
+
+
+def _section_records_for_town(records: list[dict[str, Any]], town_name: str, *, is_summary: bool, has_catalog_towns: bool) -> list[dict[str, Any]]:
+    town_records = _records_for_town(records, town_name)
+    if town_records:
+        return town_records
+    return [] if is_summary or has_catalog_towns else records
 
 
 def _record_type_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
@@ -1250,14 +1323,17 @@ def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], tow
     else:
         _add_yunan_score_overview(document, records)
 
-    town_items = towns or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
+    town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
         town_name = town_data.get("town") or "本镇"
-        town_records = _records_for_town(records, town_name) or records
+        town_records = _section_records_for_town(records, town_name, is_summary=is_summary, has_catalog_towns=bool(towns))
         code = _town_chapter_code(town_data, index)
         document.add_heading(f"{code} {town_name}污水处理设施考核情况", level=2)
         document.add_heading(f"{code}.1 总体评价", level=3)
         _add_town_basic_intro(document, town_name=town_name, town_data=town_data, records=town_records, add_heading=False)
+        if not town_records:
+            _add_paragraph(document, f"{town_name}本期尚无经复核或锁定的考核数据，报告仅列示项目基础信息，不纳入本期平均得分、扣分合计和绩效系数统计。")
+            continue
         stats = _score_stats(town_records)
         _add_paragraph(document, f"{town_name}本期纳入考核记录{int(stats['count'])}项，平均得分{stats['average']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
         type_map = {
@@ -1285,14 +1361,17 @@ def _add_maonan_result_sections(document, *, records: list[dict[str, Any]], town
     else:
         _add_yunan_score_overview(document, records)
 
-    town_items = towns or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
+    town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
         town_name = town_data.get("town") or "本镇"
-        town_records = _records_for_town(records, town_name) or records
+        town_records = _section_records_for_town(records, town_name, is_summary=is_summary, has_catalog_towns=bool(towns))
         code = _town_chapter_code(town_data, index)
         document.add_heading(f"{code} {town_name}考核结果", level=2)
         document.add_heading(f"{code}.1 基本情况", level=3)
         _add_town_basic_intro(document, town_name=town_name, town_data=town_data, records=town_records, add_heading=False)
+        if not town_records:
+            _add_paragraph(document, f"{town_name}本期尚无经复核或锁定的考核数据，报告仅列示项目基础信息，不纳入本期平均得分、扣分合计和绩效系数统计。")
+            continue
         _add_paragraph(document, f"经汇总，{town_name}本期平均得分为{_score_stats(town_records)['average']:.2f}分。")
         section_titles = {
             "town_plant": "水质净化厂运维考核情况",

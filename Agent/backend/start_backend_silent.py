@@ -17,7 +17,7 @@ def default_runtime_root() -> Path:
         return Path(os.environ["WATERSUPPLY_RUNTIME_DIR"])
     agent_root = BACKEND_DIR.parent
     base = agent_root.parent.parent if agent_root.parent.name.lower() == "watersupplyassessment" else agent_root.parent
-    return base / "运行脚本" / "watersupply-agent-runtime"
+    return base / '运行脚本' / "watersupply-agent-runtime"
 
 
 RUNTIME_ROOT = default_runtime_root()
@@ -95,13 +95,8 @@ def main() -> None:
         process = subprocess.Popen(
             [
                 str(python_exe),
-                "-m",
-                "uvicorn",
-                "app.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                BACKEND_PORT,
+                "-c",
+                "import os, uvicorn; uvicorn.run('app.main:app', host='127.0.0.1', port=int(os.environ.get('BACKEND_PORT', '8000')))",
             ],
             cwd=str(BACKEND_DIR),
             stdin=subprocess.DEVNULL,

@@ -42,6 +42,18 @@ def _normalize(value: Any) -> Any:
     return _json_safe(value)
 
 
+def _chapter_sort_key(code: str | None) -> tuple[int, ...]:
+    if not code:
+        return (9999,)
+    parts: list[int] = []
+    for part in str(code).split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(9999)
+    return tuple(parts) or (9999,)
+
+
 def _hash_payload(payload: dict[str, Any]) -> str:
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=_json_safe)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -72,7 +84,7 @@ def build_report_dataset(
     town_names: set[str] | None = None,
     city_id: str | None = None,
 ) -> dict[str, Any]:
-    query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["reviewed", "locked"]))
+    query = select(AssessmentRecord).where(AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]))
     project_id = city_id or (cycle.city_id if cycle else None)
     if project_id:
         query = query.where(AssessmentRecord.city_id == project_id)
@@ -170,22 +182,18 @@ def build_report_dataset(
     for record in record_payloads:
         by_town.setdefault(record["town"], []).append(record)
 
-    if town_names:
-        town_query = select(Town).where(Town.name.in_(town_names))
+    if by_town:
+        town_query = select(Town).where(Town.name.in_(by_town.keys()))
         if project_id:
             town_query = town_query.where(Town.city_id == project_id)
         catalog_towns = list(session.scalars(town_query).all())
-    elif project_id:
-        catalog_towns = list(session.scalars(select(Town).where(Town.city_id == project_id)).all())
-    elif by_town:
-        catalog_towns = list(session.scalars(select(Town).where(Town.name.in_(by_town.keys()))).all())
     else:
         catalog_towns = []
 
     catalog_by_name = {town.name: town for town in catalog_towns}
     ordered_town_names = sorted(
         {*catalog_by_name.keys(), *by_town.keys()},
-        key=lambda name: ((catalog_by_name.get(name).chapter_code if catalog_by_name.get(name) else "") or "", name),
+        key=lambda name: (_chapter_sort_key(catalog_by_name.get(name).chapter_code if catalog_by_name.get(name) else None), name),
     )
     for town_name in ordered_town_names:
         town_records = by_town.get(town_name, [])
@@ -199,6 +207,7 @@ def build_report_dataset(
                 "assessmentObject": town.assessment_object if town else {},
                 "reportTemplate": town.report_template if town else {},
                 "recordCount": len(town_records),
+                "submittedCount": sum(1 for item in town_records if item["status"] == "submitted"),
                 "lockedCount": sum(1 for item in town_records if item["status"] == "locked"),
                 "reviewedCount": sum(1 for item in town_records if item["status"] == "reviewed"),
                 "scoreCount": sum(item["scoreCount"] for item in town_records),
@@ -237,7 +246,7 @@ def build_report_dataset(
 
 def validate_report_dataset(snapshot: dict[str, Any]) -> None:
     if not snapshot.get("records"):
-        raise RuntimeError("没有可用于生成报告的已复核或已锁定考核记录。")
+        raise RuntimeError("没有可用于生成报告的已提交、已复核或已锁定考核记录。")
     missing_versions = [item["id"] for item in snapshot["records"] if not item.get("indicatorVersionId")]
     if missing_versions:
         raise RuntimeError("生成报告前，每条考核记录都需要绑定评分标准版本。")

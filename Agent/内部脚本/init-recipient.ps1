@@ -58,12 +58,20 @@ function Install-PythonRequirements {
   $marker = Join-Path $TargetDir ".requirements.sha256"
   $requirementsHash = (Get-FileHash -LiteralPath $requirements -Algorithm SHA256).Hash
   if (Test-Path -LiteralPath (Join-Path $TargetDir "fastapi")) {
-    if (-not (Test-Path -LiteralPath $marker)) {
+    $cachedHash = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim() } else { "" }
+    if ($cachedHash -eq $requirementsHash) { return }
+    $previousPythonPath = $env:PYTHONPATH
+    $env:PYTHONPATH = (($TargetDir, $previousPythonPath) | Where-Object { $_ }) -join ";"
+    try {
+      & $PythonExe -c "import fastapi, uvicorn, multipart, docx, fitz, sqlalchemy, alembic, psycopg, celery, pydantic_settings, httpx"
+    }
+    finally {
+      $env:PYTHONPATH = $previousPythonPath
+    }
+    if ($LASTEXITCODE -eq 0) {
       Set-Content -LiteralPath $marker -Value $requirementsHash -Encoding ASCII
       return
     }
-    $cachedHash = (Get-Content -LiteralPath $marker -Raw).Trim()
-    if ($cachedHash -eq $requirementsHash) { return }
   }
   & $PythonExe -m pip --version | Out-Null
   if ($LASTEXITCODE -ne 0) {

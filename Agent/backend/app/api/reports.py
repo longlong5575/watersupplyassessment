@@ -156,7 +156,7 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
     available = {item.get("town") for item in snapshot.get("towns", [])}
     missing = sorted(name for name in requested if name not in available)
     if missing:
-        errors.append("以下镇街缺少已复核或已锁定数据：" + "、".join(missing))
+        errors.append("以下镇街缺少已提交、已复核或已锁定数据：" + "、".join(missing))
     for town in snapshot.get("towns", []):
         if town.get("waterQualityCount", 0) <= 0:
             warnings.append(f"{town.get('town')}缺少水质抽检记录。")
