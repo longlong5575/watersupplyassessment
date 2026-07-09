@@ -144,6 +144,7 @@ def build_report_dataset(
                         "deductionOptionId": item.deduction_option_id,
                         "contentType": item.content_type,
                         "size": item.size,
+                        "storageKey": item.storage_key,
                     }
                     for item in attachments
                 ],

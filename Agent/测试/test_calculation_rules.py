@@ -63,7 +63,7 @@ def main() -> None:
     close(yunan_water_quality_coefficient(160, 35, effluent_qualified=False), 0.9)
     basis = load_payment_basis()
     assert set(basis) == {"yunan", "maonan"}
-    assert "茂南项目既有例文" in payment_source_summary("茂南项目")
+    assert "茂南项目既有绩效考核报告" in payment_source_summary("茂南项目")
     assert "表4-1 水质净化设施项目服务费" in payment_source_summary("茂南项目")
     print("PASS: 郁南/茂南扣分系数与金额公式反算")
 

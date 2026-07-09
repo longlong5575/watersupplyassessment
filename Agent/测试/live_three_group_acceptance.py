@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,7 +84,7 @@ def choose_option(item: dict, index: int) -> list[dict]:
         "optionId": option["id"],
         "selection": "standard",
         "instances": min(2, int(option.get("maxInstances") or 2)),
-        "note": f"全真验收测试：{option['name']}",
+        "note": f"现场核查发现：{option['name']}",
     }
     if option.get("type") == "range":
         low = float(option.get("min") or 0)
@@ -115,6 +117,8 @@ def make_payload(project: dict, cycle_id: str, town: dict, village: dict | None,
         record["waterQuality"] = {
             "sampleTime": "2030-12-15T09:30:00",
             "dischargeStandard": "DB44/2208-2019",
+            "processType": "一体化生化处理设施",
+            "designScale": "50",
             "codValue": "45", "codLimit": "40",
             "nh3nValue": "4.2", "nh3nLimit": "5",
             "tpValue": "0.4", "tpLimit": "0.5",
@@ -180,12 +184,32 @@ def main() -> None:
                 deduction = round(sum(float(item["deduction"]) for item in detail["scores"]), 2)
                 assert round(float(detail["totalScore"]), 2) == round(100 - deduction, 2)
                 score = next(item for item in detail["scores"] if float(item["deduction"]) > 0)
+                import fitz
+
+                photo_document = fitz.open()
+                photo_page = photo_document.new_page(width=1200, height=800)
+                photo_page.draw_rect((40, 40, 1160, 760), color=(0.1, 0.35, 0.55), width=10)
+                photo_page.insert_text((390, 400), "SITE PHOTO SAMPLE", fontsize=32, color=(0.1, 0.35, 0.55))
+                photo_pixmap = photo_page.get_pixmap(alpha=False)
+                photo_bytes = photo_pixmap.tobytes("png")
+                photo_document.close()
                 require(client.post(
                     f"/api/mobile/assessment-records/{record_id}/attachments",
                     headers=inspector,
                     data={"score_id": score["id"], "deduction_option_id": score.get("deductionOptionId") or ""},
-                    files={"file": (f"第{scenario_index}组全真验收证据.jpg", b"live acceptance evidence", "image/jpeg")},
+                    files={"file": (f"第{scenario_index}组现场问题照片.png", photo_bytes, "image/png")},
                 ), "上传证据")
+
+                pdf = fitz.open()
+                page = pdf.new_page()
+                page.insert_text((72, 90), "Water quality test report")
+                pdf_bytes = pdf.tobytes()
+                pdf.close()
+                require(client.post(
+                    f"/api/mobile/assessment-records/{record_id}/attachments",
+                    headers=inspector,
+                    files={"file": (f"{town['name']}水质检测报告.pdf", pdf_bytes, "application/pdf")},
+                ), "上传检测报告")
                 require(client.post(f"/api/records/{record_id}/review", headers=admin), "平台复核")
                 require(client.post(f"/api/agent/records/{record_id}/analysis", headers=admin), "分析校验")
 
@@ -203,6 +227,9 @@ def main() -> None:
                     raise RuntimeError("报告下载失败或文件不完整")
                 output = RESULTS / report["name"]
                 output.write_bytes(download.content)
+                with ZipFile(BytesIO(download.content)) as package:
+                    document_xml = package.read("word/document.xml")
+                    assert document_xml.count(b"<w:drawing") >= 2
                 reports.append({
                     "project": project_name, "town": town["name"], "facilityType": facility_type,
                     "score": detail["totalScore"], "deduction": deduction, "path": str(output),

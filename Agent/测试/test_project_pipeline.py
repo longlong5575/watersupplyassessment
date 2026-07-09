@@ -139,7 +139,9 @@ def check_docx(path: Path, town: str, project_name: str):
     assert ("摘要" in all_text) or ("摘  要" in all_text)
     assert "目录" in all_text
     assert "附件1 考核标准" in all_text
-    assert "附件1 考核标准" in all_text
+    assert "项目人员组成" in all_text
+    assert "1.6.1 现场检查" in all_text
+    assert "1.6.2 查阅资料" in all_text
     if project_name == "郁南项目":
         assert "镇级及农村设施考核报告" in all_text
         assert "公众调查" in all_text
@@ -147,7 +149,10 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "DB44/2208-2019" in all_text
         assert "第一章 考核工作概述" in all_text
         assert "第二章 镇级设施运维考核情况" in all_text
-        assert "第三章 主要问题及整改建议" in all_text
+        assert "第三章 考核评价系数的确定" in all_text
+        assert "第四章 主要问题及整改建议" in all_text
+        assert "运维绩效考核系数" in all_text
+        assert "不引用其他项目金额代算" in all_text
         assert "附件2 考核评分表" in all_text
         assert "附件3 现场照片" in all_text
         assert "附件5 水质抽检情况汇总表" in all_text
