@@ -28,7 +28,7 @@ def default_runtime_root() -> Path:
 RUNTIME_ROOT = default_runtime_root()
 LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_RUNTIME = RUNTIME_ROOT / "backend"
-BACKEND_PACKAGES = BACKEND_RUNTIME / "python-packages"
+BACKEND_PACKAGES = BACKEND_RUNTIME / "python-packages-current"
 FRONT_RUNTIME = RUNTIME_ROOT / "frontend" / "front"
 MOBILE_RUNTIME = RUNTIME_ROOT / "frontend" / "front-mobile"
 STARTUP_LOG = LOG_DIR / "startup.log"

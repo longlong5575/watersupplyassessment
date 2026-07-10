@@ -23,7 +23,7 @@ RUNTIME_ROOT = default_runtime_root()
 LOG_DIR = RUNTIME_ROOT / "logs"
 BACKEND_DIR = AGENT_ROOT / "backend"
 BACKEND_STARTER = BACKEND_DIR / "start_backend_silent.py"
-BACKEND_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
+BACKEND_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages-current"
 PNPM_CANDIDATES = [
     Path(os.environ.get("USERPROFILE", "")) / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "bin" / "pnpm.cmd",
 ]

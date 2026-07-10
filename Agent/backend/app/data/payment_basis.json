@@ -1,7 +1,9 @@
 {
   "yunan": {
     "projectName": "郁南项目",
-    "sourcePolicy": "未提供新金额资料时，沿用郁南项目既有绩效考核报告和历史付费资料；本项目资料缺失时只输出公式和缺失条件。",
+    "basisStatus": "合同附件18金额基数已结构化",
+    "sourceCycle": "《PPP项目合同》附件18",
+    "sourcePolicy": "郁南金额基数和付费公式仅采用《PPP项目合同》附件18及郁南例文。未提供经确认的新调价资料时沿用附件18原始中标金额；调价后的单价或运营维护费必须由平台端明确录入，不引用茂南或其他项目金额。",
     "coefficient": {
       "name": "E2",
       "rule": "考核得分W不低于90分时取1，低于90分时取W/90。"
@@ -12,21 +14,88 @@
     },
     "sourceTables": [
       {
-        "name": "郁南项目既有绩效考核报告及历史付费资料",
-        "status": "历史沿用",
-        "usage": "作为未提供新合同金额基础表时的本项目金额基础来源。"
+        "name": "附件18表1 镇区污水处理及管网服务费",
+        "status": "合同原始基数",
+        "usage": "提供连滩、南江口及13个镇区的管网年可用性付费、年运营养护费和13个镇区污水处理单价。"
+      },
+      {
+        "name": "附件18表2 县城区污水管网服务费",
+        "status": "合同原始基数",
+        "usage": "提供县城区管网年可用性付费649.84万元和年运营养护费5.85万元。"
+      },
+      {
+        "name": "附件18表3 农村污水处理设施服务费",
+        "status": "合同原始基数",
+        "usage": "提供15个镇街农村设施年可用性付费和年运营养护费。"
+      },
+      {
+        "name": "附件18表4至表5 其他项目服务费",
+        "status": "合同原始基数",
+        "usage": "提供人居环境综合提升服务费179.68万元/年和112个已建设施运营养护费200万元/年。"
       }
     ],
+    "formulas": {
+      "countyAndCenterNetwork": "Pwi=P0/12×(5/6×KQ×Kq+1/6×E1×E2)",
+      "townNetwork": "Pwi=P0/12×(5/6×KQ×Kq+1/6×E1×E2)",
+      "townTreatment": "PCi=P0×QB×(3/4×Kq+1/4×E2)",
+      "ruralTreatment": "PDi=1/12×(3/4×P1×Kq+1/4×P1×KQ+P2×E2)",
+      "environmentImprovement": "R=R2017/12，R2017=2017年度审定建设投资/3000×179.68",
+      "existingRuralOperation": "Y=200×E2/12"
+    },
+    "countyNetworkBasis": {
+      "pointName": "县城区",
+      "networkAvailabilityFeeTenThousandYuanPerYear": 649.84,
+      "networkOperationFeeTenThousandYuanPerYear": 5.85
+    },
+    "townFacilityBasis": [
+      {"pointName": "连滩镇", "designScaleCubicMetersPerDay": null, "treatmentOperationUnitPriceYuanPerCubicMeter": null, "excessTreatmentUnitPriceFactor": null, "networkAvailabilityFeeTenThousandYuanPerYear": 255.48, "networkOperationFeeTenThousandYuanPerYear": 3.90},
+      {"pointName": "南江口镇", "designScaleCubicMetersPerDay": null, "treatmentOperationUnitPriceYuanPerCubicMeter": null, "excessTreatmentUnitPriceFactor": null, "networkAvailabilityFeeTenThousandYuanPerYear": 103.37, "networkOperationFeeTenThousandYuanPerYear": 1.34},
+      {"pointName": "平台镇", "designScaleCubicMetersPerDay": 400, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.88, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 41.78, "networkOperationFeeTenThousandYuanPerYear": 1.32},
+      {"pointName": "桂圩镇", "designScaleCubicMetersPerDay": 450, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.83, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 29.42, "networkOperationFeeTenThousandYuanPerYear": 0.88},
+      {"pointName": "罗顺片区", "designScaleCubicMetersPerDay": 350, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.01, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 45.38, "networkOperationFeeTenThousandYuanPerYear": 1.46},
+      {"pointName": "建城镇", "designScaleCubicMetersPerDay": 1000, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.46, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 52.74, "networkOperationFeeTenThousandYuanPerYear": 1.77},
+      {"pointName": "宝珠镇", "designScaleCubicMetersPerDay": 400, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.05, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 32.59, "networkOperationFeeTenThousandYuanPerYear": 1.01},
+      {"pointName": "通门镇", "designScaleCubicMetersPerDay": 550, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.01, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 25.00, "networkOperationFeeTenThousandYuanPerYear": 0.77},
+      {"pointName": "千官镇", "designScaleCubicMetersPerDay": 1000, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.46, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 58.27, "networkOperationFeeTenThousandYuanPerYear": 1.88},
+      {"pointName": "大湾镇", "designScaleCubicMetersPerDay": null, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.01, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 44.10, "networkOperationFeeTenThousandYuanPerYear": 1.48},
+      {"pointName": "大方镇", "designScaleCubicMetersPerDay": 400, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.20, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 37.73, "networkOperationFeeTenThousandYuanPerYear": 1.20},
+      {"pointName": "河口镇", "designScaleCubicMetersPerDay": 450, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.83, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 61.05, "networkOperationFeeTenThousandYuanPerYear": 1.99},
+      {"pointName": "宋桂镇", "designScaleCubicMetersPerDay": 700, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.65, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 35.32, "networkOperationFeeTenThousandYuanPerYear": 1.09},
+      {"pointName": "东坝镇", "designScaleCubicMetersPerDay": 1000, "treatmentOperationUnitPriceYuanPerCubicMeter": 1.46, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 92.98, "networkOperationFeeTenThousandYuanPerYear": 2.93},
+      {"pointName": "历洞镇", "designScaleCubicMetersPerDay": 450, "treatmentOperationUnitPriceYuanPerCubicMeter": 2.01, "excessTreatmentUnitPriceFactor": 0.58, "networkAvailabilityFeeTenThousandYuanPerYear": 23.43, "networkOperationFeeTenThousandYuanPerYear": 0.76}
+    ],
+    "ruralFacilityBasis": [
+      {"pointName": "都城镇", "availabilityFeeTenThousandYuanPerYear": 123.93, "operationFeeTenThousandYuanPerYear": 29.89},
+      {"pointName": "连滩镇", "availabilityFeeTenThousandYuanPerYear": 54.41, "operationFeeTenThousandYuanPerYear": 15.03},
+      {"pointName": "南江口镇", "availabilityFeeTenThousandYuanPerYear": 164.23, "operationFeeTenThousandYuanPerYear": 40.66},
+      {"pointName": "平台镇", "availabilityFeeTenThousandYuanPerYear": 70.49, "operationFeeTenThousandYuanPerYear": 17.68},
+      {"pointName": "桂圩镇", "availabilityFeeTenThousandYuanPerYear": 165.59, "operationFeeTenThousandYuanPerYear": 41.96},
+      {"pointName": "建城镇", "availabilityFeeTenThousandYuanPerYear": 83.87, "operationFeeTenThousandYuanPerYear": 21.32},
+      {"pointName": "宝珠镇", "availabilityFeeTenThousandYuanPerYear": 42.45, "operationFeeTenThousandYuanPerYear": 7.84},
+      {"pointName": "通门镇", "availabilityFeeTenThousandYuanPerYear": 75.49, "operationFeeTenThousandYuanPerYear": 16.06},
+      {"pointName": "千官镇", "availabilityFeeTenThousandYuanPerYear": 182.79, "operationFeeTenThousandYuanPerYear": 40.11},
+      {"pointName": "大湾镇", "availabilityFeeTenThousandYuanPerYear": 72.84, "operationFeeTenThousandYuanPerYear": 20.59},
+      {"pointName": "大方镇", "availabilityFeeTenThousandYuanPerYear": 49.66, "operationFeeTenThousandYuanPerYear": 11.64},
+      {"pointName": "河口镇", "availabilityFeeTenThousandYuanPerYear": 98.01, "operationFeeTenThousandYuanPerYear": 27.95},
+      {"pointName": "宋桂镇", "availabilityFeeTenThousandYuanPerYear": 57.15, "operationFeeTenThousandYuanPerYear": 16.42},
+      {"pointName": "东坝镇", "availabilityFeeTenThousandYuanPerYear": 160.86, "operationFeeTenThousandYuanPerYear": 39.77},
+      {"pointName": "历洞镇", "availabilityFeeTenThousandYuanPerYear": 87.89, "operationFeeTenThousandYuanPerYear": 25.29}
+    ],
+    "environmentImprovementFeeTenThousandYuanPerYear": 179.68,
+    "existingRuralOperationFeeTenThousandYuanPerYear": 200.0,
     "requiredInputs": [
-      "经确认的可用性付费及运营维护费基数",
-      "实际处理水量",
+      "当期实际处理水量或负荷数据",
       "月均进出水COD",
-      "出水达标结论"
+      "出水达标结论",
+      "上一考核周期运维绩效考核系数",
+      "适用时的调价后单价或运营维护费"
     ]
   },
   "maonan": {
     "projectName": "茂南项目",
-    "sourcePolicy": "未提供新金额资料时，沿用茂南项目既有绩效考核报告表4-1至表4-5及后续服务费表；本项目资料缺失时只输出公式和缺失条件。",
+    "basisStatus": "历史金额基数已结构化",
+    "sourceCycle": "城镇设施第八、九周期绩效考核报告",
+    "sourcePolicy": "未提供新金额资料时，沿用茂南项目既有绩效考核报告表4-1、表4-2及后续服务费表。表4-1提供可用性付费和中标运营单价，表4-2提供2024年1月起调整后的管网及提升泵站运营维护费；本期付费采用上一考核周期已提交结果折算E1，本期评分用于下一付费周期。",
     "coefficient": {
       "name": "E1",
       "rule": "考核得分W不低于70分时取1，低于70分时取W/70。"
@@ -39,30 +108,106 @@
       {
         "name": "表4-1 水质净化设施项目服务费",
         "status": "历史沿用",
-        "usage": "提供水质净化厂可用性付费、运营维护服务费单价等历史基数。"
+        "usage": "提供水质净化厂可用性付费、污水处理运营服务费单价、管网可用性付费和原中标管网运营维护费。"
       },
       {
         "name": "表4-2 污水管网及提升泵站运营维护服务费",
         "status": "历史沿用",
-        "usage": "提供管网及提升泵站年运营维护费历史基数。"
+        "usage": "提供2024年1月起调整后的管网及提升泵站年运营维护费，金额计算优先采用该调整值。"
       },
       {
         "name": "表4-3至表4-4 水质浓度系数Kq计算表",
-        "status": "历史沿用",
-        "usage": "提供水质浓度系数测算口径和周期参考。"
+        "status": "当期数据计算",
+        "usage": "按当期月均进出水COD计算Kq。"
       },
       {
         "name": "表4-5 水质净化厂及污水收集管网运维考核系数",
-        "status": "当期计算",
-        "usage": "依据本期考核得分计算E1后写入报告。"
+        "status": "当期评分计算",
+        "usage": "依据当期考核得分计算E1。"
+      }
+    ],
+    "facilityBasis": [
+      {
+        "pointName": "金塘镇",
+        "designScaleCubicMetersPerDay": 1000,
+        "guaranteedVolumeFactor": 0.8,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 33.59,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.69,
+        "networkAvailabilityFeeTenThousandYuanPerYear": null,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": null,
+        "adjustedNetworkOperationFeeYuanPerYear": null
+      },
+      {
+        "pointName": "山阁镇",
+        "designScaleCubicMetersPerDay": 800,
+        "guaranteedVolumeFactor": 1.0,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 58.24,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.74,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 168.48,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 34.21,
+        "adjustedNetworkOperationFeeYuanPerYear": 302277.33
+      },
+      {
+        "pointName": "镇盛镇",
+        "designScaleCubicMetersPerDay": 1200,
+        "guaranteedVolumeFactor": 1.0,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 84.23,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.67,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 203.19,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 43.06,
+        "adjustedNetworkOperationFeeYuanPerYear": 377837.32
+      },
+      {
+        "pointName": "袂花镇",
+        "designScaleCubicMetersPerDay": 600,
+        "guaranteedVolumeFactor": 1.0,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 44.72,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.78,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 111.02,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 23.52,
+        "adjustedNetworkOperationFeeYuanPerYear": 97221.24
+      },
+      {
+        "pointName": "鳌头镇",
+        "designScaleCubicMetersPerDay": 800,
+        "guaranteedVolumeFactor": 1.0,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 58.24,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.74,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 117.29,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 20.41,
+        "adjustedNetworkOperationFeeYuanPerYear": 277040.89
+      },
+      {
+        "pointName": "茂南区",
+        "designScaleCubicMetersPerDay": 25000,
+        "guaranteedVolumeFactor": 0.8,
+        "maximumVolumeFactor": 1.2,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": 295.4,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": 1.22,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 783.84,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 118.25,
+        "adjustedNetworkOperationFeeYuanPerYear": 1057655.34
+      },
+      {
+        "pointName": "中科云粤西产业园",
+        "designScaleCubicMetersPerDay": null,
+        "guaranteedVolumeFactor": null,
+        "maximumVolumeFactor": null,
+        "treatmentAvailabilityFeeTenThousandYuanPerYear": null,
+        "treatmentOperationUnitPriceYuanPerCubicMeter": null,
+        "networkAvailabilityFeeTenThousandYuanPerYear": 823.76,
+        "originalNetworkOperationFeeTenThousandYuanPerYear": 172.09,
+        "adjustedNetworkOperationFeeYuanPerYear": 861768.32
       }
     ],
     "requiredInputs": [
-      "Py污水处理运营服务费单价",
-      "Pk水质净化设施可用性付费",
-      "管网年运营维护费",
-      "QB当月处理水量",
-      "月均进出水COD"
+      "各月实际处理水量QB",
+      "各月平均进出水COD"
     ]
   }
 }

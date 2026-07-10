@@ -150,10 +150,12 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "DB44/2208-2019" in all_text
         assert "第一章 考核工作概述" in all_text
         assert "第二章 镇级设施运维考核情况" in all_text
-        assert "第三章 考核评价系数的确定" in all_text
+        assert "第三章 绩效付费计算" in all_text
         assert "第四章 主要问题及整改建议" in all_text
         assert "运维绩效考核系数" in all_text
-        assert "不引用其他项目金额代算" in all_text
+        assert "附件18金额基础" in all_text
+        assert "本期付费采用上一考核周期" in all_text
+        assert "不引用茂南或其他项目金额资料" in all_text
         assert "附件2 考核评分表" in all_text
         assert "附件3 现场照片" in all_text
         assert "附件5 水质抽检情况汇总表" in all_text
@@ -164,6 +166,10 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "第一章 考核工作概述" in all_text
         assert "第二章 城镇水质净化设施考核结果" in all_text
         assert "第三章 绩效付费计算" in all_text
+        assert "3.3 沿用金额基础" in all_text
+        assert "3.4 当期付费测算" in all_text
+        assert "表4-1、表4-2" in all_text
+        assert "未匹配到本项目金额基数" not in all_text
         assert "第四章 主要改进点、主要问题和整改工作建议" in all_text
         assert "附件2 周期评分表" in all_text
         assert "附件3 现场检查照片" in all_text

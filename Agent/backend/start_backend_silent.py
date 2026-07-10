@@ -21,7 +21,7 @@ def default_runtime_root() -> Path:
 
 
 RUNTIME_ROOT = default_runtime_root()
-PYTHON_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages"
+PYTHON_PACKAGES = RUNTIME_ROOT / "backend" / "python-packages-current"
 LOG_DIR = RUNTIME_ROOT / "logs"
 STORAGE_DIR = RUNTIME_ROOT / "storage"
 PID_FILE = LOG_DIR / "backend-server.pid"

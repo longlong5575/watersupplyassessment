@@ -20,6 +20,26 @@ class ScorePatch(BaseModel):
     reason: str | None = None
 
 
+class PaymentMonthInput(BaseModel):
+    month: str = Field(pattern=r"^20\d{2}-(0[1-9]|1[0-2])$")
+    monthlyVolumeTenThousandCubicMeters: float | None = Field(default=None, ge=0)
+    averageDailyVolumeCubicMeters: float | None = Field(default=None, ge=0)
+    influentCod: float | None = Field(default=None, ge=0)
+    effluentCod: float | None = Field(default=None, ge=0)
+    effluentQualified: bool | None = None
+    influentCodDaysOver160: int | None = Field(default=None, ge=0, le=31)
+    note: str = Field(default="", max_length=500)
+
+
+class PaymentDataPatch(BaseModel):
+    months: list[PaymentMonthInput] = Field(default_factory=list, max_length=12)
+    designScaleCubicMetersPerDay: float | None = Field(default=None, gt=0)
+    firstPaymentPeriod: bool = False
+    adjustedTreatmentUnitPriceYuanPerCubicMeter: float | None = Field(default=None, ge=0)
+    adjustedNetworkOperationFeeTenThousandYuanPerYear: float | None = Field(default=None, ge=0)
+    note: str = Field(default="", max_length=1000)
+
+
 class ReportTaskRequest(BaseModel):
     source: str = "dashboard"
     period: str = ""

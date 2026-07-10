@@ -111,8 +111,8 @@ def inspect_report(path: Path) -> dict[str, object]:
         required_sections = ["摘  要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 水质检测", "第二章 城镇水质净化设施考核结果", "第三章 绩效付费计算", "第四章 主要改进点、主要问题和整改工作建议", "附件1 考核标准", "附件2 周期评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
         amount_boundary_missing = "不引用其他项目" not in text and "本项目既有例文和历史付费表" not in text
     else:
-        required_sections = ["摘要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 问卷调查", "1.6.4 水质检测", "第二章 镇级设施运维考核情况", "第三章 考核评价系数的确定", "第四章 主要问题及整改建议", "附件1 考核标准", "附件2 考核评分表", "附件3 现场照片", "附件5 水质抽检情况汇总表"]
-        amount_boundary_missing = "不引用其他项目金额代算" not in text
+        required_sections = ["摘要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 问卷调查", "1.6.4 水质检测", "第二章 镇级设施运维考核情况", "第三章 绩效付费计算", "附件18金额基础", "第四章 主要问题及整改建议", "附件1 考核标准", "附件2 考核评分表", "附件3 现场照片", "附件5 水质抽检情况汇总表"]
+        amount_boundary_missing = "不引用茂南或其他项目金额资料" not in text
     missing_sections = [item for item in required_sections if item not in text]
     with ZipFile(path) as package:
         document_xml = package.read("word/document.xml")

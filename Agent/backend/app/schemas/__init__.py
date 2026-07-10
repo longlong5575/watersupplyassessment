@@ -1,3 +1,3 @@
-from .records import RecordPatch, ReportTaskRequest, ScorePatch
+from .records import PaymentDataPatch, RecordPatch, ReportTaskRequest, ScorePatch
 
-__all__ = ["RecordPatch", "ReportTaskRequest", "ScorePatch"]
+__all__ = ["PaymentDataPatch", "RecordPatch", "ReportTaskRequest", "ScorePatch"]

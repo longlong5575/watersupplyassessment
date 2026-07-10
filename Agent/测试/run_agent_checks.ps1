@@ -19,7 +19,7 @@ if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
   $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
   if (Test-Path -LiteralPath $candidate) { $pythonExe = $candidate }
 }
-$pythonPackages = Join-Path (Join-Path $runtimeRoot "backend") "python-packages"
+$pythonPackages = Join-Path (Join-Path $runtimeRoot "backend") "python-packages-current"
 if (-not (Test-Path -LiteralPath $pythonPackages)) {
   & (Join-Path (Join-Path $agentRoot "内部脚本") "init-recipient.ps1")
 }

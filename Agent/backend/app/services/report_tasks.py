@@ -13,9 +13,31 @@ from app.core.database import SessionLocal
 from app.core.config import settings
 from app.models import AssessmentCycle, AssessmentRecord, Attachment, Report, ReportTask, SurveyRecord, Town, WaterQualityRecord
 from app.models.entities import utcnow
-from app.services.payment_basis import payment_source_summary
+from app.services.payment_basis import (
+    maonan_payment_basis_for_point,
+    maonan_payment_basis_rows,
+    payment_source_summary,
+    yunan_county_network_basis,
+    yunan_rural_payment_basis_rows,
+    yunan_town_payment_basis_for_point,
+    yunan_town_payment_basis_rows,
+)
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
-from app.services.payment import maonan_operation_coefficient, town_average_coefficient, yunan_operation_coefficient
+from app.services.payment import (
+    bounded_monthly_volume,
+    maonan_annual_maximum_treatment_fee,
+    maonan_network_monthly_fee,
+    maonan_operation_coefficient,
+    maonan_treatment_monthly_fee,
+    maonan_water_quality_coefficient,
+    town_average_coefficient,
+    yunan_dry_season_quality_coefficient,
+    yunan_network_monthly_fee,
+    yunan_operation_coefficient,
+    yunan_town_network_load_coefficient,
+    yunan_town_treatment_monthly_fee,
+    yunan_water_quality_coefficient,
+)
 
 
 REPORT_TYPE_LABELS = {
@@ -1588,64 +1610,447 @@ def _source_toc_rows(project_name: str, *, is_summary: bool) -> list[list[Any]]:
 
 
 def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> None:
-    document.add_heading("第三章 考核评价系数的确定", level=1)
+    document.add_heading("第三章 绩效付费计算", level=1)
     document.add_heading("3.1 运维绩效考核系数", level=2)
-    _add_paragraph(document, "根据郁南项目绩效付费口径，考核得分W达到90分及以上时，运维绩效考核系数取1；考核得分低于90分时，按W/90计算。")
+    _add_paragraph(document, "根据郁南项目绩效付费口径，考核得分W达到90分及以上时，运维绩效考核系数E2取1；考核得分低于90分时，按W/90计算。本期付费采用上一考核周期已提交并经复核的数据，本期形成的考核得分作为下一付费周期的系数来源。")
     rows = []
     for index, record in enumerate(records, 1):
         score = float(record.get("totalScore") or 0)
+        context = _payment_context(record)
+        applied, source = _payment_coefficient(record, project="yunan")
         rows.append([
             index,
             _record_point_name(record),
             REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
             f"{score:.2f}",
             f"{yunan_operation_coefficient(score):.3f}",
+            context.get("currentScoreAppliesTo") or "下一付费周期",
+            f"{applied:.3f}" if applied is not None else "暂不核定",
+            source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "考核得分W", "运维绩效考核系数"], rows)
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E2", "本期得分适用周期", "本期付费采用E2", "采用依据"], rows)
 
     document.add_heading("3.2 水质浓度系数", level=2)
     _add_paragraph(document, "水质浓度系数Kq根据进水CODCr、出水CODCr及出水达标情况确定。进水CODCr低于140mg/L时，按进出水浓度差折算；进水CODCr达到140mg/L但出水不达标时，按项目既有付费口径取0.9；其余区间按郁南项目既有付费资料执行。")
-    _add_paragraph(document, "本期只有在月平均进、出水CODCr数据及出水达标结论齐全时，方可逐月计算Kq。单次抽检结果用于水质达标评价，不能替代月平均数据直接核定付费系数。")
-
-    document.add_heading("3.3 付费计算条件", level=2)
-    _add_simple_table(document, ["序号", "所需资料", "核定要求", "资料不足时的处理"], [
-        [1, "经确认的可用性付费和运营维护费基数", "采用郁南项目本身的合同基础表或经确认的历史付费表", "不引用其他项目金额代算"],
-        [2, "实际处理水量", "采用本期计量记录并按合同约定核实", "不输出最终应付金额"],
-        [3, "月平均进、出水CODCr及达标情况", "用于逐月计算Kq", "只列公式和缺失条件"],
-        [4, "运维绩效考核得分", "采用本报告经复核确认的评分结果", "可计算运维绩效考核系数"],
-    ])
+    _add_paragraph(document, "镇区污水处理设施处理水量按附件18约定设置1.1倍设计规模上限；镇区管网负荷系数KQ按实际日均水量与设计规模折算，最高取1。县城区管网按附件18县城区管网基数列示，需补充售水量或经确认的负荷基数后核定KQ。")
     _add_paragraph(document, payment_source_summary("郁南项目"))
-    _add_paragraph(document, "在合同金额基数、实际处理水量和月平均水质数据未全部确认前，本报告仅列示计算口径和已具备的考核系数，不形成最终应付金额结论。")
+
+    document.add_heading("3.3 附件18金额基础", level=2)
+    selected_town_names = {_record_point_name(record) for record in records if record.get("facilityType") in {"town_plant", "town_network"}}
+    selected_rural_towns = {str(record.get("town") or "") for record in records if record.get("facilityType") == "rural_treatment"}
+    town_rows = []
+    for row in yunan_town_payment_basis_rows():
+        if row["pointName"] in selected_town_names:
+            town_rows.append([
+                len(town_rows) + 1,
+                row["pointName"],
+                "-" if row.get("treatmentOperationUnitPriceYuanPerCubicMeter") is None else f"{float(row['treatmentOperationUnitPriceYuanPerCubicMeter']):.2f}",
+                "-" if row.get("designScaleCubicMetersPerDay") is None else f"{float(row['designScaleCubicMetersPerDay']):.0f}",
+                f"{float(row['networkAvailabilityFeeTenThousandYuanPerYear']):.2f}",
+                f"{float(row['networkOperationFeeTenThousandYuanPerYear']):.2f}",
+            ])
+    if any(str(record.get("town") or "") == "都城镇" and record.get("facilityType") == "town_network" for record in records):
+        county = yunan_county_network_basis()
+        town_rows.append([
+            len(town_rows) + 1,
+            "县城区",
+            "-",
+            "-",
+            f"{float(county.get('networkAvailabilityFeeTenThousandYuanPerYear') or 0):.2f}",
+            f"{float(county.get('networkOperationFeeTenThousandYuanPerYear') or 0):.2f}",
+        ])
+    if town_rows:
+        _add_simple_table(document, ["序号", "镇区项目点", "处理单价（元/m³）", "设计规模（m³/d）", "管网可用性付费（万元/年）", "管网运维养护费（万元/年）"], town_rows)
+    rural_rows = []
+    for row in yunan_rural_payment_basis_rows():
+        if row["pointName"] in selected_rural_towns:
+            rural_rows.append([
+                len(rural_rows) + 1,
+                row["pointName"],
+                f"{float(row['availabilityFeeTenThousandYuanPerYear']):.2f}",
+                f"{float(row['operationFeeTenThousandYuanPerYear']):.2f}",
+            ])
+    if rural_rows:
+        _add_simple_table(document, ["序号", "镇街", "农村设施可用性付费（万元/年）", "农村设施运维养护费（万元/年）"], rural_rows)
+
+    document.add_heading("3.4 本期付费测算", level=2)
+    payment_rows = []
+    for record in records:
+        point_name = _record_point_name(record)
+        facility_type = record.get("facilityType") or ""
+        context = _payment_context(record)
+        coefficient, coefficient_source = _payment_coefficient(record, project="yunan")
+        months = _payment_month_rows(record)
+        basis = context.get("basis") if isinstance(context.get("basis"), dict) else None
+        if not basis and facility_type in {"town_plant", "town_network"}:
+            basis = yunan_town_payment_basis_for_point(point_name)
+        if not basis and facility_type == "town_network" and str(record.get("town") or "") == "都城镇":
+            basis = yunan_county_network_basis()
+
+        if facility_type == "rural_treatment":
+            payment_rows.append([
+                len(payment_rows) + 1,
+                point_name,
+                REPORT_TYPE_LABELS.get(facility_type, facility_type),
+                "-",
+                "-",
+                "农村设施按全镇设施汇总Kq、KQ和E2核定，单个村点记录不直接形成镇级服务费",
+                "待全镇月度汇总数据齐全后核定",
+            ])
+            continue
+
+        dry_days = sum(int(_optional_float(row.get("influentCodDaysOver160")) or 0) for row in months)
+        dry_e1 = yunan_dry_season_quality_coefficient(dry_days)
+        design_scale = _optional_float(context.get("designScaleCubicMetersPerDay"))
+        rows_for_record: list[str] = []
+        for month in months:
+            month_label = str(month.get("month") or "-")
+            missing: list[str] = []
+            kq = _month_kq(month, project="yunan")
+            if kq is None:
+                missing.append("月均进出水COD")
+            if coefficient is None:
+                missing.append("上一期E2")
+            amount_text = "暂不核定"
+            if facility_type == "town_plant":
+                unit_price = _optional_float(context.get("adjustedTreatmentUnitPriceYuanPerCubicMeter"))
+                if unit_price is None and basis:
+                    unit_price = _optional_float(basis.get("treatmentOperationUnitPriceYuanPerCubicMeter"))
+                volume = _month_volume(month)
+                if unit_price is None:
+                    missing.append("处理单价")
+                if volume is None:
+                    missing.append("月处理水量")
+                applied_volume = volume
+                if volume is not None and design_scale is not None:
+                    applied_volume = bounded_monthly_volume(
+                        actual_volume_ten_thousand_cubic_meters=volume,
+                        design_scale_cubic_meters_per_day=design_scale,
+                        month=month_label,
+                        maximum_factor=1.1,
+                    )["applied"]
+                if not missing and unit_price is not None and applied_volume is not None and kq is not None and coefficient is not None:
+                    amount = yunan_town_treatment_monthly_fee(
+                        operation_unit_price=unit_price,
+                        monthly_volume_ten_thousand_cubic_meters=applied_volume,
+                        water_quality_coefficient=kq,
+                        operation_coefficient=coefficient,
+                    )
+                    amount_text = f"PCi={amount:.4f}万元"
+                input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
+                if volume is not None:
+                    input_text += f"，QB={volume:.4f}万m³"
+                    if applied_volume is not None and applied_volume != volume:
+                        input_text += f"，核定QB={applied_volume:.4f}万m³"
+                rows_for_record.append(f"{input_text}，{_format_missing(missing)}，{amount_text}")
+            elif facility_type == "town_network":
+                annual_fee = None
+                if basis:
+                    annual_fee = _optional_float(basis.get("networkAvailabilityFeeTenThousandYuanPerYear"))
+                    operation_fee = _optional_float(context.get("adjustedNetworkOperationFeeTenThousandYuanPerYear"))
+                    if operation_fee is None:
+                        operation_fee = _optional_float(basis.get("networkOperationFeeTenThousandYuanPerYear"))
+                    if annual_fee is not None and operation_fee is not None:
+                        annual_fee += operation_fee
+                average_daily = _month_average_daily_volume(month)
+                if annual_fee is None:
+                    missing.append("管网年服务费基数")
+                if average_daily is None:
+                    missing.append("日均水量")
+                if design_scale is None:
+                    missing.append("设计规模或确认负荷基数")
+                load = None
+                if average_daily is not None and design_scale is not None:
+                    load = yunan_town_network_load_coefficient(average_daily, design_scale)
+                if not missing and annual_fee is not None and load is not None and kq is not None and coefficient is not None:
+                    amount = yunan_network_monthly_fee(
+                        annual_network_fee_ten_thousand_yuan=annual_fee,
+                        load_coefficient=load,
+                        water_quality_coefficient=kq,
+                        dry_season_quality_coefficient=dry_e1,
+                        operation_coefficient=coefficient,
+                    )
+                    amount_text = f"Pwi={amount:.4f}万元"
+                input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
+                if load is not None:
+                    input_text += f"，KQ={load:.4f}"
+                input_text += f"，E1={dry_e1:.4f}"
+                rows_for_record.append(f"{input_text}，{_format_missing(missing)}，{amount_text}")
+        payment_rows.append([
+            len(payment_rows) + 1,
+            point_name,
+            REPORT_TYPE_LABELS.get(facility_type, facility_type or "-"),
+            f"{coefficient:.4f}" if coefficient is not None else "暂不核定",
+            coefficient_source,
+            "；".join(rows_for_record) if rows_for_record else "未录入月度付费基础数据",
+            "逐月金额齐全后汇总形成应付服务费结论",
+        ])
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期采用E2", "系数依据", "月度测算", "处理意见"], payment_rows)
+
+    document.add_heading("3.5 金额核定条件", level=2)
+    _add_simple_table(document, ["序号", "必需输入", "当前处理原则", "说明"], [
+        [1, "附件18金额基数", "已按郁南附件18结构化引用", "不引用茂南或其他项目金额资料"],
+        [2, "上一期考核得分", "用于本期付费E2", "首个付费周期可按1执行，但需在平台端明确勾选"],
+        [3, "月度水量、月均COD和达标结论", "逐月计算Kq、KQ和服务费", "缺失时只列公式和缺失条件，不输出最终应付金额"],
+        [4, "农村设施全镇汇总数据", "全镇汇总后核定", "单个村点记录不替代全镇农村设施付费测算"],
+    ])
+
+
+def _optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _payment_context(record: dict[str, Any]) -> dict[str, Any]:
+    value = record.get("paymentContext")
+    return value if isinstance(value, dict) else {}
+
+
+def _payment_month_rows(record: dict[str, Any]) -> list[dict[str, Any]]:
+    context = _payment_context(record)
+    rows = context.get("months")
+    if isinstance(rows, list):
+        return [dict(item) for item in rows if isinstance(item, dict)]
+    raw = record.get("rawPayload") or {}
+    payment_data = raw.get("paymentData") if isinstance(raw.get("paymentData"), dict) else {}
+    rows = payment_data.get("months")
+    if isinstance(rows, list):
+        return [dict(item) for item in rows if isinstance(item, dict)]
+    return []
+
+
+def _payment_coefficient(record: dict[str, Any], *, project: str) -> tuple[float | None, str]:
+    context = _payment_context(record)
+    coefficient = _optional_float(context.get("appliedOperationCoefficient"))
+    if coefficient is not None:
+        source = context.get("coefficientSourcePeriod") or context.get("coefficientStatus") or "已确认来源"
+        return coefficient, str(source)
+    if context.get("firstPaymentPeriod"):
+        return 1.0, "首个付费周期按1执行"
+    return None, "缺少上一期已提交考核结果，暂不核定本期付费金额"
+
+
+def _month_kq(row: dict[str, Any], *, project: str) -> float | None:
+    influent = _optional_float(row.get("influentCod"))
+    effluent = _optional_float(row.get("effluentCod"))
+    if influent is None or effluent is None:
+        return None
+    if project == "yunan":
+        return yunan_water_quality_coefficient(
+            influent,
+            effluent,
+            effluent_qualified=bool(row.get("effluentQualified", True)),
+        )
+    return maonan_water_quality_coefficient(influent, effluent)
+
+
+def _month_volume(row: dict[str, Any]) -> float | None:
+    return _optional_float(row.get("monthlyVolumeTenThousandCubicMeters"))
+
+
+def _month_average_daily_volume(row: dict[str, Any]) -> float | None:
+    return _optional_float(row.get("averageDailyVolumeCubicMeters"))
+
+
+def _format_missing(items: list[str]) -> str:
+    return "；".join(items) if items else "资料齐全"
+
+
+def _maonan_monthly_payment_inputs(record: dict[str, Any]) -> tuple[float | None, float | None]:
+    raw = record.get("rawPayload") or {}
+    water = raw.get("waterQuality") or {}
+    if not isinstance(water, dict):
+        water = {}
+    influent = _optional_float(raw.get("monthlyInfluentCod"))
+    if influent is None:
+        influent = _optional_float(water.get("monthlyInfluentCod"))
+    effluent = _optional_float(raw.get("monthlyEffluentCod"))
+    if effluent is None:
+        effluent = _optional_float(water.get("monthlyEffluentCod"))
+    kq = maonan_water_quality_coefficient(influent, effluent) if influent is not None and effluent is not None else None
+
+    volume = _optional_float(raw.get("monthlyVolumeTenThousandTons"))
+    if volume is None:
+        volume = _optional_float(water.get("monthlyVolumeTenThousandTons"))
+    if volume is None:
+        unit = str(raw.get("monthlyVolumeUnit") or water.get("monthlyVolumeUnit") or "").strip().lower()
+        if unit in {"万吨", "万吨/月", "10k_m3", "10k_tons"}:
+            volume = _optional_float(raw.get("monthlyVolume") or water.get("monthlyVolume"))
+    return kq, volume
 
 
 def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None:
     document.add_heading("第三章 绩效付费计算", level=1)
     document.add_heading("3.1 运维考核系数", level=2)
-    _add_paragraph(document, "按茂南项目绩效付费口径，考核得分W不低于70分时，运维考核系数E1取1；低于70分时，E1=W/70。")
+    _add_paragraph(document, "按茂南项目绩效付费口径，考核得分W不低于70分时，运维考核系数E1取1；低于70分时，E1=W/70。本期付费采用上一考核周期已提交并经复核的数据，本期考核得分作为下一付费周期服务费测算依据。")
     coefficient_rows = []
     for index, record in enumerate(records, 1):
         score = float(record.get("totalScore") or 0)
+        context = _payment_context(record)
+        applied, source = _payment_coefficient(record, project="maonan")
         coefficient_rows.append([
             index,
             _record_point_name(record),
             REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
             f"{score:.2f}",
             f"{maonan_operation_coefficient(score):.3f}",
+            context.get("currentScoreAppliesTo") or "下一付费周期",
+            f"{applied:.3f}" if applied is not None else "暂不核定",
+            source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "考核得分W", "运维考核系数E1"], coefficient_rows)
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E1", "本期得分适用周期", "本期付费采用E1", "采用依据"], coefficient_rows)
 
     document.add_heading("3.2 付费公式", level=2)
     _add_paragraph(document, "城镇水质净化厂月服务费Pz=Py×QB×(3/5+Kq/10+3E1/10)+Pk/12×(2/3+E1/3)。其中Py为污水处理运营服务费单价，QB为当月处理水量，Kq为水质浓度系数，Pk为水质净化设施可用性付费。")
-    _add_paragraph(document, "管网月运营维护费按年运营维护费×(3/5+Kq/10+3E1/10)/12计算。项目服务费由可用性付费和运营维护费组成，具体付费范围及基数优先采用本期经确认资料；未提供新资料时，沿用茂南项目既有历史付费表，不引用其他项目或通用金额基础表。")
+    _add_paragraph(document, "管网月服务费Pw=管网可用性付费/12×(2/3+E1/3)+调整后管网年运营维护费/12×(3/5+Kq/10+3E1/10)。项目服务费由可用性付费和运营维护费组成；未提供新金额表时沿用茂南项目既有历史表，不引用其他项目或通用金额基础表。")
     _add_paragraph(document, payment_source_summary("茂南项目"))
 
-    document.add_heading("3.3 金额核定条件", level=2)
+    document.add_heading("3.3 沿用金额基础", level=2)
+    basis_rows = maonan_payment_basis_rows()
+    selected_types: dict[str, set[str]] = {}
+    for record in records:
+        basis = maonan_payment_basis_for_point(_record_point_name(record))
+        if basis:
+            selected_types.setdefault(basis["pointName"], set()).add(record.get("facilityType") or "")
+    plant_rows = []
+    network_rows = []
+    for row in basis_rows:
+        point_types = selected_types.get(row["pointName"], set())
+        if "town_plant" in point_types and row.get("treatmentAvailabilityFeeTenThousandYuanPerYear") is not None:
+            plant_rows.append([
+                len(plant_rows) + 1,
+                row["pointName"],
+                f"{float(row['treatmentAvailabilityFeeTenThousandYuanPerYear']):.2f}",
+                f"{float(row['treatmentOperationUnitPriceYuanPerCubicMeter']):.2f}",
+                "茂南例文表4-1",
+            ])
+        if "town_network" in point_types and row.get("networkAvailabilityFeeTenThousandYuanPerYear") is not None:
+            network_rows.append([
+                len(network_rows) + 1,
+                row["pointName"],
+                f"{float(row['networkAvailabilityFeeTenThousandYuanPerYear']):.2f}",
+                f"{float(row['originalNetworkOperationFeeTenThousandYuanPerYear']):.2f}",
+                f"{float(row['adjustedNetworkOperationFeeYuanPerYear']):.2f}",
+                "茂南例文表4-1、表4-2",
+            ])
+    if plant_rows:
+        _add_simple_table(document, ["序号", "水质净化厂", "可用性付费（万元/年）", "运营服务费单价（元/m³）", "来源"], plant_rows)
+    if network_rows:
+        _add_simple_table(document, ["序号", "污水收集管网", "可用性付费（万元/年）", "原运营维护费（万元/年）", "调整后运营维护费（元/年）", "来源"], network_rows)
+    _add_paragraph(document, "上述金额基数在未提供新合同金额表或正式调整文件时沿用；如后续提供新表，以新确认资料覆盖本表，不改变评分和系数计算规则。")
+
+    document.add_heading("3.4 当期付费测算", level=2)
+    payment_rows = []
+    for record in records:
+        point_name = _record_point_name(record)
+        facility_type = record.get("facilityType") or ""
+        score = float(record.get("totalScore") or 0)
+        e1, coefficient_source = _payment_coefficient(record, project="maonan")
+        basis = maonan_payment_basis_for_point(point_name)
+        basis_text = "未匹配到本项目金额基数"
+        result_text = "待补齐本期输入后计算"
+        if basis and facility_type == "town_plant":
+            pk = float(basis["treatmentAvailabilityFeeTenThousandYuanPerYear"])
+            py = float(basis["treatmentOperationUnitPriceYuanPerCubicMeter"])
+            max_year = maonan_annual_maximum_treatment_fee(
+                annual_availability_fee_ten_thousand_yuan=pk,
+                operation_unit_price_yuan_per_cubic_meter=py,
+                design_scale_cubic_meters_per_day=float(basis.get("designScaleCubicMetersPerDay") or 0),
+            )
+            basis_text = f"Pk={pk:.2f}万元/年；Py={py:.2f}元/m³；年封顶={max_year:.2f}万元"
+        elif basis and facility_type == "town_network":
+            pk = float(basis["networkAvailabilityFeeTenThousandYuanPerYear"])
+            adjusted_py = float(basis["adjustedNetworkOperationFeeYuanPerYear"]) / 10000
+            basis_text = f"Pk={pk:.2f}万元/年；调整后Py={adjusted_py:.4f}万元/年"
+        month_lines: list[str] = []
+        months = _payment_month_rows(record)
+        if not months:
+            legacy_kq, legacy_qb = _maonan_monthly_payment_inputs(record)
+            months = [{"month": "本期", "monthlyVolumeTenThousandCubicMeters": legacy_qb, "influentCod": None, "effluentCod": None}]
+            if legacy_kq is not None:
+                months[0]["legacyKq"] = legacy_kq
+        for month in months:
+            month_label = str(month.get("month") or "-")
+            kq = _optional_float(month.get("legacyKq"))
+            if kq is None:
+                kq = _month_kq(month, project="maonan")
+            qb = _month_volume(month)
+            missing: list[str] = []
+            if e1 is None:
+                missing.append("上一期E1")
+            if kq is None:
+                missing.append("月均进出水COD")
+            if facility_type == "town_plant" and qb is None:
+                missing.append("QB")
+            amount_text = "暂不核定"
+            if basis and facility_type == "town_plant":
+                pk = float(basis["treatmentAvailabilityFeeTenThousandYuanPerYear"])
+                py = float(basis["treatmentOperationUnitPriceYuanPerCubicMeter"])
+                applied_qb = qb
+                design_scale = _optional_float(basis.get("designScaleCubicMetersPerDay"))
+                if qb is not None and design_scale is not None and "-" in month_label:
+                    bounded = bounded_monthly_volume(
+                        actual_volume_ten_thousand_cubic_meters=qb,
+                        design_scale_cubic_meters_per_day=design_scale,
+                        month=month_label,
+                        guaranteed_factor=_optional_float(basis.get("guaranteedVolumeFactor")),
+                        maximum_factor=_optional_float(basis.get("maximumVolumeFactor")) or 1.2,
+                    )
+                    applied_qb = bounded["applied"]
+                if not missing and kq is not None and applied_qb is not None and e1 is not None:
+                    amount = maonan_treatment_monthly_fee(
+                        operation_unit_price=py,
+                        monthly_volume_ten_thousand_tons=applied_qb,
+                        water_quality_coefficient=kq,
+                        operation_coefficient=e1,
+                        annual_availability_fee_ten_thousand_yuan=pk,
+                    )
+                    amount_text = f"Pz={amount:.4f}万元"
+                input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
+                if qb is not None:
+                    input_text += f"，QB={qb:.4f}万吨"
+                    if applied_qb is not None and applied_qb != qb:
+                        input_text += f"，核定QB={applied_qb:.4f}万吨"
+                month_lines.append(f"{input_text}，{_format_missing(missing)}，{amount_text}")
+            elif basis and facility_type == "town_network":
+                pk = float(basis["networkAvailabilityFeeTenThousandYuanPerYear"])
+                adjusted_py = float(basis["adjustedNetworkOperationFeeYuanPerYear"]) / 10000
+                if not missing and kq is not None and e1 is not None:
+                    amount = maonan_network_monthly_fee(
+                        annual_availability_fee_ten_thousand_yuan=pk,
+                        annual_operation_fee_ten_thousand_yuan=adjusted_py,
+                        water_quality_coefficient=kq,
+                        operation_coefficient=e1,
+                    )
+                    amount_text = f"Pw={amount:.4f}万元"
+                input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
+                month_lines.append(f"{input_text}，{_format_missing(missing)}，{amount_text}")
+        if month_lines:
+            result_text = "；".join(month_lines)
+        payment_rows.append([
+            len(payment_rows) + 1,
+            point_name,
+            REPORT_TYPE_LABELS.get(facility_type, facility_type or "-"),
+            f"{score:.2f}",
+            f"{e1:.4f}" if e1 is not None else "暂不核定",
+            basis_text,
+            coefficient_source,
+            result_text,
+        ])
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期采用E1", "沿用基数", "系数依据", "月度测算结果"], payment_rows)
+    _add_paragraph(document, "当期月均进出水COD、处理水量或上一期运维系数未录入时，报告保留已确认金额基数和公式，不将缺失值按0处理，也不输出虚假的最终应付金额。")
+
+    document.add_heading("3.5 金额核定条件", level=2)
     _add_simple_table(document, ["序号", "必需输入", "当前状态", "处理原则"], [
-        [1, "经确认的可用性付费及运营维护费基数", "未提供新表时沿用本项目历史表", "不得引用其他项目基数代算。"],
+        [1, "可用性付费及运营维护费基数", "已结构化茂南例文表4-1、表4-2", "未提供新表时沿用；新表确认后覆盖。"],
         [2, "各月实际处理水量QB", "需由本期数据或本项目历史付费资料提供", "按出水计量数据并结合合同上下限核定。"],
         [3, "各月平均进、出水COD浓度", "需由本期数据或本项目历史付费资料提供", "用于逐月计算Kq。"],
     ])
-    _add_paragraph(document, "上述金额输入由本期资料或茂南项目既有历史表支撑时，可按既有付费口径测算服务费；若本项目自身资料仍不完整，本报告仅核定考核得分和运维考核系数，不输出具体应付金额，避免形成未经依据确认的金额结果。")
+    _add_paragraph(document, "金额基数已具备时，仍需本期QB和月均COD数据才能形成完整服务费结论；资料不完整时仅输出可复核的金额基础、公式和已具备系数。")
 
 
 def _add_problem_and_suggestion_chapter(document, records: list[dict[str, Any]], *, maonan: bool) -> None:

@@ -2197,11 +2197,85 @@ type ScoreDraft = {
   reason: string;
 };
 
+type PaymentMonthRow = {
+  month: string;
+  monthlyVolumeTenThousandCubicMeters?: number | null;
+  averageDailyVolumeCubicMeters?: number | null;
+  influentCod?: number | null;
+  effluentCod?: number | null;
+  effluentQualified?: boolean | null;
+  influentCodDaysOver160?: number | null;
+  note?: string;
+};
+
+type PaymentContext = {
+  assessmentPeriod?: string | null;
+  paymentPeriod?: string | null;
+  coefficientSourcePeriod?: string | null;
+  previousRecordId?: string | null;
+  previousScore?: number | null;
+  appliedOperationCoefficient?: number | null;
+  firstPaymentPeriod?: boolean;
+  coefficientStatus?: string;
+  currentScore?: number | null;
+  currentScoreAppliesTo?: string | null;
+  nextPaymentPeriod?: string | null;
+  months?: PaymentMonthRow[];
+  designScaleCubicMetersPerDay?: number | null;
+  adjustedTreatmentUnitPriceYuanPerCubicMeter?: number | null;
+  adjustedNetworkOperationFeeTenThousandYuanPerYear?: number | null;
+  note?: string;
+  basis?: Record<string, unknown> | null;
+  basisStatus?: string | null;
+};
+
+type PaymentMonthDraft = {
+  month: string;
+  monthlyVolumeTenThousandCubicMeters: string;
+  averageDailyVolumeCubicMeters: string;
+  influentCod: string;
+  effluentCod: string;
+  effluentQualified: "" | "true" | "false";
+  influentCodDaysOver160: string;
+  note: string;
+};
+
+type PaymentDraft = {
+  months: PaymentMonthDraft[];
+  designScaleCubicMetersPerDay: string;
+  firstPaymentPeriod: boolean;
+  adjustedTreatmentUnitPriceYuanPerCubicMeter: string;
+  adjustedNetworkOperationFeeTenThousandYuanPerYear: string;
+  note: string;
+};
+
+function paymentDraftFromContext(context?: PaymentContext | null): PaymentDraft {
+  const value = (input?: number | null) => input == null ? "" : String(input);
+  return {
+    months: (context?.months ?? []).map(item => ({
+      month: item.month,
+      monthlyVolumeTenThousandCubicMeters: value(item.monthlyVolumeTenThousandCubicMeters),
+      averageDailyVolumeCubicMeters: value(item.averageDailyVolumeCubicMeters),
+      influentCod: value(item.influentCod),
+      effluentCod: value(item.effluentCod),
+      effluentQualified: item.effluentQualified == null ? "" : item.effluentQualified ? "true" : "false",
+      influentCodDaysOver160: value(item.influentCodDaysOver160),
+      note: item.note ?? "",
+    })),
+    designScaleCubicMetersPerDay: value(context?.designScaleCubicMetersPerDay),
+    firstPaymentPeriod: Boolean(context?.firstPaymentPeriod),
+    adjustedTreatmentUnitPriceYuanPerCubicMeter: value(context?.adjustedTreatmentUnitPriceYuanPerCubicMeter),
+    adjustedNetworkOperationFeeTenThousandYuanPerYear: value(context?.adjustedNetworkOperationFeeTenThousandYuanPerYear),
+    note: context?.note ?? "",
+  };
+}
+
 type ReviewRecordDetail = ReviewRecordRow & {
   surveys?: Array<{ surveyType: string; respondent?: string; score?: number; payload?: { comment?: string } }>;
   waterQuality?: Array<{ id: string; conclusion?: string; sampledAt?: string | null; payload?: { sampleTime?: string; note?: string } }>;
   attachments?: Array<{ id: string; filename: string; scoreId?: string | null; deductionOptionId?: string | null; size: number; downloadUrl?: string }>;
   reviewLogs?: Array<{ id: string; action: string; reason?: string | null; beforePayload?: { scores?: Array<{ id: string; score?: number | null; deduction?: number; reason?: string | null }>; status?: string }; afterPayload?: { scores?: Array<{ id: string; score?: number | null; deduction?: number; reason?: string | null }>; status?: string }; createdAt: string }>;
+  paymentContext?: PaymentContext;
 };
 
 function reviewRecordProject(record: ReviewRecordRow): string {
@@ -2636,12 +2710,14 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   const [selected, setSelected] = useState<ReviewRecordDetail | null>(null);
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [scoreDrafts, setScoreDrafts] = useState<Record<string, ScoreDraft>>({});
+  const [paymentDraft, setPaymentDraft] = useState<PaymentDraft>(() => paymentDraftFromContext());
   const [scorePatchReason, setScorePatchReason] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const [returnReasons, setReturnReasons] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [savingScores, setSavingScores] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
@@ -2672,6 +2748,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
             downloadUrl: `${API_BASE_URL}/uploads/${item.id}/download`,
           })),
         });
+        setPaymentDraft(paymentDraftFromContext(detail.paymentContext));
         const drafts: Record<string, ScoreDraft> = {};
         for (const item of detail.scores ?? []) {
           drafts[item.id] = {
@@ -2778,6 +2855,54 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
     }
   };
 
+  const updatePaymentMonth = (index: number, patch: Partial<PaymentMonthDraft>) => {
+    setPaymentDraft(previous => ({
+      ...previous,
+      months: previous.months.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
+    }));
+  };
+
+  const savePaymentData = async () => {
+    if (!selected) return;
+    const optionalNumber = (value: string) => value.trim() === "" ? null : Number(value);
+    setSavingPayment(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/records/${selected.id}/payment-data`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          months: paymentDraft.months.map(item => ({
+            month: item.month,
+            monthlyVolumeTenThousandCubicMeters: optionalNumber(item.monthlyVolumeTenThousandCubicMeters),
+            averageDailyVolumeCubicMeters: optionalNumber(item.averageDailyVolumeCubicMeters),
+            influentCod: optionalNumber(item.influentCod),
+            effluentCod: optionalNumber(item.effluentCod),
+            effluentQualified: item.effluentQualified === "" ? null : item.effluentQualified === "true",
+            influentCodDaysOver160: optionalNumber(item.influentCodDaysOver160),
+            note: item.note.trim(),
+          })),
+          designScaleCubicMetersPerDay: optionalNumber(paymentDraft.designScaleCubicMetersPerDay),
+          firstPaymentPeriod: paymentDraft.firstPaymentPeriod,
+          adjustedTreatmentUnitPriceYuanPerCubicMeter: optionalNumber(paymentDraft.adjustedTreatmentUnitPriceYuanPerCubicMeter),
+          adjustedNetworkOperationFeeTenThousandYuanPerYear: optionalNumber(paymentDraft.adjustedNetworkOperationFeeTenThousandYuanPerYear),
+          note: paymentDraft.note.trim(),
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || "保存付费数据失败，请检查填写内容。 ");
+      }
+      const detail = await response.json();
+      setSelected(previous => previous ? { ...previous, ...detail } : detail);
+      setPaymentDraft(paymentDraftFromContext(detail.paymentContext));
+      setNotice("付费数据已保存，并会用于正式报告测算。");
+    } catch (error) {
+      setNotice(error instanceof Error ? localizeBackendMessage(error.message) : "保存付费数据失败，请稍后重试。");
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto">
       <TopBar title="数据复核" breadcrumbs={["数据复核"]} />
@@ -2874,6 +2999,99 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
               <p>周期：<span className="text-foreground">{selected.cycleName || "-"}</span></p>
             <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
               <p>提交：<span className="text-foreground">{formatPlatformTime(selected.submittedAt)}</span></p>
+            </div>
+            <div className="border-b border-border px-5 py-4">
+              <div className="mb-3 flex items-start justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-semibold text-foreground">绩效付费基础数据</h4>
+                  <p className="mt-1 text-[11px] text-muted-foreground">金额基数来自当前项目资料；月度水量和水质数据由平台复核录入。</p>
+                </div>
+                <button
+                  disabled={savingPayment}
+                  onClick={savePaymentData}
+                  className="h-8 rounded bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:opacity-40"
+                >
+                  {savingPayment ? "保存中..." : "保存付费数据"}
+                </button>
+              </div>
+              <div className="mb-4 grid grid-cols-4 gap-3 text-xs">
+                <div className="border-l-2 border-primary pl-3">
+                  <p className="text-muted-foreground">本次付费周期</p>
+                  <p className="mt-1 font-medium text-foreground">{selected.paymentContext?.paymentPeriod || selected.cycleName || "未识别"}</p>
+                </div>
+                <div className="border-l-2 border-emerald-500 pl-3">
+                  <p className="text-muted-foreground">本期采用运维系数</p>
+                  <p className="mt-1 font-medium text-foreground">
+                    {selected.paymentContext?.appliedOperationCoefficient == null ? "待补上一期结果" : selected.paymentContext.appliedOperationCoefficient.toFixed(4)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{selected.paymentContext?.coefficientSourcePeriod || selected.paymentContext?.coefficientStatus || "未识别来源周期"}</p>
+                </div>
+                <div className="border-l-2 border-amber-500 pl-3">
+                  <p className="text-muted-foreground">本期得分适用周期</p>
+                  <p className="mt-1 font-medium text-foreground">{selected.paymentContext?.currentScoreAppliesTo || "待确定"}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">当前得分不参与本期金额计算</p>
+                </div>
+                <div className="border-l-2 border-border pl-3">
+                  <p className="text-muted-foreground">金额基础状态</p>
+                  <p className="mt-1 font-medium text-foreground">{selected.paymentContext?.basisStatus || "未匹配"}</p>
+                </div>
+              </div>
+              <div className="mb-3 grid grid-cols-4 gap-3">
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">设计规模（立方米/日）</span>
+                  <input type="number" min="0" value={paymentDraft.designScaleCubicMetersPerDay} onChange={event => setPaymentDraft(previous => ({ ...previous, designScaleCubicMetersPerDay: event.target.value }))} className="h-9 w-full rounded border border-border bg-background px-2 text-xs text-foreground" />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">调整后处理单价（元/立方米）</span>
+                  <input type="number" min="0" step="0.0001" value={paymentDraft.adjustedTreatmentUnitPriceYuanPerCubicMeter} onChange={event => setPaymentDraft(previous => ({ ...previous, adjustedTreatmentUnitPriceYuanPerCubicMeter: event.target.value }))} className="h-9 w-full rounded border border-border bg-background px-2 text-xs text-foreground" placeholder="没有正式调价文件时留空" />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs text-muted-foreground">调整后管网运维费（万元/年）</span>
+                  <input type="number" min="0" step="0.0001" value={paymentDraft.adjustedNetworkOperationFeeTenThousandYuanPerYear} onChange={event => setPaymentDraft(previous => ({ ...previous, adjustedNetworkOperationFeeTenThousandYuanPerYear: event.target.value }))} className="h-9 w-full rounded border border-border bg-background px-2 text-xs text-foreground" placeholder="没有正式调价文件时留空" />
+                </label>
+                <label className="flex items-center gap-2 self-end h-9 text-xs text-foreground">
+                  <input type="checkbox" checked={paymentDraft.firstPaymentPeriod} onChange={event => setPaymentDraft(previous => ({ ...previous, firstPaymentPeriod: event.target.checked }))} />
+                  首个付费周期，运维系数按1执行
+                </label>
+              </div>
+              <div className="overflow-x-auto border border-border">
+                <table className="w-full min-w-[1080px] text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
+                      <th className="px-2 py-2">月份</th>
+                      <th className="px-2 py-2">处理水量（万吨/月）</th>
+                      <th className="px-2 py-2">日均水量（立方米/日）</th>
+                      <th className="px-2 py-2">进水化学需氧量</th>
+                      <th className="px-2 py-2">出水化学需氧量</th>
+                      <th className="px-2 py-2">出水结论</th>
+                      <th className="px-2 py-2">进水大于160天数</th>
+                      <th className="px-2 py-2">备注</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paymentDraft.months.map((item, index) => (
+                      <tr key={item.month} className="border-b border-border last:border-0">
+                        <td className="px-2 py-2 font-mono text-foreground">{item.month}</td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}处理水量`} type="number" min="0" step="0.0001" value={item.monthlyVolumeTenThousandCubicMeters} onChange={event => updatePaymentMonth(index, { monthlyVolumeTenThousandCubicMeters: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}日均水量`} type="number" min="0" step="0.01" value={item.averageDailyVolumeCubicMeters} onChange={event => updatePaymentMonth(index, { averageDailyVolumeCubicMeters: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}进水化学需氧量`} type="number" min="0" step="0.01" value={item.influentCod} onChange={event => updatePaymentMonth(index, { influentCod: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}出水化学需氧量`} type="number" min="0" step="0.01" value={item.effluentCod} onChange={event => updatePaymentMonth(index, { effluentCod: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                        <td className="px-2 py-2">
+                          <select aria-label={`${item.month}出水结论`} value={item.effluentQualified} onChange={event => updatePaymentMonth(index, { effluentQualified: event.target.value as PaymentMonthDraft["effluentQualified"] })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground">
+                            <option value="">请选择</option><option value="true">达标</option><option value="false">不达标</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}高浓度天数`} type="number" min="0" max="31" value={item.influentCodDaysOver160} onChange={event => updatePaymentMonth(index, { influentCodDaysOver160: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                        <td className="px-2 py-2"><input aria-label={`${item.month}备注`} value={item.note} onChange={event => updatePaymentMonth(index, { note: event.target.value })} className="h-8 w-full rounded border border-border bg-background px-2 text-foreground" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <label className="mt-3 block space-y-1">
+                <span className="block text-xs text-muted-foreground">付费数据复核备注</span>
+                <input value={paymentDraft.note} onChange={event => setPaymentDraft(previous => ({ ...previous, note: event.target.value }))} className="h-9 w-full rounded border border-border bg-background px-2 text-xs text-foreground" placeholder="记录数据来源、调价文件或异常说明" />
+              </label>
             </div>
             <div className="px-5 py-4 grid grid-cols-2 gap-5">
               <div>

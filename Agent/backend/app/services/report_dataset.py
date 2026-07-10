@@ -24,6 +24,7 @@ from app.models import (
     WaterQualityRecord,
     City,
 )
+from app.services.payment_context import build_payment_context
 
 
 def _json_safe(value: Any) -> Any:
@@ -131,6 +132,7 @@ def build_report_dataset(
                 "status": record.status,
                 "totalScore": record.total_score,
                 "rawPayload": record.raw_payload or {},
+                "paymentContext": build_payment_context(session, record),
                 "submittedAt": record.submitted_at,
                 "reviewedAt": record.reviewed_at,
                 "lockedAt": record.locked_at,

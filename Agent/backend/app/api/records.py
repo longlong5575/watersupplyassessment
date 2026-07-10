@@ -20,8 +20,9 @@ from app.models import (
     Village,
     WaterQualityRecord,
 )
-from app.schemas import RecordPatch, ScorePatch
+from app.schemas import PaymentDataPatch, RecordPatch, ScorePatch
 from app.services.assessment_ingest import recalculate_record_total, sync_scores, sync_surveys, sync_water_quality
+from app.services.payment_context import build_payment_context, months_for_period
 from app.services.review import review_record
 from app.services.standard_names import clean_standard_name
 
@@ -151,6 +152,7 @@ def get_record(record_id: str, session: Session = Depends(get_session)):
         }
         for item in session.scalars(select(ReviewLog).where(ReviewLog.record_id == record.id).order_by(ReviewLog.created_at.desc())).all()
     ]
+    data["paymentContext"] = build_payment_context(session, record)
     return data
 
 
@@ -169,6 +171,39 @@ def update_record(record_id: str, payload: RecordPatch, session: Session = Depen
         sync_water_quality(session, record, payload.data["waterQuality"])
     session.commit()
     return serialize(record, session)
+
+
+@router.put("/api/records/{record_id}/payment-data")
+def update_payment_data(record_id: str, payload: PaymentDataPatch, session: Session = Depends(get_session), user=Depends(admin_user)):
+    record = session.get(AssessmentRecord, record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="未找到考核记录")
+    cycle = session.get(AssessmentCycle, record.cycle_id)
+    months = [item.month for item in payload.months]
+    if len(months) != len(set(months)):
+        raise HTTPException(status_code=422, detail="同一个月份只能填写一次付费数据")
+    expected_months = months_for_period(cycle.name if cycle else "")
+    unexpected = sorted(set(months) - set(expected_months)) if expected_months else []
+    if unexpected:
+        raise HTTPException(status_code=422, detail=f"月份不属于当前考核周期：{'、'.join(unexpected)}")
+
+    before = dict((record.raw_payload or {}).get("paymentData") or {})
+    payment_data = payload.model_dump()
+    record.raw_payload = {**(record.raw_payload or {}), "paymentData": payment_data}
+    session.add(
+        ReviewLog(
+            record_id=record.id,
+            actor_id=user.id,
+            action="payment_data_update",
+            reason="更新绩效付费基础数据",
+            before_payload={"paymentData": before},
+            after_payload={"paymentData": payment_data},
+        )
+    )
+    session.commit()
+    data = serialize(record, session)
+    data["paymentContext"] = build_payment_context(session, record)
+    return data
 
 
 @router.put("/api/records/{record_id}/scores")

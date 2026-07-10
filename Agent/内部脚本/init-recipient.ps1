@@ -98,7 +98,7 @@ if (-not $python312 -or -not (Test-Path -LiteralPath $python312)) {
 Push-Location $backend
 try {
   New-Item -ItemType Directory -Force -Path $runtimeBackend | Out-Null
-  $pythonPackages = Join-Path $runtimeBackend "python-packages"
+  $pythonPackages = Join-Path $runtimeBackend "python-packages-current"
   Install-PythonRequirements $python312 $pythonPackages
 }
 finally { Pop-Location }
