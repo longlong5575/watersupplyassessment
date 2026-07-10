@@ -2473,7 +2473,6 @@ function StandardsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-foreground">{cleanStandardName(version.name)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{version.cityName || "-"} · {version.cycleName || "-"}</p>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">三级指标 {version.indicatorCount ?? 0} 项</p>

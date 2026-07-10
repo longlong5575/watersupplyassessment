@@ -104,14 +104,8 @@ def resolve_village(session: Session, raw: dict[str, Any], town_id: str) -> Vill
 def resolve_indicator_version(session: Session, raw: dict[str, Any], city_id: str, cycle_id: str) -> IndicatorVersion | None:
     version_id = raw.get("indicatorVersionId") or raw.get("indicator_version_id")
     version = session.get(IndicatorVersion, version_id) if version_id else None
-    if version is None:
-        version = session.scalar(
-            select(IndicatorVersion).where(
-                IndicatorVersion.city_id == city_id,
-                IndicatorVersion.cycle_id == cycle_id,
-                IndicatorVersion.status == "published",
-            )
-        )
+    if version is not None and version.city_id != city_id:
+        version = None
     if version is None:
         version = session.scalar(
             select(IndicatorVersion)

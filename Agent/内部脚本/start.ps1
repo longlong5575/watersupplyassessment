@@ -86,9 +86,15 @@ function Install-Python312 {
   $env:PYTHON312_EXE = $candidate
 }
 
-function Start-Frontend([string]$directory, [int]$Port) {
-  $command = "Set-Location -LiteralPath '$directory'; if (Get-Command pnpm -ErrorAction SilentlyContinue) { pnpm exec vite --host 127.0.0.1 --port $Port --strictPort } else { npx --yes pnpm@10.12.1 exec vite --host 127.0.0.1 --port $Port --strictPort }"
-  $process = Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$command`"" -PassThru
+function Start-Frontend([string]$directory, [int]$Port, [string]$Name) {
+  $nodeCommand = Get-Command "node" -ErrorAction SilentlyContinue
+  $viteEntry = Join-Path $directory "node_modules\vite\bin\vite.js"
+  if (-not $nodeCommand) { throw "未找到 Node.js，无法启动前端服务。" }
+  if (-not (Test-Path -LiteralPath $viteEntry)) { throw "前端依赖不完整，请重新启动系统以自动修复。" }
+  $stdoutPath = Join-Path $logDir "$Name.out.log"
+  $stderrPath = Join-Path $logDir "$Name.err.log"
+  $arguments = @("`"$viteEntry`"", "--host", "127.0.0.1", "--port", [string]$Port, "--strictPort")
+  $process = Start-Process -FilePath $nodeCommand.Source -ArgumentList $arguments -WorkingDirectory $directory -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
   return $process.Id
 }
 
@@ -211,8 +217,8 @@ try {
   Write-StartupStatus $Text.Backend $Text.BackendMsg
   & $backendLauncherPython (Join-Path $backend "start_backend_silent.py")
   Write-StartupStatus $Text.Frontend $Text.FrontendMsg
-  $frontPid = Start-Frontend $front $frontPort
-  $mobilePid = Start-Frontend $mobile $mobilePort
+  $frontPid = Start-Frontend $front $frontPort "front-server"
+  $mobilePid = Start-Frontend $mobile $mobilePort "front-mobile-server"
   $frontPid | Out-File -LiteralPath (Join-Path $logDir "front-server.pid") -Encoding ascii
   $mobilePid | Out-File -LiteralPath (Join-Path $logDir "front-mobile-server.pid") -Encoding ascii
   Wait-ForUrl "http://127.0.0.1:$backendPort/health"

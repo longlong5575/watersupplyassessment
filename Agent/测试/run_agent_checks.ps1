@@ -10,8 +10,10 @@ $mobile = Join-Path (Join-Path $agentRoot "frontend") "front-mobile"
 $resultDir = Join-Path $runtimeRoot "test-results"
 New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
-$pnpm = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd"
-if (-not (Test-Path -LiteralPath $pnpm)) { $pnpm = "pnpm" }
+$dependencyRoot = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies"
+$bundledNode = Join-Path $dependencyRoot "node\bin\node.exe"
+$bundledPnpm = Join-Path $dependencyRoot "node\node_modules\pnpm\bin\pnpm.cjs"
+$pnpm = if (Get-Command "pnpm" -ErrorAction SilentlyContinue) { (Get-Command "pnpm").Source } else { "pnpm" }
 $pythonExe = $env:PYTHON312_EXE
 if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
   $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
@@ -30,6 +32,15 @@ function Invoke-Checked {
   param([scriptblock]$Command)
   & $Command
   if ($LASTEXITCODE -ne 0) { throw ("Command failed with exit code " + $LASTEXITCODE) }
+}
+
+function Invoke-Pnpm {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+  if ((Test-Path -LiteralPath $bundledNode) -and (Test-Path -LiteralPath $bundledPnpm)) {
+    & $bundledNode $bundledPnpm @Arguments
+    return
+  }
+  & $pnpm @Arguments
 }
 
 function Copy-FrontendForCheck {
@@ -56,10 +67,10 @@ function Invoke-FrontendChecks {
     $target = Copy-FrontendForCheck -Source $Source -Name $Name -CheckRoot $checkRoot
     Push-Location $target
     try {
-      Invoke-Checked { & $pnpm install --config.confirm-modules-purge=false }
-      Invoke-Checked { & $pnpm typecheck }
+      Invoke-Checked { Invoke-Pnpm install --config.confirm-modules-purge=false }
+      Invoke-Checked { Invoke-Pnpm typecheck }
       & $MarkTypecheck
-      Invoke-Checked { & $pnpm build }
+      Invoke-Checked { Invoke-Pnpm build }
       & $MarkBuild
     }
     finally { Pop-Location }

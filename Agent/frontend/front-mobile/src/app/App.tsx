@@ -3759,16 +3759,13 @@ function AssessmentApp() {
           recordsByTown.set(item.town, mergeVillageRecords(recordsByTown.get(item.town) ?? [], [record]));
           if (item.updatedAt) updatedAtByTown.set(item.town, item.updatedAt);
         });
-        setSubmittedData(prev => {
-          const next = { ...prev };
-          recordsByTown.forEach((records, townName) => {
-            next[townName] = mergeVillageRecords(next[townName] ?? [], records);
-          });
-          return next;
-        });
         setSyncQueue(prev => {
           const backendPrefix = `backend-${cityId}-${cycleId || cycleName}-`;
-          const retained = prev.filter(item => !item.localId.startsWith(backendPrefix));
+          const retained = prev.filter(item => !(
+            item.syncStatus === "synced" &&
+            item.pkg.cityId === cityId &&
+            item.pkg.period === cycleName
+          ) && !item.localId.startsWith(backendPrefix));
           const restored = Array.from(recordsByTown.entries()).map(([townName, records]): SyncQueueItem => ({
             localId: `${backendPrefix}${townName}`,
             town: townName,
@@ -3786,7 +3783,9 @@ function AssessmentApp() {
             createdAt: updatedAtByTown.get(townName) ?? new Date().toISOString(),
             syncedAt: updatedAtByTown.get(townName),
           }));
-          return [...retained, ...restored];
+          const nextQueue = [...retained, ...restored];
+          setSubmittedData(submittedDataFromQueue(nextQueue));
+          return nextQueue;
         });
       })
       .catch(() => undefined);

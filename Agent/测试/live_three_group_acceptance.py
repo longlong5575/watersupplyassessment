@@ -11,7 +11,8 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent.parent if ROOT.parent.name.lower() == "watersupplyassessment" else ROOT.parent
-RUNTIME = WORKSPACE / "运行脚本" / "watersupply-agent-runtime"
+RUN_SCRIPTS_NAME = "".join(chr(c) for c in [0x8fd0, 0x884c, 0x811a, 0x672c])
+RUNTIME = WORKSPACE / RUN_SCRIPTS_NAME / "watersupply-agent-runtime"
 RESULTS = RUNTIME / "test-results" / "live-three-groups"
 DB_PATH = RUNTIME / "storage" / "assessment.db"
 
@@ -23,13 +24,12 @@ import httpx
 from sqlalchemy import delete, select
 
 from app.core.database import SessionLocal
-from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion
-from app.services.seed import _seed_standard_groups
+from app.models import AssessmentCycle, City
 
 
-STATUS_PATH = WORKSPACE / "运行脚本" / "watersupply-agent-runtime" / "logs" / "startup-status.json"
+STATUS_PATH = WORKSPACE / RUN_SCRIPTS_NAME / "watersupply-agent-runtime" / "logs" / "startup-status.json"
 BASE_URL = os.environ.get("WATERSUPPLY_BACKEND_URL") or "http://127.0.0.1:8000"
-PERIOD = "2030年第4季度"
+PERIOD = "".join(chr(c) for c in [0x32, 0x30, 0x33, 0x30, 0x5e74, 0x7b2c, 0x34, 0x5b63, 0x5ea6])
 if not os.environ.get("WATERSUPPLY_BACKEND_URL") and STATUS_PATH.exists():
     try:
         BASE_URL = json.loads(STATUS_PATH.read_text(encoding="utf-8")).get("backendUrl") or BASE_URL
@@ -46,23 +46,15 @@ def require(response: httpx.Response, label: str):
 def prepare_cycles() -> dict[str, str]:
     cycle_ids: dict[str, str] = {}
     with SessionLocal() as session:
-        for city in session.scalars(select(City).where(City.name.in_(["郁南项目", "茂南项目"]))).all():
+        project_names = ["".join(chr(c) for c in codes) for codes in ([0x90c1, 0x5357, 0x9879, 0x76ee], [0x8302, 0x5357, 0x9879, 0x76ee])]
+        projects = session.scalars(select(City).where(City.name.in_(project_names))).all()
+        for city in projects:
             existing = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city.id, AssessmentCycle.name == PERIOD))
             if existing is not None:
-                raise RuntimeError(f"{city.name}已存在{PERIOD}数据，请先清理后再测试")
+                raise RuntimeError(f"{city.name}已存在{PERIOD}测试周期，请先清理旧测试数据。")
             cycle = AssessmentCycle(city_id=city.id, name=PERIOD, status="active")
             session.add(cycle)
             session.flush()
-            version = IndicatorVersion(
-                city_id=city.id,
-                cycle_id=cycle.id,
-                name=f"{city.name}{PERIOD}全真验收标准",
-                status="published",
-                locked=False,
-            )
-            session.add(version)
-            session.flush()
-            _seed_standard_groups(session, version, "maonan" if "茂南" in city.name else "yunan")
             cycle_ids[city.name] = cycle.id
         session.commit()
     return cycle_ids
@@ -70,17 +62,8 @@ def prepare_cycles() -> dict[str, str]:
 
 def cleanup_schema(cycle_ids: dict[str, str]) -> None:
     with SessionLocal() as session:
-        versions = list(session.scalars(select(IndicatorVersion).where(IndicatorVersion.cycle_id.in_(cycle_ids.values()))))
-        version_ids = [item.id for item in versions]
-        indicator_ids = list(session.scalars(select(Indicator.id).where(Indicator.version_id.in_(version_ids)))) if version_ids else []
-        if indicator_ids:
-            session.execute(delete(DeductionOption).where(DeductionOption.indicator_id.in_(indicator_ids)))
-            session.execute(delete(Indicator).where(Indicator.id.in_(indicator_ids)))
-        if version_ids:
-            session.execute(delete(IndicatorVersion).where(IndicatorVersion.id.in_(version_ids)))
         session.execute(delete(AssessmentCycle).where(AssessmentCycle.id.in_(cycle_ids.values())))
         session.commit()
-
 
 def choose_option(item: dict, index: int) -> list[dict]:
     options = item.get("deductionOptions") or []
@@ -179,7 +162,8 @@ def main() -> None:
                     "city_id": project["id"], "cycle_id": cycle_ids[project_name], "facility_type": facility_type,
                 }), "读取评分标准")
                 leaves = [item for item in standards["items"] if item["level"] == 3]
-                assert leaves and round(sum(float(item["fullScore"]) for item in leaves), 2) == 100
+                total_full_score = round(sum(float(item["fullScore"]) for item in leaves), 2)
+                assert leaves and total_full_score == 100, f"{project_name} {facility_type} 评分项合计为 {total_full_score}"
                 assert all(item.get("deductionOptions") for item in leaves)
                 assert all(item.get("evaluationStandard") and item.get("dataSource") for item in leaves)
 
@@ -253,7 +237,7 @@ def main() -> None:
         cleanup_schema(cycle_ids)
 
     import json
-    (RESULTS / "验收结果.json").write_text(json.dumps({"passed": True, "reports": reports}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (RESULTS / "acceptance_result.json").write_text(json.dumps({"passed": True, "reports": reports}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"passed": True, "reports": reports}, ensure_ascii=False))
 
 

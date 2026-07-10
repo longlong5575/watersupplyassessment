@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from app.services.standard_catalog import load_standard_groups  # noqa: E402
+from app.services.standard_catalog import _deduction_clauses, load_standard_groups  # noqa: E402
 
 
 def main() -> None:
@@ -27,7 +28,26 @@ def main() -> None:
                         option_count += len(options)
                         if not options:
                             failures.append(f"{project}/{facility_type}/{item.get('name')}: 缺少扣分选项")
+                        fixed_options = [option for option in options if (option.get("type") or "fixed") == "fixed"]
+                        clauses = _deduction_clauses(item.get("evaluationStandard") or item.get("standardText") or "")
+                        if clauses and len(fixed_options) != len(clauses):
+                            failures.append(
+                                f"{project}/{facility_type}/{item.get('name')}: "
+                                f"原文扣分条款{len(clauses)}项，实际选项{len(fixed_options)}项"
+                            )
+                        option_keys: set[tuple[object, ...]] = set()
                         for option in options:
+                            key = (
+                                re.sub(r"\s+", "", str(option.get("reason") or "")),
+                                option.get("type") or "fixed",
+                                float(option.get("value") or 0),
+                                float(option.get("min") or 0),
+                                float(option.get("max") or 0),
+                                option.get("unit"),
+                            )
+                            if key in option_keys:
+                                failures.append(f"{project}/{facility_type}/{item.get('name')}: 存在重复扣分选项 {option.get('reason')}")
+                            option_keys.add(key)
                             if option.get("unit"):
                                 count_options += 1
                             if option.get("type") == "fixed" and float(option.get("value") or 0) > score + 1e-9:

@@ -151,7 +151,6 @@ def villages(town_id: str, city_id: str | None = None, session: Session = Depend
 def indicator_standards(city_id: str | None = None, cycle_id: str | None = None, facility_type: str | None = None, session: Session = Depends(get_session)):
     version_query = select(IndicatorVersion).where(IndicatorVersion.status == "published")
     if city_id: version_query = version_query.where(IndicatorVersion.city_id == city_id)
-    if cycle_id: version_query = version_query.where(IndicatorVersion.cycle_id == cycle_id)
     version = session.scalar(version_query.order_by(IndicatorVersion.created_at.desc()))
     if version is None: return {"version": None, "items": []}
     city = session.get(City, version.city_id)

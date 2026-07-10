@@ -15,11 +15,9 @@ router = APIRouter(prefix="/api/indicator-versions", tags=["standards"])
 
 @router.get("")
 def list_versions(city_id: str | None = None, cycle_id: str | None = None, session: Session = Depends(get_session)):
-    statement = select(IndicatorVersion).order_by(IndicatorVersion.created_at.desc())
+    statement = select(IndicatorVersion).where(IndicatorVersion.status == "published").order_by(IndicatorVersion.created_at.desc())
     if city_id:
         statement = statement.where(IndicatorVersion.city_id == city_id)
-    if cycle_id:
-        statement = statement.where(IndicatorVersion.cycle_id == cycle_id)
     versions = session.scalars(statement).all()
     counts = dict(
         session.execute(
@@ -177,7 +175,6 @@ def publish_version(version_id: str, session: Session = Depends(get_session)):
     for existing in session.scalars(
         select(IndicatorVersion).where(
             IndicatorVersion.city_id == version.city_id,
-            IndicatorVersion.cycle_id == version.cycle_id,
             IndicatorVersion.status == "published",
             IndicatorVersion.id != version.id,
         )
