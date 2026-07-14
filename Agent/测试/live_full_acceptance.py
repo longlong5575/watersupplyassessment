@@ -21,10 +21,10 @@ os.environ["STORAGE_DIR"] = str((RUNTIME / "storage").resolve())
 sys.path.insert(0, str(ROOT / "backend"))
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.core.database import SessionLocal
-from app.models import AssessmentCycle, City
+from app.models import AssessmentCycle, AssessmentRecord, City, Report, ReportTask
 
 
 STATUS_PATH = WORKSPACE / RUN_SCRIPTS_NAME / "watersupply-agent-runtime" / "logs" / "startup-status.json"
@@ -88,6 +88,22 @@ def cleanup_schema(cycle_ids: dict[str, str]) -> None:
     with SessionLocal() as session:
         session.execute(delete(AssessmentCycle).where(AssessmentCycle.id.in_(cycle_ids.values())))
         session.commit()
+
+
+def verify_cleanup(cycle_ids: dict[str, str]) -> None:
+    ids = list(cycle_ids.values())
+    if not ids:
+        return
+    with SessionLocal() as session:
+        remaining = {
+            "测试周期": session.scalar(select(func.count()).select_from(AssessmentCycle).where(AssessmentCycle.id.in_(ids))) or 0,
+            "考核记录": session.scalar(select(func.count()).select_from(AssessmentRecord).where(AssessmentRecord.cycle_id.in_(ids))) or 0,
+            "报告任务": session.scalar(select(func.count()).select_from(ReportTask).where(ReportTask.cycle_id.in_(ids))) or 0,
+            "生成报告": session.scalar(select(func.count()).select_from(Report).where(Report.cycle_id.in_(ids))) or 0,
+        }
+    leftovers = {name: count for name, count in remaining.items() if count}
+    if leftovers:
+        raise RuntimeError(f"全真验收清理不完整：{leftovers}")
 
 def choose_option(item: dict, index: int) -> list[dict]:
     options = item.get("deductionOptions") or []
@@ -286,6 +302,7 @@ def main() -> None:
     finally:
         cleanup_live_data(cycle_ids)
         cleanup_schema(cycle_ids)
+        verify_cleanup(cycle_ids)
 
     import json
     (RESULTS / "acceptance_result.json").write_text(json.dumps({"passed": True, "reports": reports}, ensure_ascii=False, indent=2), encoding="utf-8")

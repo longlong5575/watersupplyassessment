@@ -1052,6 +1052,12 @@ const CYCLE_PERIODS = [
   { id: "h2", label: "下半年度", suffix: "下半年度" },
 ];
 
+function currentCycleParts(): { year: number; periodId: string } {
+  const now = new Date();
+  const year = CYCLE_YEARS.includes(now.getFullYear()) ? now.getFullYear() : 2026;
+  return { year, periodId: `q${Math.floor(now.getMonth() / 3) + 1}` };
+}
+
 function cycleNameFromParts(year: number, periodId: string): string {
   const period = CYCLE_PERIODS.find(item => item.id === periodId) ?? CYCLE_PERIODS[1];
   return `${year}年${period.suffix}`;
@@ -1079,9 +1085,9 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
 }) {
   const defaultCycles = fixedCycleOptions();
   const [cycles, setCycles] = useState<CycleOption[]>(defaultCycles);
-  const initialYear = CYCLE_YEARS.includes(new Date().getFullYear()) ? new Date().getFullYear() : 2026;
-  const [selectedYear, setSelectedYear] = useState(initialYear);
-  const [selectedPeriodId, setSelectedPeriodId] = useState("q2");
+  const initialCycle = currentCycleParts();
+  const [selectedYear, setSelectedYear] = useState(initialCycle.year);
+  const [selectedPeriodId, setSelectedPeriodId] = useState(initialCycle.periodId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -1101,8 +1107,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
             : item;
         });
         setCycles(mapped);
-        const active = mapped.find(item => item.status === "active");
-        const target = active ?? mapped.find(item => item.name === `${initialYear}年第2季度`) ?? mapped[0];
+        const target = mapped.find(item => item.name === cycleNameFromParts(initialCycle.year, initialCycle.periodId)) ?? mapped[0];
         const parsed = target ? parseCycleNameParts(target.name) : null;
         if (parsed) {
           setSelectedYear(parsed.year);
@@ -1113,11 +1118,11 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
         const fallback = fixedCycleOptions();
         setError("后端暂时未连接，仍可先选择固定考核周期");
         setCycles(fallback);
-        setSelectedYear(initialYear);
-        setSelectedPeriodId("q2");
+        setSelectedYear(initialCycle.year);
+        setSelectedPeriodId(initialCycle.periodId);
       })
       .finally(() => setLoading(false));
-  }, [cityId, initialYear]);
+  }, [cityId, initialCycle.periodId, initialCycle.year]);
 
   const selectedName = cycleNameFromParts(selectedYear, selectedPeriodId);
   const selected = cycles.find(item => item.name === selectedName) ?? {
@@ -3983,7 +3988,7 @@ function AssessmentApp() {
     cityId: cityId || undefined,
     cycleId: cycleId || undefined,
     city,
-    period: cycleName || "2026年第2季度",
+    period: cycleName || cycleNameFromParts(currentCycleParts().year, currentCycleParts().periodId),
     town,
     villages: completedVillages,
   });

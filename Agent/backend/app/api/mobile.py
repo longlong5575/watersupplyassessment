@@ -69,7 +69,7 @@ def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
         "villageId": record.village_id,
         "indicatorVersionId": record.indicator_version_id,
         "totalScore": float(record.total_score) if record.total_score is not None else None,
-        "period": record.raw_payload.get("period", "2026年第2季度"),
+        "period": record.raw_payload.get("period") or record.cycle.name,
         "createdAt": record.created_at.isoformat(),
         "updatedAt": record.updated_at.isoformat(),
     }

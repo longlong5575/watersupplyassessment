@@ -92,12 +92,22 @@ function Start-Frontend([string]$directory, [int]$Port, [string]$Name, [string]$
   $nodeCommand = Get-Command "node" -ErrorAction SilentlyContinue
   $viteEntry = Join-Path $directory "node_modules\vite\bin\vite.js"
   if (-not $nodeCommand) { throw "未找到 Node.js，无法启动前端服务。" }
+  $nodeExecutable = $nodeCommand.Source
+  if ([IO.Path]::GetExtension($nodeExecutable) -in @(".cmd", ".bat")) {
+    try {
+      $resolvedNode = (& $nodeExecutable -p "process.execPath" 2>$null | Select-Object -Last 1).Trim()
+      if ($resolvedNode -and (Test-Path -LiteralPath $resolvedNode)) { $nodeExecutable = $resolvedNode }
+    } catch {}
+  }
+  if ([IO.Path]::GetExtension($nodeExecutable) -ne ".exe" -or -not (Test-Path -LiteralPath $nodeExecutable)) {
+    throw "未能找到真实的 Node.js 可执行文件，请重新安装 Node.js 后重试。"
+  }
   if (-not (Test-Path -LiteralPath $viteEntry)) { throw "前端依赖不完整，请重新启动系统以自动修复。" }
   $stdoutPath = Join-Path $logDir "$Name.out.log"
   $stderrPath = Join-Path $logDir "$Name.err.log"
   $arguments = @($viteEntry, "--host", "127.0.0.1", "--port", [string]$Port, "--strictPort")
   $launcher = Join-Path $backend "start_hidden_process.py"
-  $processId = & $PythonExe $launcher --working-directory $directory --stdout $stdoutPath --stderr $stderrPath -- $nodeCommand.Source @arguments
+  $processId = & $PythonExe $launcher --working-directory $directory --stdout $stdoutPath --stderr $stderrPath -- $nodeExecutable @arguments
   if ($LASTEXITCODE -ne 0 -or -not $processId) { throw "前端服务静默启动失败：$Name" }
   return [int]($processId | Select-Object -Last 1)
 }

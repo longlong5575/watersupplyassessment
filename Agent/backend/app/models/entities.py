@@ -131,6 +131,7 @@ class AssessmentRecord(IdMixin, TimestampMixin, Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     town: Mapped[Town] = relationship()
+    cycle: Mapped[AssessmentCycle] = relationship()
     scores: Mapped[list[AssessmentScore]] = relationship(back_populates="record", cascade="all, delete-orphan")
 
 
