@@ -3,7 +3,7 @@ import traceback
 import json
 import re
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -339,12 +339,38 @@ def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> No
     _mark_table_header(table.rows[0])
     for row_values in rows:
         table_row = table.add_row()
-        keep_row_together(table_row)
+        if max((len(str(value or "")) for value in row_values), default=0) <= 420:
+            keep_row_together(table_row)
         for cell, value in zip(table_row.cells, row_values):
             _set_cell_text(cell, value)
     gap = document.add_paragraph()
     _apply_paragraph_format(gap, indent=False)
     gap.paragraph_format.line_spacing = Pt(4)
+
+
+def _chunk_table_rows(rows: list[list[Any]], *, page_weight: int = 18) -> list[list[list[Any]]]:
+    chunks: list[list[list[Any]]] = []
+    current: list[list[Any]] = []
+    weight = 0
+    for row in rows:
+        longest = max((len(str(value or "")) for value in row), default=0)
+        row_weight = max(1, min(8, (longest + 69) // 70))
+        if current and weight + row_weight > page_weight:
+            chunks.append(current)
+            current, weight = [], 0
+        current.append(row)
+        weight += row_weight
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _add_paginated_table(document, headers: list[str], rows: list[list[Any]], *, page_weight: int = 18) -> None:
+    chunks = _chunk_table_rows(rows, page_weight=page_weight)
+    for index, chunk in enumerate(chunks):
+        if index:
+            document.add_page_break()
+        _add_simple_table(document, headers, chunk)
 
 
 def _facility_types(records: list[dict[str, Any]]) -> list[str]:
@@ -372,12 +398,16 @@ def _record_point_name(record: dict[str, Any]) -> str:
     return record.get("village") or record.get("town") or "该项目点"
 
 
-def _format_report_time(value: Any) -> str:
+def _format_report_time(value: Any, *, assume_utc: bool = False) -> str:
     if not value:
         return "-"
     text = str(value).strip()
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None and assume_utc:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone(timedelta(hours=8)))
         return parsed.strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return text.replace("T", " ")
@@ -519,6 +549,35 @@ def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
 
 def _unqualified_water_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     return [row for row in _water_quality_rows(records) if row[7] == "不达标" or row[8] == "不达标"]
+
+
+def _water_quality_audit_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    for record in records:
+        review_logs = [
+            item
+            for item in (record.get("reviewLogs") or [])
+            if item.get("action") in {"review", "lock"}
+        ]
+        latest_review = review_logs[-1] if review_logs else {}
+        for item in record.get("waterQuality") or []:
+            payload = item.get("payload") or {}
+            if not (payload.get("conclusionOverridden") or payload.get("manualOverride")):
+                continue
+            conclusion = item.get("conclusion") or payload.get("conclusion")
+            final_result = "达标" if conclusion == "qualified" else "不达标" if conclusion == "unqualified" else "待判定"
+            rows.append([
+                len(rows) + 1,
+                _record_point_name(record),
+                final_result,
+                payload.get("conclusionUpdatedByName") or record.get("ownerDisplayName") or "系统录入",
+                _format_report_time(payload.get("conclusionUpdatedAt") or record.get("updatedAt"), assume_utc=True),
+                payload.get("note") or payload.get("remark") or "未填写",
+                STATUS_LABELS.get(record.get("status"), record.get("status") or "待复核"),
+                latest_review.get("actorDisplayName") or "-",
+                _format_report_time(latest_review.get("createdAt") or record.get("reviewedAt") or record.get("lockedAt"), assume_utc=True),
+            ])
+    return rows
 
 
 def _operation_volume_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
@@ -1388,19 +1447,8 @@ def _add_source_toc(document, rows: list[list[Any]]) -> None:
     _apply_run_font(title_run, REPORT_HEADING_FONT, 16, bold=True)
     toc = document.add_paragraph()
     _apply_paragraph_format(toc, indent=False)
-    run = toc.add_run()
-    begin = OxmlElement("w:fldChar")
-    begin.set(qn("w:fldCharType"), "begin")
-    instruction = OxmlElement("w:instrText")
-    instruction.set(qn("xml:space"), "preserve")
-    instruction.text = ' TOC \\o "1-3" \\h \\z \\u '
-    separate = OxmlElement("w:fldChar")
-    separate.set(qn("w:fldCharType"), "separate")
-    placeholder = OxmlElement("w:t")
-    placeholder.text = "目录"
-    end = OxmlElement("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    run._r.extend([begin, instruction, separate, placeholder, end])
+    marker = toc.add_run("[[STATIC_TOC]]")
+    _apply_run_font(marker, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT)
 
     settings = document.settings._element
     update_fields = settings.find(qn("w:updateFields"))
@@ -1410,6 +1458,65 @@ def _add_source_toc(document, rows: list[list[Any]]) -> None:
     update_fields.set(qn("w:val"), "true")
 
     document.add_page_break()
+
+
+def _finalize_static_toc(document) -> None:
+    from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
+
+    paragraphs = document.paragraphs
+    marker_index = next((index for index, paragraph in enumerate(paragraphs) if paragraph.text == "[[STATIC_TOC]]"), None)
+    if marker_index is None:
+        return
+    marker = paragraphs[marker_index]
+    heading_rows: list[tuple[int, Any]] = []
+    for paragraph in paragraphs[marker_index + 1:]:
+        style_name = str(getattr(paragraph.style, "name", "") or "")
+        match = re.fullmatch(r"Heading ([1-3])|标题 ([1-3])", style_name)
+        if paragraph.text.strip() and match:
+            level = int(match.group(1) or match.group(2))
+            heading_rows.append((level, paragraph))
+
+    right_position = document.sections[0].page_width - document.sections[0].left_margin - document.sections[0].right_margin
+    for index, (level, heading) in enumerate(heading_rows, 1):
+        bookmark_name = f"toc_heading_{index}"
+        bookmark_id = str(1000 + index)
+        bookmark_start = OxmlElement("w:bookmarkStart")
+        bookmark_start.set(qn("w:id"), bookmark_id)
+        bookmark_start.set(qn("w:name"), bookmark_name)
+        bookmark_end = OxmlElement("w:bookmarkEnd")
+        bookmark_end.set(qn("w:id"), bookmark_id)
+        heading._p.insert(0, bookmark_start)
+        heading._p.append(bookmark_end)
+
+        paragraph = document.add_paragraph()
+        _apply_paragraph_format(paragraph, indent=False)
+        paragraph.paragraph_format.left_indent = Cm((level - 1) * 0.75)
+        paragraph.paragraph_format.space_after = Pt(2)
+        paragraph.paragraph_format.tab_stops.add_tab_stop(right_position, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
+        text_run = paragraph.add_run(heading.text.strip())
+        _apply_run_font(text_run, REPORT_BODY_FONT, 11, bold=level == 1)
+        tab_run = paragraph.add_run("\t")
+        _apply_run_font(tab_run, REPORT_BODY_FONT, 11)
+        field_run = paragraph.add_run()
+        begin = OxmlElement("w:fldChar")
+        begin.set(qn("w:fldCharType"), "begin")
+        instruction = OxmlElement("w:instrText")
+        instruction.set(qn("xml:space"), "preserve")
+        instruction.text = f" PAGEREF {bookmark_name} \\h "
+        separate = OxmlElement("w:fldChar")
+        separate.set(qn("w:fldCharType"), "separate")
+        cached_page = OxmlElement("w:t")
+        cached_page.text = "—"
+        end = OxmlElement("w:fldChar")
+        end.set(qn("w:fldCharType"), "end")
+        field_run._r.extend([begin, instruction, separate, cached_page, end])
+        _apply_run_font(field_run, REPORT_BODY_FONT, 11)
+        marker._p.addprevious(paragraph._p)
+
+    marker._element.getparent().remove(marker._element)
 
 
 def _is_maonan_project(project_name: str) -> bool:
@@ -1605,15 +1712,16 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
                 if not rows:
                     continue
                 document.add_heading(REPORT_TYPE_LABELS.get(facility_type, facility_type), level=2)
-                _add_simple_table(
+                _add_paginated_table(
                     document,
                     ["序号", "一级指标", "二级指标", "评分条目", "满分", "扣分办法", "评价标准"],
                     rows,
+                    page_weight=13,
                 )
         elif "评分表" in title:
             score_rows = _all_score_rows(records)
             if score_rows:
-                _add_simple_table(document, ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows)
+                _add_paginated_table(document, ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows, page_weight=16)
             else:
                 _add_paragraph(document, "本期暂无可列示的评分明细。")
         elif "照片" in title:
@@ -1636,9 +1744,19 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
             _add_paragraph(document, profile["waterStandard"])
             rows = _water_quality_rows(records)
             if rows:
-                _add_simple_table(document, ["序号", "项目点", "取样时间", "检测指标", "实测值", "限值", "单位", "自动判定", "最终判定", "备注"], rows)
+                _add_paginated_table(document, ["序号", "项目点", "取样时间", "检测指标", "实测值", "限值", "单位", "自动判定", "最终判定", "备注"], rows, page_weight=16)
             else:
                 _add_paragraph(document, "本期暂无已提交的水质抽检结果。")
+            audit_rows = _water_quality_audit_rows(records)
+            if audit_rows:
+                document.add_heading("人工判定与复核留痕", level=2)
+                _add_paragraph(document, "下表仅列示人工修改自动判定结论的记录。修改依据必须明确，复核状态、复核人员和复核时间随平台端复核操作同步记录。")
+                _add_paginated_table(
+                    document,
+                    ["序号", "项目点", "最终判定", "修改人", "修改时间", "修改依据", "复核状态", "复核人", "复核时间"],
+                    audit_rows,
+                    page_weight=14,
+                )
             _add_simple_table(document, ["序号", "对象", "指标", "限值", "单位"], [[index, *row] for index, row in enumerate(profile["waterRows"], 1)])
         elif "公众调查" in title:
             rows = _survey_rows(records)
@@ -1649,7 +1767,7 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
         elif "检测报告" in title:
             rows = _attachment_rows(records, detection=True)
             if rows:
-                _add_simple_table(document, ["序号", "项目点", "文件名", "评分记录", "扣分项", "大小"], rows)
+                _add_paginated_table(document, ["序号", "项目点", "文件名", "评分记录", "扣分项", "大小"], rows, page_weight=16)
                 inserted, skipped = _add_attachment_pictures(document, records, detection=True)
                 if inserted:
                     _add_paragraph(document, f"本附件共装订{inserted}页检测资料。")
@@ -1693,6 +1811,7 @@ def _generate_town_document(project_name: str, cycle_name: str, town_data: dict[
         _add_yunan_coefficient_chapter(document, records)
         _add_problem_and_suggestion_chapter(document, records, maonan=False, scope_name=town_name, is_summary=False)
     _add_source_appendices(document, project_name=project_name, records=records, profile=profile)
+    _finalize_static_toc(document)
     _enforce_document_fonts(document)
     return document
 
@@ -1718,6 +1837,7 @@ def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dic
         _add_yunan_coefficient_chapter(document, records)
         _add_problem_and_suggestion_chapter(document, records, maonan=False, scope_name=project_name, is_summary=True)
     _add_source_appendices(document, project_name=project_name, records=records, profile=profile)
+    _finalize_static_toc(document)
     _enforce_document_fonts(document)
     return document
 
@@ -1778,7 +1898,19 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
             f"{applied:.3f}" if applied is not None else "暂不核定",
             source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E2", "折算过程", "本期得分适用周期", "本期付费采用E2", "采用依据"], rows)
+    document.add_heading("3.1.1 系数结果摘要", level=3)
+    _add_simple_table(
+        document,
+        ["序号", "考核对象", "设施类型", "本期得分W", "折算E2", "付费采用E2"],
+        [[row[0], row[1], row[2], row[3], row[4], row[7]] for row in rows],
+    )
+    document.add_heading("3.1.2 折算过程与采用依据", level=3)
+    _add_paginated_table(
+        document,
+        ["序号", "考核对象", "折算过程", "适用周期", "采用依据"],
+        [[row[0], row[1], row[5], row[6], row[8]] for row in rows],
+        page_weight=15,
+    )
 
     document.add_heading("3.2 水质浓度系数", level=2)
     _add_paragraph(document, "水质浓度系数Kq根据进水CODCr、出水CODCr及出水达标情况确定。进水CODCr低于140mg/L时，按进出水浓度差折算；进水CODCr达到140mg/L但出水不达标时，按项目既有付费口径取0.9；其余区间按郁南项目既有付费资料执行。")
@@ -1946,7 +2078,19 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
             "；".join(rows_for_record) if rows_for_record else "未录入月度付费基础数据",
             "逐月金额齐全后汇总形成应付服务费结论",
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期采用E2", "系数依据", "月度测算", "处理意见"], payment_rows)
+    document.add_heading("3.4.1 测算结果摘要", level=3)
+    _add_simple_table(
+        document,
+        ["序号", "考核对象", "设施类型", "采用E2", "处理意见"],
+        [[row[0], row[1], row[2], row[3], row[6]] for row in payment_rows],
+    )
+    document.add_heading("3.4.2 逐月代入明细", level=3)
+    _add_paginated_table(
+        document,
+        ["序号", "考核对象", "系数依据", "月度测算"],
+        [[row[0], row[1], row[4], row[5]] for row in payment_rows],
+        page_weight=13,
+    )
 
     document.add_heading("3.5 金额核定条件", level=2)
     _add_simple_table(document, ["序号", "必需输入", "当前处理原则", "说明"], [
@@ -2066,7 +2210,19 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
             f"{applied:.3f}" if applied is not None else "暂不核定",
             source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E1", "折算过程", "本期得分适用周期", "本期付费采用E1", "采用依据"], coefficient_rows)
+    document.add_heading("3.1.1 系数结果摘要", level=3)
+    _add_simple_table(
+        document,
+        ["序号", "考核对象", "设施类型", "本期得分W", "折算E1", "付费采用E1"],
+        [[row[0], row[1], row[2], row[3], row[4], row[7]] for row in coefficient_rows],
+    )
+    document.add_heading("3.1.2 折算过程与采用依据", level=3)
+    _add_paginated_table(
+        document,
+        ["序号", "考核对象", "折算过程", "适用周期", "采用依据"],
+        [[row[0], row[1], row[5], row[6], row[8]] for row in coefficient_rows],
+        page_weight=15,
+    )
 
     document.add_heading("3.2 付费公式", level=2)
     _add_paragraph(document, "城镇水质净化厂月服务费公式：Pz=Py×QB×（3/5+Kq/10+3E1/10）+Pk/12×（2/3+E1/3）。其中，Py为污水处理运营服务费单价（元/立方米），QB为当月核定处理水量（万立方米），Kq为水质浓度系数，Pk为水质净化设施可用性付费（万元/年），计算结果单位为万元。")
@@ -2214,7 +2370,19 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
             coefficient_source,
             result_text,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期采用E1", "沿用基数", "系数依据", "月度测算结果"], payment_rows)
+    document.add_heading("3.4.1 测算结果摘要", level=3)
+    _add_simple_table(
+        document,
+        ["序号", "考核对象", "设施类型", "本期得分W", "采用E1", "沿用基数"],
+        [[row[0], row[1], row[2], row[3], row[4], row[5]] for row in payment_rows],
+    )
+    document.add_heading("3.4.2 逐月代入明细", level=3)
+    _add_paginated_table(
+        document,
+        ["序号", "考核对象", "系数依据", "月度测算结果"],
+        [[row[0], row[1], row[6], row[7]] for row in payment_rows],
+        page_weight=13,
+    )
     _add_paragraph(document, "当期月均进出水COD、处理水量或上一期运维系数未录入时，报告保留已确认金额基数和公式，不将缺失值按0处理，也不输出虚假的最终应付金额。")
 
     document.add_heading("3.5 金额核定条件", level=2)

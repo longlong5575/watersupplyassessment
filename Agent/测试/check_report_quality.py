@@ -38,7 +38,8 @@ def serial_errors(document: Document) -> list[dict[str, object]]:
             continue
         serial_index = headers.index("序号")
         serials = [row.cells[serial_index].text.strip() for row in table.rows[1:]]
-        expected = [str(number) for number in range(1, len(serials) + 1)]
+        start = int(serials[0]) if serials and all(value.isdigit() for value in serials) else 1
+        expected = [str(number) for number in range(start, start + len(serials))]
         if serials != expected:
             errors.append({"table": index, "serials": serials, "expected": expected})
     return errors
@@ -48,6 +49,9 @@ def chapter_order_errors(document: Document) -> list[dict[str, object]]:
     chapters: list[tuple[int, str]] = []
     subsections: dict[int, list[tuple[int, str]]] = {}
     for paragraph in document.paragraphs:
+        style_name = str(getattr(paragraph.style, "name", "") or "")
+        if not re.fullmatch(r"Heading [1-3]|标题 [1-3]", style_name):
+            continue
         text = paragraph.text.strip()
         match = re.match(r"^2\.(\d+)\s+", text)
         if match:
@@ -193,7 +197,8 @@ def inspect_report(path: Path) -> dict[str, object]:
         footer_xml = b"".join(
             package.read(name) for name in package.namelist() if name.startswith("word/footer") and name.endswith(".xml")
         )
-    toc_field_missing = b"w:instrText" not in document_xml or b"TOC " not in document_xml
+    toc_field_missing = b"PAGEREF " not in document_xml or b"bookmarkStart" not in document_xml
+    toc_text_missing = text.count("第一章 考核工作概述") < 2
     update_fields_missing = b"updateFields" not in settings_xml
     page_field_missing = b" PAGE " not in footer_xml
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
@@ -201,7 +206,7 @@ def inspect_report(path: Path) -> dict[str, object]:
     min_tables = (18 if project_key == "茂南" else 20) if is_summary else 12
     min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
-    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not too_short
+    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -212,6 +217,7 @@ def inspect_report(path: Path) -> dict[str, object]:
         "badAmountText": bad_amount_text,
         "amountBoundaryMissing": amount_boundary_missing,
         "tocFieldMissing": toc_field_missing,
+        "tocTextMissing": toc_text_missing,
         "updateFieldsMissing": update_fields_missing,
         "pageFieldMissing": page_field_missing,
         "replacementChars": replacement_chars,

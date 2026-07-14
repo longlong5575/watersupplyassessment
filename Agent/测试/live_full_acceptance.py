@@ -154,10 +154,10 @@ def make_payload(project: dict, cycle_id: str, town: dict, village: dict | None,
             "codValue": "45", "codLimit": "40",
             "nh3nValue": "4.2", "nh3nLimit": "5",
             "tpValue": "0.4", "tpLimit": "0.5",
-            "conclusion": "unqualified",
+            "conclusion": "qualified",
             "completed": True,
-            "manualOverride": False,
-            "remark": "CODCr实测值超过限值",
+            "conclusionOverridden": True,
+            "note": "经复核，检测报告采用修正后的有效结果",
         }
     return {
         "schemaVersion": "1.0",
@@ -217,6 +217,14 @@ def main() -> None:
                 payload = make_payload(project, cycle_ids[project_name], town, village, facility_type, standards)
                 created = require(client.post("/api/mobile/assessment-records", headers=inspector, json=payload), "保存考核")
                 record_id = created["recordIds"][0]
+                if facility_type == "rural_treatment":
+                    invalid_override = client.put(
+                        f"/api/mobile/assessment-records/{record_id}/water-quality",
+                        headers=inspector,
+                        json={"conclusion": "qualified", "conclusionOverridden": True},
+                    )
+                    assert invalid_override.status_code == 422
+                    assert "必须填写修改依据" in invalid_override.text
                 require(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector), "提交考核")
                 detail = require(client.get(f"/api/records/{record_id}", headers=admin), "读取评分结果")
                 deduction = round(sum(float(item["deduction"]) for item in detail["scores"]), 2)
@@ -288,6 +296,17 @@ def main() -> None:
                     assert {"自动判定", "最终判定", "备注"}.issubset(headers)
                     automatic_results = {row.cells[headers.index("自动判定")].text.strip() for row in water_table.rows[1:]}
                     assert {"达标", "不达标"}.issubset(automatic_results)
+                    final_results = {row.cells[headers.index("最终判定")].text.strip() for row in water_table.rows[1:]}
+                    assert "达标" in final_results
+                    audit_tables = [
+                        table for table in report_document.tables
+                        if table.rows and "修改人" in [cell.text.strip() for cell in table.rows[0].cells]
+                    ]
+                    assert audit_tables
+                    audit_text = "\n".join(cell.text for table in audit_tables for row in table.rows for cell in row.cells)
+                    assert "现场采集员" in audit_text
+                    assert "系统管理员" in audit_text
+                    assert "经复核，检测报告采用修正后的有效结果" in audit_text
                 reports.append({
                     "project": project_name, "town": town["name"], "facilityType": facility_type,
                     "score": detail["totalScore"], "deduction": deduction, "path": str(output),

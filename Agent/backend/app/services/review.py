@@ -6,7 +6,13 @@ from sqlalchemy.orm import Session
 from app.models import AssessmentRecord, ReviewLog
 
 
-def review_record(session: Session, record_id: str, action: str, reason: str | None = None) -> AssessmentRecord:
+def review_record(
+    session: Session,
+    record_id: str,
+    action: str,
+    reason: str | None = None,
+    actor_id: str | None = None,
+) -> AssessmentRecord:
     record = session.get(AssessmentRecord, record_id)
     if record is None:
         raise HTTPException(status_code=404, detail="未找到考核记录")
@@ -21,7 +27,7 @@ def review_record(session: Session, record_id: str, action: str, reason: str | N
         record.status, record.locked_at = "locked", datetime.now(timezone.utc)
     else:
         raise HTTPException(status_code=400, detail="不支持的复核操作")
-    session.add(ReviewLog(record_id=record.id, action=action, reason=reason, before_payload=before, after_payload={"status": record.status}))
+    session.add(ReviewLog(record_id=record.id, actor_id=actor_id, action=action, reason=reason, before_payload=before, after_payload={"status": record.status}))
     session.commit()
     session.refresh(record)
     return record

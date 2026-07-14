@@ -20,6 +20,7 @@ from app.models import (
     ScoreSourceMapping,
     SurveyRecord,
     Town,
+    User,
     Village,
     WaterQualityRecord,
 )
@@ -140,6 +141,9 @@ def split_town_package(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def create_assessment_record(session: Session, raw: dict[str, Any], owner_user_id: str | None = None) -> AssessmentRecord:
+    raw = dict(raw)
+    if "waterQuality" in raw:
+        raw["waterQuality"] = stamp_water_quality_audit(session, raw["waterQuality"], owner_user_id)
     town = resolve_town(session, raw)
     city = resolve_city(session, raw, town)
     cycle = resolve_cycle(session, raw, city.id)
@@ -476,6 +480,24 @@ def _parse_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def stamp_water_quality_audit(session: Session, payload: Any, user_id: str | None) -> dict[str, Any]:
+    data = dict(payload) if isinstance(payload, dict) else {"value": payload}
+    overridden = bool(data.get("conclusionOverridden") or data.get("manualOverride"))
+    audit_keys = ("conclusionUpdatedBy", "conclusionUpdatedByName", "conclusionUpdatedAt")
+    if not overridden:
+        for key in audit_keys:
+            data.pop(key, None)
+        return data
+    if not str(data.get("note") or data.get("remark") or "").strip():
+        raise ValueError("人工修改水质判定后必须填写修改依据")
+
+    user = session.get(User, user_id) if user_id else None
+    data["conclusionUpdatedBy"] = user.id if user else user_id
+    data["conclusionUpdatedByName"] = (user.display_name or user.username) if user else "系统录入"
+    data["conclusionUpdatedAt"] = datetime.now(timezone.utc).isoformat()
+    return data
 
 
 def sync_water_quality(session: Session, record: AssessmentRecord, payload: Any) -> WaterQualityRecord:

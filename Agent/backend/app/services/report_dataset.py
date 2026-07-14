@@ -20,6 +20,7 @@ from app.models import (
     ReviewLog,
     SurveyRecord,
     Town,
+    User,
     Village,
     WaterQualityRecord,
     City,
@@ -102,6 +103,7 @@ def build_report_dataset(
 
     for record in sorted(records, key=lambda item: (item.town.name, item.created_at.isoformat(), item.id)):
         village = session.get(Village, record.village_id) if record.village_id else None
+        owner = session.get(User, record.owner_user_id) if record.owner_user_id else None
         surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)).all())
         water = list(session.scalars(select(WaterQualityRecord).where(WaterQualityRecord.record_id == record.id)).all())
         attachments = list(session.scalars(select(Attachment).where(Attachment.record_id == record.id)).all())
@@ -112,7 +114,7 @@ def build_report_dataset(
                 .order_by(AgentRun.created_at.desc())
             ).all()
         )
-        logs = list(session.scalars(select(ReviewLog).where(ReviewLog.record_id == record.id)).all())
+        logs = list(session.scalars(select(ReviewLog).where(ReviewLog.record_id == record.id).order_by(ReviewLog.created_at)).all())
         record_payloads.append(
             {
                 "id": record.id,
@@ -131,11 +133,14 @@ def build_report_dataset(
                 "indicatorVersionId": record.indicator_version_id,
                 "status": record.status,
                 "totalScore": record.total_score,
+                "ownerUserId": record.owner_user_id,
+                "ownerDisplayName": (owner.display_name or owner.username) if owner else None,
                 "rawPayload": record.raw_payload or {},
                 "paymentContext": build_payment_context(session, record),
                 "submittedAt": record.submitted_at,
                 "reviewedAt": record.reviewed_at,
                 "lockedAt": record.locked_at,
+                "updatedAt": record.updated_at,
                 "scoreCount": len(record.scores),
                 "surveyCount": len(surveys),
                 "waterQualityCount": len(water),
@@ -174,7 +179,18 @@ def build_report_dataset(
                     for item in accepted_agent_runs
                 ],
                 "reviewLogs": [
-                    {"id": item.id, "action": item.action, "reason": item.reason, "createdAt": item.created_at}
+                    {
+                        "id": item.id,
+                        "action": item.action,
+                        "reason": item.reason,
+                        "actorId": item.actor_id,
+                        "actorDisplayName": (
+                            (actor.display_name or actor.username)
+                            if item.actor_id and (actor := session.get(User, item.actor_id))
+                            else None
+                        ),
+                        "createdAt": item.created_at,
+                    }
                     for item in logs
                 ],
             }

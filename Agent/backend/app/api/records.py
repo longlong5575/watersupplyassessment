@@ -21,7 +21,7 @@ from app.models import (
     WaterQualityRecord,
 )
 from app.schemas import PaymentDataPatch, RecordPatch, ScorePatch
-from app.services.assessment_ingest import recalculate_record_total, sync_scores, sync_surveys, sync_water_quality
+from app.services.assessment_ingest import recalculate_record_total, stamp_water_quality_audit, sync_scores, sync_surveys, sync_water_quality
 from app.services.payment_context import build_payment_context, months_for_period
 from app.services.review import review_record
 from app.services.standard_names import clean_standard_name
@@ -161,14 +161,20 @@ def update_record(record_id: str, payload: RecordPatch, session: Session = Depen
     record = session.get(AssessmentRecord, record_id)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
-    record.raw_payload = {**record.raw_payload, **payload.data}
-    if "entries" in payload.data:
-        sync_scores(session, record, payload.data["entries"])
-    if "surveys" in payload.data:
-        record.raw_payload = {**record.raw_payload, "surveyEntries": payload.data["surveys"]}
-        sync_surveys(session, record, payload.data["surveys"])
-    if "waterQuality" in payload.data:
-        sync_water_quality(session, record, payload.data["waterQuality"])
+    updates = dict(payload.data)
+    if "waterQuality" in updates:
+        try:
+            updates["waterQuality"] = stamp_water_quality_audit(session, updates["waterQuality"], user.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    record.raw_payload = {**record.raw_payload, **updates}
+    if "entries" in updates:
+        sync_scores(session, record, updates["entries"])
+    if "surveys" in updates:
+        record.raw_payload = {**record.raw_payload, "surveyEntries": updates["surveys"]}
+        sync_surveys(session, record, updates["surveys"])
+    if "waterQuality" in updates:
+        sync_water_quality(session, record, updates["waterQuality"])
     session.commit()
     return serialize(record, session)
 
@@ -264,22 +270,22 @@ def delete_record(record_id: str, session: Session = Depends(get_session), user=
 
 @router.post("/api/records/{record_id}/review")
 def review(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
-    return serialize(review_record(session, record_id, "review"), session)
+    return serialize(review_record(session, record_id, "review", actor_id=user.id), session)
 
 
 @router.post("/api/records/{record_id}/return")
 def return_for_correction(record_id: str, payload: RecordPatch, session: Session = Depends(get_session), user=Depends(admin_user)):
-    return serialize(review_record(session, record_id, "return", payload.reason), session)
+    return serialize(review_record(session, record_id, "return", payload.reason, actor_id=user.id), session)
 
 
 @router.post("/api/records/{record_id}/lock")
 def lock_record(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
-    return serialize(review_record(session, record_id, "lock"), session)
+    return serialize(review_record(session, record_id, "lock", actor_id=user.id), session)
 
 
 @router.post("/api/assessment-cycles/{cycle_id}/lock")
 def lock_cycle(cycle_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     records = session.scalars(select(AssessmentRecord).where(AssessmentRecord.cycle_id == cycle_id)).all()
     for record in records:
-        if record.status == "reviewed": review_record(session, record.id, "lock")
+        if record.status == "reviewed": review_record(session, record.id, "lock", actor_id=user.id)
     return {"cycleId": cycle_id, "lockedRecords": len(records)}

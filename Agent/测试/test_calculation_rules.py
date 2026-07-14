@@ -34,7 +34,7 @@ from app.services.payment_basis import (  # noqa: E402
 )
 from app.services.payment_context import adjacent_period_name, months_for_period  # noqa: E402
 from app.services.project_catalog import MAONAN_TOWNS  # noqa: E402
-from app.services.report_tasks import _add_maonan_payment_chapter  # noqa: E402
+from app.services.report_tasks import _add_maonan_payment_chapter, _format_report_time  # noqa: E402
 
 
 def close(actual: float, expected: float, tolerance: float = 1e-8) -> None:
@@ -42,6 +42,9 @@ def close(actual: float, expected: float, tolerance: float = 1e-8) -> None:
 
 
 def main() -> None:
+    assert _format_report_time("2030-12-15T09:30:00") == "2030-12-15 09:30"
+    assert _format_report_time("2026-07-14T07:20:00", assume_utc=True) == "2026-07-14 15:20"
+    assert _format_report_time("2026-07-14T07:20:00+00:00", assume_utc=True) == "2026-07-14 15:20"
     close(maonan_operation_coefficient(70), 1)
     close(maonan_operation_coefficient(69), 69 / 70)
     close(yunan_operation_coefficient(90), 1)

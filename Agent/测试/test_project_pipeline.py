@@ -194,7 +194,8 @@ def check_docx(path: Path, town: str, project_name: str):
         if "序号" in headers:
             index = headers.index("序号")
             serials = [row.cells[index].text.strip() for row in table.rows[1:]]
-            assert serials == [str(number) for number in range(1, len(serials) + 1)]
+            start = int(serials[0]) if serials and all(value.isdigit() for value in serials) else 1
+            assert serials == [str(number) for number in range(start, start + len(serials))]
 
 
 def main():

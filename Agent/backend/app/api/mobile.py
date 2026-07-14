@@ -18,6 +18,7 @@ from app.models import (
 from app.services.assessment_ingest import (
     create_assessment_record,
     split_town_package,
+    stamp_water_quality_audit,
     submit_record as mark_record_submitted,
     sync_scores,
     sync_surveys,
@@ -366,8 +367,12 @@ def update_water_quality(record_id: str, payload: dict[str, Any], session: Sessi
     record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
-    record.raw_payload = {**record.raw_payload, "waterQuality": payload}
-    sync_water_quality(session, record, payload)
+    try:
+        audited_payload = stamp_water_quality_audit(session, payload, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    record.raw_payload = {**record.raw_payload, "waterQuality": audited_payload}
+    sync_water_quality(session, record, audited_payload)
     session.commit()
     return _record_payload(record)
 
