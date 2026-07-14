@@ -8,6 +8,8 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
+from docx import Document
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent.parent if ROOT.parent.name.lower() == "watersupplyassessment" else ROOT.parent
@@ -265,6 +267,27 @@ def main() -> None:
                 with ZipFile(BytesIO(download.content)) as package:
                     document_xml = package.read("word/document.xml")
                     assert document_xml.count(b"<w:drawing") >= 2
+                report_document = Document(BytesIO(download.content))
+                report_text = "\n".join(
+                    [paragraph.text for paragraph in report_document.paragraphs]
+                    + [cell.text for table in report_document.tables for row in table.rows for cell in row.cells]
+                )
+                assert "指标编号" not in report_text
+                assert "m3" not in report_text.lower()
+                assert "总体评价和设施情况概览" in report_text
+                photo_captions = [paragraph.text for paragraph in report_document.paragraphs if paragraph.text.startswith("序号：")]
+                assert photo_captions and all("项目点：" in caption and ".png" not in caption.lower() for caption in photo_captions)
+                if facility_type == "rural_treatment":
+                    water_tables = [
+                        table for table in report_document.tables
+                        if table.rows and [cell.text.strip() for cell in table.rows[0].cells][:4] == ["序号", "项目点", "取样时间", "检测指标"]
+                    ]
+                    assert water_tables
+                    water_table = water_tables[-1]
+                    headers = [cell.text.strip() for cell in water_table.rows[0].cells]
+                    assert {"自动判定", "最终判定", "备注"}.issubset(headers)
+                    automatic_results = {row.cells[headers.index("自动判定")].text.strip() for row in water_table.rows[1:]}
+                    assert {"达标", "不达标"}.issubset(automatic_results)
                 reports.append({
                     "project": project_name, "town": town["name"], "facilityType": facility_type,
                     "score": detail["totalScore"], "deduction": deduction, "path": str(output),
@@ -287,6 +310,14 @@ def main() -> None:
                     raise RuntimeError("汇总报告下载失败或文件不完整")
                 output = RESULTS / report["name"]
                 output.write_bytes(download.content)
+                summary_document = Document(BytesIO(download.content))
+                summary_text = "\n".join(
+                    [paragraph.text for paragraph in summary_document.paragraphs]
+                    + [cell.text for table in summary_document.tables for row in table.rows for cell in row.cells]
+                )
+                assert "指标编号" not in summary_text
+                assert "m3" not in summary_text.lower()
+                assert "2.1 项目考核结果汇总" in summary_text
                 reports.append({
                     "project": project_name, "town": "汇总", "facilityType": "summary",
                     "score": None, "deduction": None, "path": str(output),

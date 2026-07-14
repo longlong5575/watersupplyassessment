@@ -2074,7 +2074,7 @@ function PWaterQualityForm({ town, village, projectName, primaryFacilityType, en
           <WaterQualityField label="取样时间" value={form.sampleTime} placeholder="如：2023-12-10 09:30" onChange={sampleTime => update({ sampleTime })} />
           <WaterQualityFixedField label="排放标准" value={form.dischargeStandard} />
           <WaterQualityField label="工艺类型" value={form.processType} placeholder="如：A/O + 人工湿地" onChange={processType => update({ processType })} />
-          <WaterQualityField label="规模（m3/d）" value={form.designScale} placeholder="如：50" numeric onChange={designScale => update({ designScale })} />
+          <WaterQualityField label="规模（立方米/日）" value={form.designScale} placeholder="如：50" numeric onChange={designScale => update({ designScale })} />
         </div>
 
         <div className="bg-white border border-border rounded-xl p-4 space-y-4">

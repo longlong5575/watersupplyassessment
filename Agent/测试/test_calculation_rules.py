@@ -202,8 +202,10 @@ def main() -> None:
         water_quality_coefficient=shange_kq,
         operation_coefficient=plant_e1,
     )
-    assert f"Pz={plant_amount:.4f}万元" in report_text
-    assert f"Pw={network_amount:.4f}万元" in report_text
+    assert "代入：Pz=1.6900×3.0000×" in report_text
+    assert f"={plant_amount:.4f}万元" in report_text
+    assert "代入：Pw=168.4800/12×" in report_text
+    assert f"={network_amount:.4f}万元" in report_text
     assert "2026年第1季度" in report_text
     assert "缺少月均进出水COD" not in report_text
     print("PASS: 郁南/茂南扣分系数与金额公式反算")

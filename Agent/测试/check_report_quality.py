@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -45,37 +46,102 @@ def serial_errors(document: Document) -> list[dict[str, object]]:
 
 def chapter_order_errors(document: Document) -> list[dict[str, object]]:
     chapters: list[tuple[int, str]] = []
+    subsections: dict[int, list[tuple[int, str]]] = {}
     for paragraph in document.paragraphs:
         text = paragraph.text.strip()
         match = re.match(r"^2\.(\d+)\s+", text)
         if match:
             chapters.append((int(match.group(1)), text))
+        subsection = re.match(r"^2\.(\d+)\.(\d+)\s+", text)
+        if subsection:
+            subsections.setdefault(int(subsection.group(1)), []).append((int(subsection.group(2)), text))
     numbers = [number for number, _ in chapters]
-    if numbers != sorted(numbers):
-        return [{"chapters": [text for _, text in chapters], "expectedOrder": sorted(numbers)}]
-    return []
-
-
-def font_errors(document: Document) -> list[dict[str, str]]:
-    errors: list[dict[str, str]] = []
-    for style_name in ("Normal", "Heading 1", "Heading 2", "Heading 3"):
-        style = document.styles[style_name]
-        fonts = style._element.rPr.rFonts if style._element.rPr is not None else None
-        east_asia = fonts.get(qn("w:eastAsia")) if fonts is not None else None
-        if east_asia != "宋体":
-            errors.append({"location": f"style:{style_name}", "font": east_asia or ""})
-    paragraphs = list(document.paragraphs)
-    paragraphs.extend(paragraph for table in document.tables for row in table.rows for cell in row.cells for paragraph in cell.paragraphs)
-    for paragraph_index, paragraph in enumerate(paragraphs, 1):
-        for run in paragraph.runs:
-            if not run.text.strip() or run._element.rPr is None or run._element.rPr.rFonts is None:
-                continue
-            east_asia = run._element.rPr.rFonts.get(qn("w:eastAsia"))
-            if east_asia not in (None, "宋体"):
-                errors.append({"location": f"run:{paragraph_index}", "font": east_asia})
-                if len(errors) >= 20:
-                    return errors
+    errors: list[dict[str, object]] = []
+    expected = list(range(1, len(numbers) + 1))
+    if numbers != expected:
+        errors.append({"chapters": [text for _, text in chapters], "numbers": numbers, "expectedOrder": expected})
+    for parent, items in subsections.items():
+        child_numbers = [number for number, _ in items]
+        child_expected = list(range(1, len(child_numbers) + 1))
+        if child_numbers != child_expected:
+            errors.append({"parent": f"2.{parent}", "chapters": [text for _, text in items], "numbers": child_numbers, "expectedOrder": child_expected})
     return errors
+
+
+def font_errors(document: Document, path: Path) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    attributes = [f"{{{namespace['w']}}}{name}" for name in ("ascii", "hAnsi", "eastAsia", "cs")]
+    with ZipFile(path) as package:
+        styles = ET.fromstring(package.read("word/styles.xml"))
+        default_fonts = styles.find(".//w:docDefaults/w:rPrDefault/w:rPr/w:rFonts", namespace)
+        if default_fonts is None or any(default_fonts.get(attribute) != "宋体" for attribute in attributes):
+            errors.append({"location": "styles:docDefaults", "font": "缺少完整宋体设置"})
+        for name in package.namelist():
+            if not name.startswith("word/") or not name.endswith(".xml") or name == "word/styles.xml":
+                continue
+            try:
+                root = ET.fromstring(package.read(name))
+            except ET.ParseError:
+                continue
+            for index, run in enumerate(root.findall(".//w:r", namespace), 1):
+                if run.find("w:t", namespace) is None:
+                    continue
+                fonts = run.find("w:rPr/w:rFonts", namespace)
+                if fonts is None or any(fonts.get(attribute) != "宋体" for attribute in attributes):
+                    errors.append({"location": f"{name}:run:{index}", "font": "未完整设置宋体"})
+                    if len(errors) >= 20:
+                        return errors
+    return errors
+
+
+def table_header_errors(document: Document) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    for index, table in enumerate(document.tables, 1):
+        if not table.rows:
+            continue
+        row = table.rows[0]
+        if row._tr.get_or_add_trPr().find(qn("w:tblHeader")) is None:
+            errors.append({"table": index, "reason": "表头未设置跨页重复"})
+        if any(paragraph.paragraph_format.keep_with_next is not True for cell in row.cells for paragraph in cell.paragraphs):
+            errors.append({"table": index, "reason": "表头未与下一行同页"})
+    return errors
+
+
+def adjacent_table_errors(document: Document) -> list[dict[str, object]]:
+    children = list(document._element.body.iterchildren())
+    return [
+        {"position": index, "reason": "不同表头的表格之间缺少分隔"}
+        for index in range(1, len(children))
+        if children[index - 1].tag == qn("w:tbl") and children[index].tag == qn("w:tbl")
+    ]
+
+
+def score_table_indicator_errors(document: Document) -> list[dict[str, object]]:
+    errors = []
+    for index, table in enumerate(document.tables, 1):
+        if not table.rows:
+            continue
+        headers = [cell.text.strip() for cell in table.rows[0].cells]
+        if "评分条目" in headers and "实得分" in headers and "指标编号" in headers:
+            errors.append({"table": index, "headers": headers})
+    return errors
+
+
+def water_summary_errors(document: Document) -> list[dict[str, object]]:
+    for index, table in enumerate(document.tables, 1):
+        if not table.rows:
+            continue
+        headers = [cell.text.strip() for cell in table.rows[0].cells]
+        if headers[:4] == ["序号", "项目点", "取样时间", "检测指标"]:
+            required = {"自动判定", "最终判定", "备注"}
+            if not required.issubset(headers):
+                return [{"table": index, "headers": headers, "reason": "水质汇总缺少判定字段"}]
+            results = {row.cells[headers.index("最终判定")].text.strip() for row in table.rows[1:]}
+            if not results.issubset({"达标", "不达标", "待判定"}):
+                return [{"table": index, "results": sorted(results), "reason": "水质结论不规范"}]
+            return []
+    return []
 
 
 def latest_reports(report_root: Path) -> list[Path]:
@@ -107,12 +173,18 @@ def inspect_report(path: Path) -> dict[str, object]:
     replacement_chars = text.count("\ufffd")
     sequence_errors = serial_errors(document)
     chapter_errors = chapter_order_errors(document)
-    report_font_errors = font_errors(document)
+    report_font_errors = font_errors(document, path)
+    header_errors = table_header_errors(document)
+    table_separation_errors = adjacent_table_errors(document)
+    indicator_errors = score_table_indicator_errors(document)
+    water_errors = water_summary_errors(document)
+    unit_errors = re.findall(r"(?i)m\s*(?:\^\s*)?3", text)
+    is_summary = "汇总" in path.name
     if project_key == "茂南":
-        required_sections = ["摘  要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 水质检测", "第二章 城镇水质净化设施考核结果", "第三章 绩效付费计算", "第四章 主要改进点、主要问题和整改工作建议", "附件1 考核标准", "附件2 周期评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
+        required_sections = ["摘  要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 水质检测", "第二章 城镇水质净化设施考核结果", "第三章 绩效付费计算", "3.3 金额基础表", "主要问题和整改工作建议", "附件1 考核标准", "附件2 周期评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
         amount_boundary_missing = "不引用其他项目" not in text and "本项目既有例文和历史付费表" not in text
     else:
-        required_sections = ["摘要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 问卷调查", "1.6.4 水质检测", "第二章 镇级设施运维考核情况", "第三章 绩效付费计算", "附件18金额基础", "第四章 主要问题及整改建议", "附件1 考核标准", "附件2 考核评分表", "附件3 现场照片", "附件5 水质抽检情况汇总表"]
+        required_sections = ["摘要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 问卷调查", "1.6.4 水质检测", "第二章 镇级设施运维考核情况", "第三章 绩效付费计算", "3.3 金额基础表", "第四章 主要问题及整改建议", "附件1 考核标准", "附件2 考核评分表", "附件3 现场照片", "附件5 水质抽检情况汇总表"]
         amount_boundary_missing = "不引用茂南或其他项目金额资料" not in text
     missing_sections = [item for item in required_sections if item not in text]
     with ZipFile(path) as package:
@@ -125,12 +197,11 @@ def inspect_report(path: Path) -> dict[str, object]:
     update_fields_missing = b"updateFields" not in settings_xml
     page_field_missing = b" PAGE " not in footer_xml
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
-    is_summary = "汇总" in path.name
     summary_scope_missing = is_summary and ("已提交、已复核或已锁定" not in text or "草稿、退回和未提交" not in text)
     min_tables = (18 if project_key == "茂南" else 20) if is_summary else 12
     min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
-    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not too_short
+    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -147,6 +218,11 @@ def inspect_report(path: Path) -> dict[str, object]:
         "serialErrors": sequence_errors,
         "chapterOrderErrors": chapter_errors,
         "fontErrors": report_font_errors,
+        "tableHeaderErrors": header_errors,
+        "tableSeparationErrors": table_separation_errors,
+        "indicatorCodeErrors": indicator_errors,
+        "waterSummaryErrors": water_errors,
+        "unitErrors": unit_errors,
         "summaryScopeMissing": summary_scope_missing,
         "overlongDecimals": weird_numbers[:20],
         "tooShort": too_short,

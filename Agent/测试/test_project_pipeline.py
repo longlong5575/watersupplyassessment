@@ -5,6 +5,7 @@ import re
 import sys
 import base64
 from pathlib import Path
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +135,7 @@ def create_record(client: TestClient, headers: dict[str, str], *, project, cycle
 
 def check_docx(path: Path, town: str, project_name: str):
     document = Document(path)
+    paragraph_texts = [paragraph.text.strip() for paragraph in document.paragraphs]
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
     all_text = f"{text}\n{table_text}"
@@ -154,7 +156,7 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "第三章 绩效付费计算" in all_text
         assert "第四章 主要问题及整改建议" in all_text
         assert "运维绩效考核系数" in all_text
-        assert "附件18金额基础" in all_text
+        assert "3.3 金额基础表" in all_text
         assert "本期付费采用上一考核周期" in all_text
         assert "不引用茂南或其他项目金额资料" in all_text
         assert "附件2 考核评分表" in all_text
@@ -167,16 +169,22 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "第一章 考核工作概述" in all_text
         assert "第二章 城镇水质净化设施考核结果" in all_text
         assert "第三章 绩效付费计算" in all_text
-        assert "3.3 沿用金额基础" in all_text
+        assert "3.3 金额基础表" in all_text
         assert "3.4 当期付费测算" in all_text
         assert "表4-1、表4-2" in all_text
         assert "未匹配到本项目金额基数" not in all_text
-        assert "第四章 主要改进点、主要问题和整改工作建议" in all_text
+        assert "主要问题和整改工作建议" in all_text
         assert "附件2 周期评分表" in all_text
         assert "附件3 现场检查照片" in all_text
         assert "附件5 水质抽检汇总" in all_text
         assert "附件8 月平均值统计" in all_text
-    assert "fixture-photo.png" in all_text
+    assert f"2.1 {town}" in all_text
+    assert "2.1.1 总体评价和设施情况概览" in paragraph_texts
+    assert "2.1 项目考核结果汇总" not in paragraph_texts
+    assert "指标编号" not in all_text
+    assert not re.search(r"(?i)m\s*(?:\^\s*)?3", all_text)
+    with ZipFile(path) as package:
+        assert package.read("word/document.xml").count(b"<w:drawing") >= 1
     assert "Agent辅助校验" not in all_text
     assert "系统采集" not in all_text
     for table in document.tables:
@@ -582,6 +590,15 @@ def main():
             assert all(name in summary_text for name in expected_summary_towns)
             assert all(name not in summary_text for name in excluded_summary_towns)
             assert "未提交/未复核" not in summary_text
+            summary_paragraphs = [paragraph.text.strip() for paragraph in summary_doc.paragraphs]
+            assert "2.1 项目考核结果汇总" in summary_paragraphs
+            assert any(text.startswith("2.2 ") for text in summary_paragraphs)
+            assert all(
+                any(text.endswith("总体评价和设施情况概览") and text.startswith(f"2.{index + 2}.1 ") for text in summary_paragraphs)
+                for index, _ in enumerate(expected_summary_towns)
+            )
+            assert "指标编号" not in summary_text
+            assert not re.search(r"(?i)m\s*(?:\^\s*)?3", summary_text)
             check_docx(path, town, project["name"])
             preview = assert_ok(client.get(f"/api/reports/{town_report['id']}/preview"), f"report preview {town}")
             assert preview["content"]["paragraphCount"] > 0

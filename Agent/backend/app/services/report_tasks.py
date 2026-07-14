@@ -1,6 +1,7 @@
 import shutil
 import traceback
 import json
+import re
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
@@ -72,14 +73,36 @@ REPORT_TABLE_SIZE_PT = 9
 REPORT_BODY_LINE_SPACING_PT = 24
 
 
-def _apply_run_font(run, font_name: str, size_pt: float, *, bold: bool | None = None) -> None:
+def _normalize_report_text(value: Any) -> str:
+    """Normalize legacy source units and punctuation at the report boundary."""
+    text = "" if value is None else str(value)
+    text = re.sub(r"(?i)m\s*(?:\^\s*)?3", "立方米", text)
+    text = re.sub(r"(?i)立方米\s*/\s*d\b", "立方米/日", text)
+    text = re.sub(r"(?i)(?<=\d)\s*km\b", "公里", text)
+    text = re.sub(r"(?<=\d)\s*立方米", "立方米", text)
+    text = text.replace("~", "至")
+    return text
+
+
+def _set_rfonts(r_pr, font_name: str = REPORT_BODY_FONT) -> None:
+    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    for attribute in ("ascii", "hAnsi", "eastAsia", "cs"):
+        r_fonts.set(qn(f"w:{attribute}"), font_name)
+    for attribute in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+        r_fonts.attrib.pop(qn(f"w:{attribute}"), None)
+
+
+def _apply_run_font(run, font_name: str, size_pt: float, *, bold: bool | None = None) -> None:
     from docx.shared import Pt
 
     run.font.name = font_name
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
-    run._element.rPr.rFonts.set(qn("w:ascii"), REPORT_LATIN_FONT)
-    run._element.rPr.rFonts.set(qn("w:hAnsi"), REPORT_LATIN_FONT)
+    _set_rfonts(run._element.get_or_add_rPr(), font_name)
     run.font.size = Pt(size_pt)
     if bold is not None:
         run.bold = bold
@@ -99,16 +122,54 @@ def _apply_paragraph_format(paragraph, *, indent: bool = False, table: bool = Fa
 
 
 def _set_style_font(style, font_name: str, size_pt: float, *, bold: bool = False) -> None:
-    from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
 
     style.font.name = font_name
-    style._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
-    style._element.rPr.rFonts.set(qn("w:ascii"), REPORT_LATIN_FONT)
-    style._element.rPr.rFonts.set(qn("w:hAnsi"), REPORT_LATIN_FONT)
+    _set_rfonts(style._element.get_or_add_rPr(), font_name)
     style.font.size = Pt(size_pt)
     style.font.bold = bold
     style.font.color.rgb = RGBColor(0, 0, 0)
+
+
+def _enforce_document_fonts(document) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    styles = document.styles._element
+    doc_defaults = styles.find(qn("w:docDefaults"))
+    if doc_defaults is None:
+        doc_defaults = OxmlElement("w:docDefaults")
+        styles.insert(0, doc_defaults)
+    r_pr_default = doc_defaults.find(qn("w:rPrDefault"))
+    if r_pr_default is None:
+        r_pr_default = OxmlElement("w:rPrDefault")
+        doc_defaults.insert(0, r_pr_default)
+    default_r_pr = r_pr_default.find(qn("w:rPr"))
+    if default_r_pr is None:
+        default_r_pr = OxmlElement("w:rPr")
+        r_pr_default.append(default_r_pr)
+    _set_rfonts(default_r_pr)
+
+    for style in styles.findall(qn("w:style")):
+        style_r_pr = style.find(qn("w:rPr"))
+        if style_r_pr is None:
+            style_r_pr = OxmlElement("w:rPr")
+            style.append(style_r_pr)
+        _set_rfonts(style_r_pr)
+
+    for part in document.part.package.parts:
+        root = getattr(part, "_element", None)
+        if root is None:
+            continue
+        for text_node in root.iter(qn("w:t")):
+            if text_node.text:
+                text_node.text = _normalize_report_text(text_node.text)
+        for run in root.iter(qn("w:r")):
+            run_r_pr = run.find(qn("w:rPr"))
+            if run_r_pr is None:
+                run_r_pr = OxmlElement("w:rPr")
+                run.insert(0, run_r_pr)
+            _set_rfonts(run_r_pr)
 
 
 def _fmt_score_value(value: Any) -> str:
@@ -156,12 +217,26 @@ PROJECT_REPORT_PROFILES = {
 
 
 def _set_cell_text(cell, value: Any, *, bold: bool = False) -> None:
-    text = "" if value is None else str(value)
+    text = _normalize_report_text(value)
     cell.text = text
     for paragraph in cell.paragraphs:
         _apply_paragraph_format(paragraph, table=True)
         for run in paragraph.runs:
             _apply_run_font(run, REPORT_BODY_FONT, REPORT_TABLE_SIZE_PT, bold=bold)
+
+
+def _mark_table_header(row) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr_pr = row._tr.get_or_add_trPr()
+    if tr_pr.find(qn("w:tblHeader")) is None:
+        tr_pr.append(OxmlElement("w:tblHeader"))
+    if tr_pr.find(qn("w:cantSplit")) is None:
+        tr_pr.append(OxmlElement("w:cantSplit"))
+    for cell in row.cells:
+        for paragraph in cell.paragraphs:
+            paragraph.paragraph_format.keep_with_next = True
 
 
 def _prepare_document(title: str):
@@ -228,6 +303,7 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
         table.style = "Table Grid"
         for cell, value in zip(table.rows[0].cells, ["序号", "行政村", "设施点", "章节号", "考核对象"]):
             _set_cell_text(cell, value, bold=True)
+        _mark_table_header(table.rows[0])
         for index, record in enumerate(sorted(villages.values(), key=lambda item: (item.get("villageChapterCode") or "", item.get("village") or "")), 1):
             row = table.add_row().cells
             obj = record.get("villageAssessmentObject") or {}
@@ -236,6 +312,8 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
 
 
 def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, indent: bool = True, size_pt: float | None = None) -> None:
+    text = _normalize_report_text(text)
+    bold_prefix = _normalize_report_text(bold_prefix) if bold_prefix else None
     paragraph = document.add_paragraph()
     _apply_paragraph_format(paragraph, indent=indent)
     font_size = size_pt or REPORT_BODY_SIZE_PT
@@ -249,21 +327,24 @@ def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, inden
 
 def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
     from docx.oxml import OxmlElement
+    from docx.shared import Pt
 
     def keep_row_together(row) -> None:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
     table = document.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
-    table.rows[0]._tr.get_or_add_trPr().append(OxmlElement("w:tblHeader"))
-    keep_row_together(table.rows[0])
     for cell, value in zip(table.rows[0].cells, headers):
         _set_cell_text(cell, value, bold=True)
+    _mark_table_header(table.rows[0])
     for row_values in rows:
         table_row = table.add_row()
         keep_row_together(table_row)
         for cell, value in zip(table_row.cells, row_values):
             _set_cell_text(cell, value)
+    gap = document.add_paragraph()
+    _apply_paragraph_format(gap, indent=False)
+    gap.paragraph_format.line_spacing = Pt(4)
 
 
 def _facility_types(records: list[dict[str, Any]]) -> list[str]:
@@ -360,7 +441,6 @@ def _all_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
             rows.append([
                 len(rows) + 1,
                 point_name,
-                score.get("indicatorCode") or "-",
                 score.get("indicatorName") or "-",
                 f"{full_score:.2f}",
                 f"{max(full_score - deduction, 0):.2f}",
@@ -370,28 +450,75 @@ def _all_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     return rows
 
 
+def _water_number(value: Any) -> float | None:
+    match = re.search(r"\d+(?:\.\d+)?", str(value or ""))
+    return float(match.group()) if match else None
+
+
+def _water_result(value: Any, limit: Any) -> str:
+    measured = _water_number(value)
+    maximum = _water_number(limit)
+    if measured is None or maximum is None:
+        return "待判定"
+    return "达标" if measured <= maximum else "不达标"
+
+
 def _water_quality_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for record in records:
         for item in record.get("waterQuality") or []:
             payload = item.get("payload") or {}
+            point_name = record.get("village") or record.get("town") or "-"
+            sample_time = _format_report_time(payload.get("sampleTime") or item.get("sampledAt"))
+            metric_rows = [
+                ("CODCr", payload.get("codValue"), payload.get("codLimit")),
+                ("BOD5", payload.get("bod5Value"), payload.get("bod5Limit")),
+                ("SS", payload.get("ssValue"), payload.get("ssLimit")),
+                ("NH3-N", payload.get("nh3nValue"), payload.get("nh3nLimit")),
+                ("TP", payload.get("tpValue"), payload.get("tpLimit")),
+            ]
+            automatic_results: list[str] = []
+            for metric, value, limit in metric_rows:
+                if limit in (None, ""):
+                    continue
+                result = _water_result(value, limit)
+                automatic_results.append(result)
+                rows.append([
+                    len(rows) + 1,
+                    point_name,
+                    sample_time,
+                    metric,
+                    value if value not in (None, "") else "-",
+                    limit,
+                    "mg/L",
+                    result,
+                    result,
+                    "-",
+                ])
+            automatic_overall = "待判定" if "待判定" in automatic_results else "不达标" if "不达标" in automatic_results else "达标"
+            if payload.get("monthlyMissingTest") or payload.get("monthlyRegulatorUnqualified"):
+                automatic_overall = "不达标"
+            conclusion = item.get("conclusion") or payload.get("conclusion")
+            final_result = "达标" if conclusion == "qualified" else "不达标" if conclusion == "unqualified" else "待判定"
+            overridden = bool(payload.get("conclusionOverridden") or payload.get("manualOverride"))
+            note = payload.get("note") or payload.get("remark") or "-"
             rows.append([
                 len(rows) + 1,
-                record.get("village") or record.get("town") or "-",
-                _format_report_time(payload.get("sampleTime") or item.get("sampledAt")),
-                payload.get("codValue") or "-",
-                payload.get("codLimit") or "-",
-                payload.get("bod5Value") or "-",
-                payload.get("bod5Limit") or "-",
-                payload.get("ssValue") or "-",
-                payload.get("ssLimit") or "-",
-                payload.get("nh3nValue") or "-",
-                payload.get("nh3nLimit") or "-",
-                payload.get("tpValue") or "-",
-                payload.get("tpLimit") or "-",
-                "达标" if (item.get("conclusion") or payload.get("conclusion")) == "qualified" else "不达标" if (item.get("conclusion") or payload.get("conclusion")) == "unqualified" else "待判定",
+                point_name,
+                sample_time,
+                "综合判定",
+                "-",
+                "-",
+                "-",
+                automatic_overall,
+                final_result,
+                f"人工修改：{note}" if overridden else note,
             ])
     return rows
+
+
+def _unqualified_water_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    return [row for row in _water_quality_rows(records) if row[7] == "不达标" or row[8] == "不达标"]
 
 
 def _operation_volume_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
@@ -526,7 +653,12 @@ def _add_attachment_pictures(document, records: list[dict[str, Any]], *, detecti
                     caption = document.add_paragraph()
                     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     page_suffix = f"（第{page_index}页）" if len(pictures) > 1 else ""
-                    run = caption.add_run(f"图 {inserted + 1}  {point_name} - {item.get('filename') or path.name}{page_suffix}")
+                    caption_text = (
+                        f"检测资料 {inserted + 1}　项目点：{point_name}{page_suffix}"
+                        if detection
+                        else f"序号：{inserted + 1}　项目点：{point_name}"
+                    )
+                    run = caption.add_run(caption_text)
                     _apply_run_font(run, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT)
                     _apply_paragraph_format(caption, indent=False)
                     inserted += 1
@@ -1032,6 +1164,7 @@ def _add_record_results(document, records: list[dict[str, Any]]) -> None:
     summary.style = "Table Grid"
     for cell, value in zip(summary.rows[0].cells, ["序号", "考核类型", "行政村", "设施点", "状态", "得分"]):
         _set_cell_text(cell, value, bold=True)
+    _mark_table_header(summary.rows[0])
     for index, record in enumerate(records, 1):
         raw_type = record.get("facilityType") or record.get("rawFacilityType")
         row = summary.add_row().cells
@@ -1051,6 +1184,7 @@ def _add_record_results(document, records: list[dict[str, Any]]) -> None:
     table.style = "Table Grid"
     for cell, value in zip(table.rows[0].cells, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"]):
         _set_cell_text(cell, value, bold=True)
+    _mark_table_header(table.rows[0])
     for index, (record, score) in enumerate(deductions, 1):
         row = table.add_row().cells
         for cell, value in zip(row, [index, record.get("village") or record.get("town"), score.get("indicatorName"), score.get("indicatorFullScore"), score.get("deduction"), score.get("reason") or score.get("deductionOptionName")]):
@@ -1100,7 +1234,8 @@ def _append_database_summary(session: Session, paths: list[Path], records: list[
         table = document.add_table(rows=1, cols=7)
         table.style = "Table Grid"
         for cell, text in zip(table.rows[0].cells, ["镇街", "已复核记录", "状态", "评分条目", "问卷", "水质", "照片"]):
-            cell.text = text
+            _set_cell_text(cell, text, bold=True)
+        _mark_table_header(table.rows[0])
         for town, items in by_town.items():
             record_ids = [item.id for item in items]
             row = table.add_row().cells
@@ -1111,6 +1246,7 @@ def _append_database_summary(session: Session, paths: list[Path], records: list[
             row[4].text = str(session.scalar(select(func.count(SurveyRecord.id)).where(SurveyRecord.record_id.in_(record_ids))) or 0)
             row[5].text = str(session.scalar(select(func.count(WaterQualityRecord.id)).where(WaterQualityRecord.record_id.in_(record_ids))) or 0)
             row[6].text = str(session.scalar(select(func.count(Attachment.id)).where(Attachment.record_id.in_(record_ids))) or 0)
+        _enforce_document_fonts(document)
         document.save(path)
 
 
@@ -1350,19 +1486,17 @@ def _add_facility_result_table(document, records: list[dict[str, Any]]) -> None:
 
 def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], towns: list[dict[str, Any]], is_summary: bool) -> None:
     document.add_heading("第二章 镇级设施运维考核情况", level=1)
-    document.add_heading("2.1 镇级污水处理设施考核情况", level=2)
     if is_summary:
+        document.add_heading("2.1 项目考核结果汇总", level=2)
         _add_yunan_summary_score_overview(document, records, towns)
-    else:
-        _add_yunan_score_overview(document, records)
 
     town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
         town_name = town_data.get("town") or "本镇"
         town_records = _section_records_for_town(records, town_name, is_summary=is_summary, has_catalog_towns=bool(towns))
-        code = _town_chapter_code(town_data, index)
+        code = f"2.{index + 1}" if is_summary else f"2.{index}"
         document.add_heading(f"{code} {town_name}污水处理设施考核情况", level=2)
-        document.add_heading(f"{code}.1 总体评价", level=3)
+        document.add_heading(f"{code}.1 总体评价和设施情况概览", level=3)
         _add_town_basic_intro(document, town_name=town_name, town_data=town_data, records=town_records, add_heading=False)
         if not town_records:
             _add_paragraph(document, f"{town_name}本期尚无经复核或锁定的考核数据，报告仅列示项目基础信息，不纳入本期平均得分、扣分合计和绩效系数统计。")
@@ -1390,17 +1524,16 @@ def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], tow
 def _add_maonan_result_sections(document, *, records: list[dict[str, Any]], towns: list[dict[str, Any]], is_summary: bool) -> None:
     document.add_heading("第二章 城镇水质净化设施考核结果", level=1)
     if is_summary:
+        document.add_heading("2.1 项目考核结果汇总", level=2)
         _add_yunan_summary_score_overview(document, records, towns)
-    else:
-        _add_yunan_score_overview(document, records)
 
     town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
         town_name = town_data.get("town") or "本镇"
         town_records = _section_records_for_town(records, town_name, is_summary=is_summary, has_catalog_towns=bool(towns))
-        code = _town_chapter_code(town_data, index)
+        code = f"2.{index + 1}" if is_summary else f"2.{index}"
         document.add_heading(f"{code} {town_name}考核结果", level=2)
-        document.add_heading(f"{code}.1 基本情况", level=3)
+        document.add_heading(f"{code}.1 总体评价和设施情况概览", level=3)
         _add_town_basic_intro(document, town_name=town_name, town_data=town_data, records=town_records, add_heading=False)
         if not town_records:
             _add_paragraph(document, f"{town_name}本期尚无经复核或锁定的考核数据，报告仅列示项目基础信息，不纳入本期平均得分、扣分合计和绩效系数统计。")
@@ -1480,16 +1613,15 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
         elif "评分表" in title:
             score_rows = _all_score_rows(records)
             if score_rows:
-                _add_simple_table(document, ["序号", "项目点", "指标编号", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows)
+                _add_simple_table(document, ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows)
             else:
                 _add_paragraph(document, "本期暂无可列示的评分明细。")
         elif "照片" in title:
             rows = _attachment_rows(records, detection=False)
             if rows:
-                _add_simple_table(document, ["序号", "项目点", "文件名", "评分记录", "扣分项", "大小"], rows)
                 inserted, skipped = _add_attachment_pictures(document, records, detection=False)
                 if inserted == 0:
-                    _add_paragraph(document, "本期附件中没有可装订的有效图片，附件信息已在上表列示。")
+                    _add_paragraph(document, "本期附件中没有可装订的有效现场照片。")
                 elif skipped:
                     _add_paragraph(document, f"已装订{inserted}张现场图片；另有{skipped}张图片文件无法读取，请核对原始附件。")
             else:
@@ -1504,7 +1636,9 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
             _add_paragraph(document, profile["waterStandard"])
             rows = _water_quality_rows(records)
             if rows:
-                _add_simple_table(document, ["序号", "项目点", "取样时间", "CODCr实测", "CODCr限值", "BOD5实测", "BOD5限值", "SS实测", "SS限值", "NH3-N实测", "NH3-N限值", "TP实测", "TP限值", "结论"], rows)
+                _add_simple_table(document, ["序号", "项目点", "取样时间", "检测指标", "实测值", "限值", "单位", "自动判定", "最终判定", "备注"], rows)
+            else:
+                _add_paragraph(document, "本期暂无已提交的水质抽检结果。")
             _add_simple_table(document, ["序号", "对象", "指标", "限值", "单位"], [[index, *row] for index, row in enumerate(profile["waterRows"], 1)])
         elif "公众调查" in title:
             rows = _survey_rows(records)
@@ -1553,12 +1687,13 @@ def _generate_town_document(project_name: str, cycle_name: str, town_data: dict[
     if maonan:
         _add_maonan_result_sections(document, records=records, towns=[town_data], is_summary=False)
         _add_maonan_payment_chapter(document, records)
-        _add_problem_and_suggestion_chapter(document, records, maonan=True)
+        _add_problem_and_suggestion_chapter(document, records, maonan=True, scope_name=town_name, is_summary=False)
     else:
         _add_yunan_facility_sections(document, records=records, towns=[town_data], is_summary=False)
         _add_yunan_coefficient_chapter(document, records)
-        _add_problem_and_suggestion_chapter(document, records, maonan=False)
+        _add_problem_and_suggestion_chapter(document, records, maonan=False, scope_name=town_name, is_summary=False)
     _add_source_appendices(document, project_name=project_name, records=records, profile=profile)
+    _enforce_document_fonts(document)
     return document
 
 
@@ -1577,12 +1712,13 @@ def _generate_summary_document(project_name: str, cycle_name: str, snapshot: dic
     if maonan:
         _add_maonan_result_sections(document, records=records, towns=towns, is_summary=True)
         _add_maonan_payment_chapter(document, records)
-        _add_problem_and_suggestion_chapter(document, records, maonan=True)
+        _add_problem_and_suggestion_chapter(document, records, maonan=True, scope_name=project_name, is_summary=True)
     else:
         _add_yunan_facility_sections(document, records=records, towns=towns, is_summary=True)
         _add_yunan_coefficient_chapter(document, records)
-        _add_problem_and_suggestion_chapter(document, records, maonan=False)
+        _add_problem_and_suggestion_chapter(document, records, maonan=False, scope_name=project_name, is_summary=True)
     _add_source_appendices(document, project_name=project_name, records=records, profile=profile)
+    _enforce_document_fonts(document)
     return document
 
 
@@ -1629,24 +1765,29 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
         score = float(record.get("totalScore") or 0)
         context = _payment_context(record)
         applied, source = _payment_coefficient(record, project="yunan")
+        calculated = yunan_operation_coefficient(score)
+        calculation = f"W={score:.2f}≥90，E2=1" if score >= 90 else f"E2=W/90={score:.2f}/90={calculated:.4f}"
         rows.append([
             index,
             _record_point_name(record),
             REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
             f"{score:.2f}",
-            f"{yunan_operation_coefficient(score):.3f}",
+            f"{calculated:.3f}",
+            calculation,
             context.get("currentScoreAppliesTo") or "下一付费周期",
             f"{applied:.3f}" if applied is not None else "暂不核定",
             source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E2", "本期得分适用周期", "本期付费采用E2", "采用依据"], rows)
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E2", "折算过程", "本期得分适用周期", "本期付费采用E2", "采用依据"], rows)
 
     document.add_heading("3.2 水质浓度系数", level=2)
     _add_paragraph(document, "水质浓度系数Kq根据进水CODCr、出水CODCr及出水达标情况确定。进水CODCr低于140mg/L时，按进出水浓度差折算；进水CODCr达到140mg/L但出水不达标时，按项目既有付费口径取0.9；其余区间按郁南项目既有付费资料执行。")
     _add_paragraph(document, "镇区污水处理设施处理水量按附件18约定设置1.1倍设计规模上限；镇区管网负荷系数KQ按实际日均水量与设计规模折算，最高取1。县城区管网按附件18县城区管网基数列示，需补充售水量或经确认的负荷基数后核定KQ。")
+    _add_paragraph(document, "镇区污水处理设施月服务费公式：PCi=P0×QB×（3/4×Kq+1/4×E2）。其中，P0为处理单价（元/立方米），QB为核定月处理水量（万立方米），计算结果单位为万元。")
+    _add_paragraph(document, "镇区污水收集管网月服务费公式：Pwi=P0/12×（5/6×KQ×Kq+1/6×E1×E2）。其中，P0为管网年服务费基数（万元/年），KQ为负荷系数，Kq为水质浓度系数，E1为枯水期进水水质系数，E2为运维绩效考核系数。")
     _add_paragraph(document, payment_source_summary("郁南项目"))
 
-    document.add_heading("3.3 附件18金额基础", level=2)
+    document.add_heading("3.3 金额基础表", level=2)
     selected_town_names = {_record_point_name(record) for record in records if record.get("facilityType") in {"town_plant", "town_network"}}
     selected_rural_towns = {str(record.get("town") or "") for record in records if record.get("facilityType") == "rural_treatment"}
     town_rows = []
@@ -1747,7 +1888,11 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
                         water_quality_coefficient=kq,
                         operation_coefficient=coefficient,
                     )
-                    amount_text = f"PCi={amount:.4f}万元"
+                    amount_text = (
+                        "代入："
+                        f"PCi={unit_price:.4f}×{applied_volume:.4f}×"
+                        f"（3/4×{kq:.4f}+1/4×{coefficient:.4f}）={amount:.4f}万元"
+                    )
                 input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
                 if volume is not None:
                     input_text += f"，QB={volume:.4f}万m³"
@@ -1781,7 +1926,12 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
                         dry_season_quality_coefficient=dry_e1,
                         operation_coefficient=coefficient,
                     )
-                    amount_text = f"Pwi={amount:.4f}万元"
+                    amount_text = (
+                        "代入："
+                        f"Pwi={annual_fee:.4f}/12×"
+                        f"（5/6×{load:.4f}×{kq:.4f}+1/6×{dry_e1:.4f}×{coefficient:.4f}）"
+                        f"={amount:.4f}万元"
+                    )
                 input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
                 if load is not None:
                     input_text += f"，KQ={load:.4f}"
@@ -1903,24 +2053,27 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
         score = float(record.get("totalScore") or 0)
         context = _payment_context(record)
         applied, source = _payment_coefficient(record, project="maonan")
+        calculated = maonan_operation_coefficient(score)
+        calculation = f"W={score:.2f}≥70，E1=1" if score >= 70 else f"E1=W/70={score:.2f}/70={calculated:.4f}"
         coefficient_rows.append([
             index,
             _record_point_name(record),
             REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
             f"{score:.2f}",
-            f"{maonan_operation_coefficient(score):.3f}",
+            f"{calculated:.3f}",
+            calculation,
             context.get("currentScoreAppliesTo") or "下一付费周期",
             f"{applied:.3f}" if applied is not None else "暂不核定",
             source,
         ])
-    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E1", "本期得分适用周期", "本期付费采用E1", "采用依据"], coefficient_rows)
+    _add_simple_table(document, ["序号", "考核对象", "设施类型", "本期得分W", "本期得分折算E1", "折算过程", "本期得分适用周期", "本期付费采用E1", "采用依据"], coefficient_rows)
 
     document.add_heading("3.2 付费公式", level=2)
-    _add_paragraph(document, "城镇水质净化厂月服务费Pz=Py×QB×(3/5+Kq/10+3E1/10)+Pk/12×(2/3+E1/3)。其中Py为污水处理运营服务费单价，QB为当月处理水量，Kq为水质浓度系数，Pk为水质净化设施可用性付费。")
-    _add_paragraph(document, "管网月服务费Pw=管网可用性付费/12×(2/3+E1/3)+调整后管网年运营维护费/12×(3/5+Kq/10+3E1/10)。项目服务费由可用性付费和运营维护费组成；未提供新金额表时沿用茂南项目既有历史表，不引用其他项目或通用金额基础表。")
+    _add_paragraph(document, "城镇水质净化厂月服务费公式：Pz=Py×QB×（3/5+Kq/10+3E1/10）+Pk/12×（2/3+E1/3）。其中，Py为污水处理运营服务费单价（元/立方米），QB为当月核定处理水量（万立方米），Kq为水质浓度系数，Pk为水质净化设施可用性付费（万元/年），计算结果单位为万元。")
+    _add_paragraph(document, "污水收集管网月服务费公式：Pw=Pk/12×（2/3+E1/3）+Py/12×（3/5+Kq/10+3E1/10）。其中，Pk为管网可用性付费（万元/年），Py为调整后管网年运营维护费（万元/年）。项目服务费由可用性付费和运营维护费组成；未提供新金额表时沿用茂南项目既有历史表，不引用其他项目或通用金额基础表。")
     _add_paragraph(document, payment_source_summary("茂南项目"))
 
-    document.add_heading("3.3 沿用金额基础", level=2)
+    document.add_heading("3.3 金额基础表", level=2)
     basis_rows = maonan_payment_basis_rows()
     selected_types: dict[str, set[str]] = {}
     for record in records:
@@ -2020,7 +2173,11 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
                         operation_coefficient=e1,
                         annual_availability_fee_ten_thousand_yuan=pk,
                     )
-                    amount_text = f"Pz={amount:.4f}万元"
+                    amount_text = (
+                        "代入："
+                        f"Pz={py:.4f}×{applied_qb:.4f}×（3/5+{kq:.4f}/10+3×{e1:.4f}/10）"
+                        f"+{pk:.4f}/12×（2/3+{e1:.4f}/3）={amount:.4f}万元"
+                    )
                 input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
                 if qb is not None:
                     input_text += f"，QB={qb:.4f}万吨"
@@ -2037,7 +2194,12 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
                         water_quality_coefficient=kq,
                         operation_coefficient=e1,
                     )
-                    amount_text = f"Pw={amount:.4f}万元"
+                    amount_text = (
+                        "代入："
+                        f"Pw={pk:.4f}/12×（2/3+{e1:.4f}/3）"
+                        f"+{adjusted_py:.4f}/12×（3/5+{kq:.4f}/10+3×{e1:.4f}/10）"
+                        f"={amount:.4f}万元"
+                    )
                 input_text = f"{month_label}：Kq={kq:.4f}" if kq is not None else f"{month_label}：Kq缺失"
                 month_lines.append(f"{input_text}，{_format_missing(missing)}，{amount_text}")
         if month_lines:
@@ -2064,15 +2226,30 @@ def _add_maonan_payment_chapter(document, records: list[dict[str, Any]]) -> None
     _add_paragraph(document, "金额基数已具备时，仍需本期QB和月均COD数据才能形成完整服务费结论；资料不完整时仅输出可复核的金额基础、公式和已具备系数。")
 
 
-def _add_problem_and_suggestion_chapter(document, records: list[dict[str, Any]], *, maonan: bool) -> None:
-    if maonan:
+def _add_problem_and_suggestion_chapter(
+    document,
+    records: list[dict[str, Any]],
+    *,
+    maonan: bool,
+    scope_name: str,
+    is_summary: bool,
+) -> None:
+    if maonan and is_summary:
         document.add_heading("第四章 主要改进点、主要问题和整改工作建议", level=1)
         document.add_heading("4.1 主要改进点", level=2)
         _add_paragraph(document, "本期主要改进情况根据现场复核记录、历史问题整改情况和经确认的考核资料进行归纳。")
         document.add_heading("4.2 主要问题", level=2)
+    elif maonan:
+        document.add_heading(f"第四章 {scope_name}主要问题和整改工作建议", level=1)
+        document.add_heading("4.1 主要问题", level=2)
     else:
         document.add_heading("第四章 主要问题及整改建议", level=1)
         document.add_heading("4.1 主要问题", level=2)
+
+    if is_summary:
+        _add_paragraph(document, f"本章汇总分析{scope_name}本期所有纳入报告镇街的扣分问题和共性整改要求。")
+    else:
+        _add_paragraph(document, f"本章仅分析{scope_name}本期已提交并纳入报告的考核记录，不引用其他镇街的问题或结论。")
 
     deductions = _deduction_rows(records)
     if deductions:
@@ -2081,5 +2258,15 @@ def _add_problem_and_suggestion_chapter(document, records: list[dict[str, Any]],
     else:
         _add_deduction_narrative(document, records)
 
-    document.add_heading("4.3 整改工作建议" if maonan else "4.2 工作建议", level=2)
+    water_issues = _unqualified_water_rows(records)
+    if water_issues:
+        document.add_heading("水质抽检异常情况", level=3)
+        _add_paragraph(document, "以下仅列示自动判定或最终判定为不达标的水质抽检项目；全部达标和不达标结果详见附件5水质抽检汇总。")
+        _add_simple_table(
+            document,
+            ["序号", "项目点", "取样时间", "检测指标", "实测值", "限值", "单位", "自动判定", "最终判定", "备注"],
+            [[index, *row[1:]] for index, row in enumerate(water_issues, 1)],
+        )
+
+    document.add_heading("4.3 整改工作建议" if maonan and is_summary else "4.2 整改工作建议" if maonan else "4.2 工作建议", level=2)
     _add_yunan_suggestion_section(document, records)
