@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -30,6 +31,7 @@ from app.services.standard_names import clean_standard_name
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
 PROJECT_NAMES = {"郁南项目", "茂南项目"}
+RECORD_CREATE_LOCK = Lock()
 
 
 def _remove_managed_file(storage_key: str | None) -> bool:
@@ -47,6 +49,14 @@ def _remove_managed_file(storage_key: str | None) -> bool:
     candidate.unlink()
     return True
 
+
+def _get_owned_record(session: Session, record_id: str, user: User) -> AssessmentRecord:
+    record = session.get(AssessmentRecord, record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="未找到考核记录")
+    if user.role != "admin" and record.owner_user_id != user.id:
+        raise HTTPException(status_code=404, detail="未找到考核记录")
+    return record
 
 def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
     return {
@@ -66,12 +76,12 @@ def _record_payload(record: AssessmentRecord) -> dict[str, Any]:
 
 
 @router.get("/cities")
-def cities(session: Session = Depends(get_session)):
+def cities(session: Session = Depends(get_session), _: User = Depends(current_user)):
     return {"items": [{"id": city.id, "name": city.name} for city in session.scalars(select(City)).all()]}
 
 
 @router.get("/projects")
-def projects(session: Session = Depends(get_session)):
+def projects(session: Session = Depends(get_session), _: User = Depends(current_user)):
     statement = select(City).where(City.name.in_(PROJECT_NAMES)).order_by(City.name)
     items = []
     for city in session.scalars(statement).all():
@@ -87,7 +97,7 @@ def projects(session: Session = Depends(get_session)):
 
 
 @router.get("/projects/{city_id}/report-template")
-def project_report_template(city_id: str, session: Session = Depends(get_session)):
+def project_report_template(city_id: str, session: Session = Depends(get_session), _: User = Depends(current_user)):
     city = session.get(City, city_id)
     if city is None:
         raise HTTPException(status_code=404, detail="未找到所选项目")
@@ -104,7 +114,7 @@ def project_report_template(city_id: str, session: Session = Depends(get_session
 
 
 @router.get("/assessment-cycles")
-def cycles(city_id: str | None = None, session: Session = Depends(get_session)):
+def cycles(city_id: str | None = None, session: Session = Depends(get_session), _: User = Depends(current_user)):
     statement = select(AssessmentCycle)
     if city_id:
         statement = statement.where(AssessmentCycle.city_id == city_id)
@@ -112,7 +122,7 @@ def cycles(city_id: str | None = None, session: Session = Depends(get_session)):
 
 
 @router.get("/towns")
-def towns(city_id: str | None = None, session: Session = Depends(get_session)):
+def towns(city_id: str | None = None, session: Session = Depends(get_session), _: User = Depends(current_user)):
     statement = select(Town).where(Town.is_active.is_(True))
     if city_id:
         statement = statement.where(Town.city_id == city_id)
@@ -128,7 +138,7 @@ def towns(city_id: str | None = None, session: Session = Depends(get_session)):
 
 
 @router.get("/towns/{town_id}/villages")
-def villages(town_id: str, city_id: str | None = None, session: Session = Depends(get_session)):
+def villages(town_id: str, city_id: str | None = None, session: Session = Depends(get_session), _: User = Depends(current_user)):
     town = session.get(Town, town_id)
     if town is None:
         statement = select(Town).where(Town.name == town_id)
@@ -148,7 +158,7 @@ def villages(town_id: str, city_id: str | None = None, session: Session = Depend
 
 
 @router.get("/indicator-standards")
-def indicator_standards(city_id: str | None = None, cycle_id: str | None = None, facility_type: str | None = None, session: Session = Depends(get_session)):
+def indicator_standards(city_id: str | None = None, cycle_id: str | None = None, facility_type: str | None = None, session: Session = Depends(get_session), _: User = Depends(current_user)):
     version_query = select(IndicatorVersion).where(IndicatorVersion.status == "published")
     if city_id: version_query = version_query.where(IndicatorVersion.city_id == city_id)
     version = session.scalar(version_query.order_by(IndicatorVersion.created_at.desc()))
@@ -202,13 +212,16 @@ def indicator_standards(city_id: str | None = None, cycle_id: str | None = None,
 @router.post("/assessment-records")
 def create_record(payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
     raw = unwrap_payload(payload)
-    try:
-        records = [create_assessment_record(session, item) for item in split_town_package(raw)]
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    session.commit()
-    for record in records:
-        session.refresh(record)
+    # Serialize create/update transactions so a concurrent mobile retry reuses
+    # the existing project-point record instead of inserting a duplicate.
+    with RECORD_CREATE_LOCK:
+        try:
+            records = [create_assessment_record(session, item, owner_user_id=user.id) for item in split_town_package(raw)]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        session.commit()
+        for record in records:
+            session.refresh(record)
     response = _record_payload(records[0])
     response["recordIds"] = [record.id for record in records]
     return response
@@ -223,6 +236,8 @@ def list_mobile_records(
     user: User = Depends(current_user),
 ):
     statement = select(AssessmentRecord).where(AssessmentRecord.status.in_(["submitted", "returned", "reviewed", "locked"]))
+    if user.role != "admin":
+        statement = statement.where(AssessmentRecord.owner_user_id == user.id)
     if city_id:
         statement = statement.where(AssessmentRecord.city_id == city_id)
     if cycle_id:
@@ -267,15 +282,27 @@ def clear_mobile_records(
     if cycle.city_id != city_id:
         raise HTTPException(status_code=422, detail="所选考核季度不属于当前项目")
 
-    record_ids = list(session.scalars(select(AssessmentRecord.id).where(
+    matching_cycle_ids = list(session.scalars(
+        select(AssessmentCycle.id).where(
+            AssessmentCycle.city_id == city_id,
+            AssessmentCycle.name == cycle.name,
+        )
+    ))
+    if cycle.id not in matching_cycle_ids:
+        matching_cycle_ids.append(cycle.id)
+
+    record_query = select(AssessmentRecord.id).where(
         AssessmentRecord.city_id == city_id,
-        AssessmentRecord.cycle_id == cycle.id,
-    )))
-    task_ids = list(session.scalars(select(ReportTask.id).where(ReportTask.cycle_id == cycle.id)))
-    report_filter = Report.cycle_id == cycle.id
+        AssessmentRecord.cycle_id.in_(matching_cycle_ids),
+    )
+    if user.role != "admin":
+        record_query = record_query.where(AssessmentRecord.owner_user_id == user.id)
+    record_ids = list(session.scalars(record_query))
+    task_ids = list(session.scalars(select(ReportTask.id).where(ReportTask.cycle_id.in_(matching_cycle_ids)))) if user.role == "admin" else []
+    report_filter = Report.cycle_id.in_(matching_cycle_ids)
     if task_ids:
         report_filter = or_(report_filter, Report.task_id.in_(task_ids))
-    report_rows = list(session.scalars(select(Report).where(report_filter)))
+    report_rows = list(session.scalars(select(Report).where(report_filter))) if user.role == "admin" else []
     attachment_rows = list(session.scalars(select(Attachment).where(Attachment.record_id.in_(record_ids)))) if record_ids else []
     storage_keys = [item.storage_key for item in attachment_rows] + [item.storage_key for item in report_rows]
 
@@ -313,7 +340,7 @@ def clear_mobile_records(
 
 @router.put("/assessment-records/{record_id}/scores")
 def update_scores(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
-    record = session.get(AssessmentRecord, record_id)
+    record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     entries = payload.get("entries", payload)
@@ -325,7 +352,7 @@ def update_scores(record_id: str, payload: dict[str, Any], session: Session = De
 
 @router.put("/assessment-records/{record_id}/surveys")
 def update_surveys(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
-    record = session.get(AssessmentRecord, record_id)
+    record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     record.raw_payload = {**record.raw_payload, "surveyEntries": payload}
@@ -336,7 +363,7 @@ def update_surveys(record_id: str, payload: dict[str, Any], session: Session = D
 
 @router.put("/assessment-records/{record_id}/water-quality")
 def update_water_quality(record_id: str, payload: dict[str, Any], session: Session = Depends(get_session), user: User = Depends(current_user)):
-    record = session.get(AssessmentRecord, record_id)
+    record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     record.raw_payload = {**record.raw_payload, "waterQuality": payload}
@@ -354,7 +381,7 @@ def upload_attachment(
     session: Session = Depends(get_session),
     user: User = Depends(current_user),
 ):
-    record = session.get(AssessmentRecord, record_id)
+    record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     if score_id and not any(score.id == score_id for score in record.scores):
@@ -370,7 +397,7 @@ def upload_attachment(
 
 @router.post("/assessment-records/{record_id}/submit")
 def submit_record(record_id: str, session: Session = Depends(get_session), user: User = Depends(current_user)):
-    record = session.get(AssessmentRecord, record_id)
+    record = _get_owned_record(session, record_id, user)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     if record.status == "locked": raise HTTPException(status_code=409, detail="考核记录已锁定，不能修改")
     try:

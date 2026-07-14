@@ -25,6 +25,15 @@ ACCESS_TOKEN_EXPIRE_MINUTES=720
 ```
 
 生产环境不要提交真实密钥或数据库密码。
+## 首次建库与升级
+
+启动正式后端前，必须先在 `Agent/backend` 目录执行：
+
+```powershell
+python -m alembic upgrade head
+```
+
+全新数据库和已有数据库都使用同一条命令；迁移成功后再启动 API。生产环境不会在启动时自动改表，避免绕过迁移记录或出现重复字段。
 
 ## Nginx 路由建议
 
@@ -43,6 +52,11 @@ location /platform/ {
 location /mobile/ {
   alias /srv/water-assessment/front-mobile/;
   try_files $uri $uri/ /mobile/index.html;
+}
+
+location /admin-account/ {
+  alias /srv/water-assessment/admin-account/;
+  try_files $uri $uri/ /admin-account/index.html;
 }
 ```
 
@@ -98,3 +112,10 @@ powershell -ExecutionPolicy Bypass -File .\Agent\测试\run_agent_checks.ps1
 - 报告只能读取已复核或已锁定数据。
 - 郁南和茂南分别生成对应项目报告结构。
 - 报告中附件目录、Agent 已确认摘要、水质限值、表格序号均正确。
+## 账号与密码
+
+- 账号数据保存于数据库 `users` 表，密码仅保存为不可逆哈希，不能从系统中查看原始密码。
+- 首次生产部署前，将 `.env.production.example` 复制为服务器私有 `.env`，填写 `SECRET_KEY`、初始管理员密码、初始采集员密码、PostgreSQL 连接和正式域名。
+- 初始密码只用于首次创建默认账号；账号已创建后，修改 `.env` 不会覆盖既有密码。
+- 管理员使用独立的 `管理员账号管理.vbs` 入口新增、重置、启用或停用账号。新增和重置密码均由系统生成随机 8 位字母数字组合，并只展示一次。
+- 平台端左下角用户名区域仅用于当前用户修改自己的密码；移动端、平台端和管理员入口共用同一套账号。

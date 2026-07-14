@@ -25,7 +25,7 @@ class AgentConfirmation(BaseModel):
 
 
 @router.post("/summaries")
-def summarize(payload: dict[str, Any]):
+def summarize(payload: dict[str, Any], user=Depends(admin_user)):
     return summarize_assessment_payload(payload)
 
 
@@ -38,7 +38,7 @@ def analyze_record(record_id: str, session: Session = Depends(get_session), user
 
 
 @router.get("/records/{record_id}/runs")
-def record_runs(record_id: str, session: Session = Depends(get_session)):
+def record_runs(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     runs = session.scalars(
         select(AgentRun)
         .where(AgentRun.record_id == record_id)
@@ -56,7 +56,7 @@ def analyze_report_task(task_id: str, session: Session = Depends(get_session), u
 
 
 @router.get("/report-tasks/{task_id}/runs")
-def report_task_runs(task_id: str, session: Session = Depends(get_session)):
+def report_task_runs(task_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     runs = session.scalars(
         select(AgentRun)
         .where(AgentRun.report_task_id == task_id)

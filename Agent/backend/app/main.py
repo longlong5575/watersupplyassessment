@@ -31,9 +31,9 @@ app.include_router(uploads.router)
 
 @app.on_event("startup")
 def startup() -> None:
-    # Development fallback; production schema changes are managed by Alembic.
-    Base.metadata.create_all(bind=engine)
-    ensure_local_schema()
+    if settings.app_env == "local":
+        Base.metadata.create_all(bind=engine)
+        ensure_local_schema()
     with SessionLocal() as session:
         seed_database(session)
 

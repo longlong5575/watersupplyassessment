@@ -235,15 +235,16 @@ def _add_assessment_object(document, town_data: dict[str, Any], records: list[di
                 _set_cell_text(cell, value)
 
 
-def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, indent: bool = True) -> None:
+def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, indent: bool = True, size_pt: float | None = None) -> None:
     paragraph = document.add_paragraph()
     _apply_paragraph_format(paragraph, indent=indent)
+    font_size = size_pt or REPORT_BODY_SIZE_PT
     if bold_prefix and text.startswith(bold_prefix):
         run = paragraph.add_run(bold_prefix)
-        _apply_run_font(run, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT, bold=True)
+        _apply_run_font(run, REPORT_BODY_FONT, font_size, bold=True)
         text = text[len(bold_prefix):]
     run = paragraph.add_run(text)
-    _apply_run_font(run, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT, bold=False)
+    _apply_run_font(run, REPORT_BODY_FONT, font_size, bold=False)
 
 
 def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
@@ -641,15 +642,15 @@ def _project_cover_unit(project_name: str) -> tuple[str, str]:
     if "茂南" in project_name:
         return "委托单位：茂名市茂南区住房和城乡建设局", "编制单位：广东省建筑设计研究院集团股份有限公司"
     if "郁南" in project_name:
-        return "考核单位：广东省建筑设计研究院集团股份有限公司", "现场考核负责人：陶艺婷  林敏仪"
+        return "实施机构：郁南县住房和城乡建设局", "考核单位：广东省建筑设计研究院集团股份有限公司"
     return "委托单位：项目主管单位", "编制单位：绩效考核工作组"
 
 
-def _add_project_personnel_page(document, project_name: str) -> None:
+def _add_project_personnel_page(document, project_name: str, cycle_name: str) -> None:
     document.add_heading("项目人员组成", level=1)
     if "茂南" in project_name:
         rows = [
-            ["项目名称", "茂南区水质净化处理设施全区捆绑PPP项目城镇水质净化设施运营期绩效考核服务项目"],
+            ["项目名称", f"茂南区水质净化处理设施全区捆绑PPP项目城镇水质净化设施运营期绩效考核服务项目（城镇设施{cycle_name}绩效考核报告）"],
             ["编制单位", "广东省建筑设计研究院集团股份有限公司"],
             ["工程咨询单位甲级资信证书编号", "甲232024011004（市政公用工程）"],
             ["法定代表人", "李巍"],
@@ -665,7 +666,7 @@ def _add_project_personnel_page(document, project_name: str) -> None:
         ]
     else:
         rows = [
-            ["项目名称", "郁南县整县生活污水处理设施捆绑PPP项目绩效考核"],
+            ["项目名称", f"郁南县整县生活污水处理设施捆绑PPP项目绩效考核（{cycle_name}镇级及农村设施考核报告）"],
             ["编制单位", "广东省建筑设计研究院集团股份有限公司"],
             ["工程咨询单位甲级资信证书编号", "甲232024011004（市政公用工程）"],
             ["法定代表人", "李巍"],
@@ -681,8 +682,8 @@ def _add_project_personnel_page(document, project_name: str) -> None:
             ["检测报告人员", "编制：罗桂珠；复核：潘浩贤；签发：孔令峰"],
         ]
     for label, value in rows:
-        _add_paragraph(document, f"{label}：{value}", bold_prefix=f"{label}：", indent=False)
-    _add_paragraph(document, "本期项目人员组成以委托单位和编制单位最终确认的信息为准。", indent=False)
+        _add_paragraph(document, f"{label}：{value}", bold_prefix=f"{label}：", indent=False, size_pt=14)
+    _add_paragraph(document, "本期项目人员组成以委托单位和编制单位最终确认的信息为准。", indent=False, size_pt=14)
     document.add_page_break()
 
 
@@ -691,31 +692,41 @@ def _add_source_cover(document, *, project_name: str, cycle_name: str, title: st
 
     full_name = _project_full_name(project_name)
     owner_line, compiler_line = _project_cover_unit(project_name)
-    for _ in range(4):
-        document.add_paragraph("")
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(full_name)
-    _apply_run_font(run, REPORT_HEADING_FONT, 20, bold=True)
+    is_maonan = "茂南" in project_name
+
+    def add_centered(text: str, size: float, *, bold: bool = False) -> None:
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run(text)
+        _apply_run_font(run, REPORT_HEADING_FONT, size, bold=bold)
+
     for _ in range(2):
         document.add_paragraph("")
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(report_type)
-    _apply_run_font(run, REPORT_HEADING_FONT, 18, bold=True)
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run(cycle_name)
-    _apply_run_font(run, REPORT_BODY_FONT, 14, bold=False)
-    for _ in range(9):
+    add_centered(full_name, 20 if is_maonan else 22, bold=True)
+    if is_maonan:
+        add_centered("城镇水质净化设施运营期绩效考核", 20, bold=True)
+        add_centered("服务项目", 20, bold=True)
+        for _ in range(3):
+            document.add_paragraph("")
+        add_centered(f"城镇设施{cycle_name}绩效考核报告", 22, bold=True)
+        spacer_count = 7
+    else:
+        add_centered("绩效考核", 22, bold=True)
+        for _ in range(2):
+            document.add_paragraph("")
+        add_centered(f"{cycle_name}镇级及农村设施考核报告", 22, bold=True)
+        spacer_count = 8
+    for _ in range(spacer_count):
         document.add_paragraph("")
-    _add_paragraph(document, f"项目名称：{full_name}", indent=False)
-    _add_paragraph(document, f"报告名称：{title}", indent=False)
-    _add_paragraph(document, owner_line, indent=False)
-    _add_paragraph(document, compiler_line, indent=False)
-    _add_paragraph(document, f"编制日期：{datetime.now().strftime('%Y年%m月%d日')}", indent=False)
+    add_centered(owner_line, 16)
+    add_centered(compiler_line, 16)
+    now = datetime.now()
+    digit_names = "〇一二三四五六七八九"
+    month_names = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"]
+    cover_date = "".join(digit_names[int(value)] for value in str(now.year)) + "年" + month_names[now.month] + "月"
+    add_centered(cover_date, 16)
     document.add_page_break()
-    _add_project_personnel_page(document, project_name)
+    _add_project_personnel_page(document, project_name, cycle_name)
 
 
 def _add_assessment_summary_text(document, *, project_name: str, cycle_name: str, records: list[dict[str, Any]], towns: list[dict[str, Any]], profile: dict[str, Any]) -> None:
@@ -1150,7 +1161,7 @@ def run_report_task(task_id: str) -> None:
                 records = [record for record in records if record.town.name in town_names]
             dataset_town_names = None if include_summary else (town_names or None)
             snapshot = build_report_dataset(session, cycle=cycle, town_names=dataset_town_names, city_id=project_id)
-            if task.payload.get("source") == "dashboard":
+            if task.payload.get("source") in {"dashboard", "mobile"}:
                 validate_report_dataset(snapshot)
             task.data_snapshot = snapshot
             task.dataset_hash = snapshot.get("hash")

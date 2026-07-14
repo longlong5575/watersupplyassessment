@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_session
-from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion
+from app.core.security import admin_user
+from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion, User
 from app.services.standard_names import clean_standard_name
 from app.services.standard_validation import validate_standard_payload
 
@@ -14,7 +15,7 @@ router = APIRouter(prefix="/api/indicator-versions", tags=["standards"])
 
 
 @router.get("")
-def list_versions(city_id: str | None = None, cycle_id: str | None = None, session: Session = Depends(get_session)):
+def list_versions(city_id: str | None = None, cycle_id: str | None = None, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     statement = select(IndicatorVersion).where(IndicatorVersion.status == "published").order_by(IndicatorVersion.created_at.desc())
     if city_id:
         statement = statement.where(IndicatorVersion.city_id == city_id)
@@ -45,7 +46,7 @@ def list_versions(city_id: str | None = None, cycle_id: str | None = None, sessi
 
 
 @router.get("/{version_id}")
-def get_version(version_id: str, session: Session = Depends(get_session)):
+def get_version(version_id: str, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="未找到评分标准版本")
@@ -86,7 +87,7 @@ def get_version(version_id: str, session: Session = Depends(get_session)):
 
 
 @router.patch("/{version_id}")
-def update_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
+def update_version(version_id: str, payload: dict, session: Session = Depends(get_session), user: User = Depends(admin_user)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="未找到评分标准版本")
@@ -134,11 +135,11 @@ def update_version(version_id: str, payload: dict, session: Session = Depends(ge
                 option.requires_photo = bool(raw_option.get("requiresPhoto"))
 
     session.commit()
-    return get_version(version_id, session)
+    return get_version(version_id, session, user)
 
 
 @router.post("/{version_id}/clone")
-def clone_version(version_id: str, payload: dict, session: Session = Depends(get_session)):
+def clone_version(version_id: str, payload: dict, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     source = session.get(IndicatorVersion, version_id)
     if source is None: raise HTTPException(status_code=404, detail="未找到评分标准版本")
     target = IndicatorVersion(city_id=source.city_id, cycle_id=source.cycle_id, name=payload.get("name", f"{source.name}副本"), status="draft")
@@ -166,7 +167,7 @@ def clone_version(version_id: str, payload: dict, session: Session = Depends(get
 
 
 @router.post("/{version_id}/publish")
-def publish_version(version_id: str, session: Session = Depends(get_session)):
+def publish_version(version_id: str, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="未找到评分标准版本")
@@ -188,7 +189,7 @@ def publish_version(version_id: str, session: Session = Depends(get_session)):
 
 
 @router.post("/{version_id}/lock")
-def lock_version(version_id: str, session: Session = Depends(get_session)):
+def lock_version(version_id: str, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     version = session.get(IndicatorVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="未找到评分标准版本")

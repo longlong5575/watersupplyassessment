@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = "Stop"
+﻿param([switch]$NoBrowser)
+
+$ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $agentRoot = Split-Path -Parent $scriptRoot
@@ -79,23 +81,25 @@ function Install-Python312 {
     $detected = (& py -3.12 -c "import sys; print(sys.executable)").Trim()
     if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $detected)) { $env:PYTHON312_EXE = $detected; return }
   } catch {}
-  if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) { throw "Python 3.12 is required and Windows App Installer is unavailable." }
+  if (-not (Get-Command "winget" -ErrorAction SilentlyContinue)) { throw "缺少 Python 3.12，且当前系统无法使用 Windows 应用安装器自动安装。" }
   & winget install --id Python.Python.3.12 --exact --silent --accept-package-agreements --accept-source-agreements
   $candidate = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-  if (-not (Test-Path -LiteralPath $candidate)) { throw "Python 3.12 installation did not produce the expected executable." }
+  if (-not (Test-Path -LiteralPath $candidate)) { throw "Python 3.12 安装完成后仍未找到可执行文件。" }
   $env:PYTHON312_EXE = $candidate
 }
 
-function Start-Frontend([string]$directory, [int]$Port, [string]$Name) {
+function Start-Frontend([string]$directory, [int]$Port, [string]$Name, [string]$PythonExe) {
   $nodeCommand = Get-Command "node" -ErrorAction SilentlyContinue
   $viteEntry = Join-Path $directory "node_modules\vite\bin\vite.js"
   if (-not $nodeCommand) { throw "未找到 Node.js，无法启动前端服务。" }
   if (-not (Test-Path -LiteralPath $viteEntry)) { throw "前端依赖不完整，请重新启动系统以自动修复。" }
   $stdoutPath = Join-Path $logDir "$Name.out.log"
   $stderrPath = Join-Path $logDir "$Name.err.log"
-  $arguments = @("`"$viteEntry`"", "--host", "127.0.0.1", "--port", [string]$Port, "--strictPort")
-  $process = Start-Process -FilePath $nodeCommand.Source -ArgumentList $arguments -WorkingDirectory $directory -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
-  return $process.Id
+  $arguments = @($viteEntry, "--host", "127.0.0.1", "--port", [string]$Port, "--strictPort")
+  $launcher = Join-Path $backend "start_hidden_process.py"
+  $processId = & $PythonExe $launcher --working-directory $directory --stdout $stdoutPath --stderr $stderrPath -- $nodeCommand.Source @arguments
+  if ($LASTEXITCODE -ne 0 -or -not $processId) { throw "前端服务静默启动失败：$Name" }
+  return [int]($processId | Select-Object -Last 1)
 }
 
 function Wait-ForUrl([string]$url) {
@@ -116,9 +120,27 @@ function Test-UrlReady([string]$url) {
 }
 
 function Get-AppBuildId {
-  $sourceRoots = @((Join-Path $agentRoot "backend"), (Join-Path $agentRoot "frontend"))
-  $latest = Get-ChildItem -LiteralPath $sourceRoots -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch '[\\/](node_modules|dist|__pycache__)[\\/]' } |
+  $sourceRoots = @(
+    (Join-Path $agentRoot "backend\app"),
+    (Join-Path $agentRoot "frontend\front\src"),
+    (Join-Path $agentRoot "frontend\front-mobile\src")
+  )
+  $sourceFiles = foreach ($sourceRoot in $sourceRoots) {
+    if (Test-Path -LiteralPath $sourceRoot) {
+      Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -ErrorAction SilentlyContinue
+    }
+  }
+  $configFiles = @(
+    (Join-Path $agentRoot "backend\requirements.txt"),
+    (Join-Path $agentRoot "backend\pyproject.toml"),
+    (Join-Path $agentRoot "frontend\front\package.json"),
+    (Join-Path $agentRoot "frontend\front\pnpm-lock.yaml"),
+    (Join-Path $agentRoot "frontend\front\index.html"),
+    (Join-Path $agentRoot "frontend\front-mobile\package.json"),
+    (Join-Path $agentRoot "frontend\front-mobile\pnpm-lock.yaml"),
+    (Join-Path $agentRoot "frontend\front-mobile\index.html")
+  ) | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object { Get-Item -LiteralPath $_ }
+  $latest = @($sourceFiles) + @($configFiles) |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1
   if (-not $latest) { throw "未找到应用程序源文件，请确认 Agent 文件夹完整。" }
@@ -155,11 +177,28 @@ function Get-FreePort([int]$Preferred, [int]$Start, [int]$End) {
   for ($port = $Start; $port -le $End; $port++) {
     if (Test-PortAvailable $port) { return $port }
   }
-  throw "No free port found between $Start and $End."
+  throw "在 $Start 至 $End 范围内没有可用端口。"
 }
 
 function Set-FrontendEnv([string]$directory, [int]$BackendPort) {
   "VITE_API_BASE_URL=http://127.0.0.1:$BackendPort/api" | Out-File -LiteralPath (Join-Path $directory ".env.local") -Encoding utf8
+}
+
+function Get-LastServiceUrls {
+  $urls = [ordered]@{
+    backend = "http://127.0.0.1:8000"
+    platform = "http://127.0.0.1:5173"
+    mobile = "http://127.0.0.1:5174"
+  }
+  if (Test-Path -LiteralPath $statusJsonPath) {
+    try {
+      $status = Get-Content -LiteralPath $statusJsonPath -Raw -Encoding utf8 | ConvertFrom-Json
+      if ($status.backendUrl) { $urls.backend = [string]$status.backendUrl }
+      if ($status.platformUrl) { $urls.platform = [string]$status.platformUrl }
+      if ($status.mobileUrl) { $urls.mobile = [string]$status.mobileUrl }
+    } catch {}
+  }
+  return $urls
 }
 
 function Close-OldAppBrowserWindows {
@@ -186,14 +225,22 @@ try {
   Write-StartupStatus $Text.Preparing $Text.PreparingMsg
   $appBuildId = Get-AppBuildId
   $env:WATERSUPPLY_BUILD_ID = $appBuildId
-  if ((Test-BackendBuild "http://127.0.0.1:8000" $appBuildId) -and (Test-UrlReady "http://127.0.0.1:5173") -and (Test-UrlReady "http://127.0.0.1:5174")) {
-    Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:8000"; platformUrl = "http://127.0.0.1:5173"; mobileUrl = "http://127.0.0.1:5174" }
-    Close-OldAppBrowserWindows
-    Start-Process "http://127.0.0.1:5173"
-    Start-Process "http://127.0.0.1:5174"
+  $lastUrls = Get-LastServiceUrls
+  $lastBackendPort = ([uri]$lastUrls.backend).Port
+  $lastPlatformPort = ([uri]$lastUrls.platform).Port
+  $lastMobilePort = ([uri]$lastUrls.mobile).Port
+  $lastPortsBusy = (-not (Test-PortAvailable $lastBackendPort)) -and (-not (Test-PortAvailable $lastPlatformPort)) -and (-not (Test-PortAvailable $lastMobilePort))
+  if ($lastPortsBusy -and (Test-BackendBuild $lastUrls.backend $appBuildId) -and (Test-UrlReady $lastUrls.platform) -and (Test-UrlReady $lastUrls.mobile)) {
+    Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = $lastUrls.backend; platformUrl = $lastUrls.platform; mobileUrl = $lastUrls.mobile }
+    if (-not $NoBrowser) {
+      Close-OldAppBrowserWindows
+      Start-Process $lastUrls.platform
+      Start-Process $lastUrls.mobile
+    }
     return
   }
-  if ((Test-UrlReady "http://127.0.0.1:8000/health") -or (Test-UrlReady "http://127.0.0.1:5173") -or (Test-UrlReady "http://127.0.0.1:5174") -or (Test-Path -LiteralPath (Join-Path $logDir "backend-server.pid"))) {
+  $managedPidFiles = @("backend-server.pid", "front-server.pid", "front-mobile-server.pid") | ForEach-Object { Join-Path $logDir $_ }
+  if ($managedPidFiles | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1) {
     & (Join-Path $scriptRoot "stop-services.ps1") -Silent
     Start-Sleep -Seconds 1
   }
@@ -215,23 +262,28 @@ try {
   $backendLauncherPython = $env:PYTHON312_EXE
   if (-not $backendLauncherPython) { throw "未找到 Python 运行环境，请重新启动系统以自动修复。" }
   Write-StartupStatus $Text.Backend $Text.BackendMsg
-  & $backendLauncherPython (Join-Path $backend "start_backend_silent.py")
+  $backendStarterScript = Join-Path $backend "start_backend_silent.py"
+  $backendStarter = Start-Process -FilePath $backendLauncherPython -ArgumentList "`"$backendStarterScript`"" -WorkingDirectory $backend -WindowStyle Hidden -PassThru
   Write-StartupStatus $Text.Frontend $Text.FrontendMsg
-  $frontPid = Start-Frontend $front $frontPort "front-server"
-  $mobilePid = Start-Frontend $mobile $mobilePort "front-mobile-server"
+  $frontPid = Start-Frontend $front $frontPort "front-server" $backendLauncherPython
+  $mobilePid = Start-Frontend $mobile $mobilePort "front-mobile-server" $backendLauncherPython
   $frontPid | Out-File -LiteralPath (Join-Path $logDir "front-server.pid") -Encoding ascii
   $mobilePid | Out-File -LiteralPath (Join-Path $logDir "front-mobile-server.pid") -Encoding ascii
   Wait-ForUrl "http://127.0.0.1:$backendPort/health"
   Wait-ForUrl "http://127.0.0.1:$frontPort"
   Wait-ForUrl "http://127.0.0.1:$mobilePort"
+  if ($backendStarter.HasExited -and $backendStarter.ExitCode -ne 0) { throw "后端启动程序异常退出，请查看启动日志。" }
   Write-StartupStatus $Text.Ready $Text.ReadyMsg @{ backendUrl = "http://127.0.0.1:$backendPort"; platformUrl = "http://127.0.0.1:$frontPort"; mobileUrl = "http://127.0.0.1:$mobilePort" }
-  Close-OldAppBrowserWindows
-  Start-Process "http://127.0.0.1:$frontPort"
-  Start-Process "http://127.0.0.1:$mobilePort"
+  if (-not $NoBrowser) {
+    Close-OldAppBrowserWindows
+    Start-Process "http://127.0.0.1:$frontPort"
+    Start-Process "http://127.0.0.1:$mobilePort"
+  }
 } catch {
   $message = $_.Exception.Message
   Write-StartupStatus $Text.Failed $message
   $_ | Out-File -LiteralPath $logPath -Append -Encoding utf8
+  if ($NoBrowser) { throw }
   Show-StartupFailure $message
 } finally {
   if ($launchLockAcquired) {

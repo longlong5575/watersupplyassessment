@@ -1,42 +1,63 @@
 services:
   api:
     build: .
-    environment:
-      DATABASE_URL: postgresql+psycopg://assessment:assessment@postgres:5432/assessment
+    environment: &backend_environment
+      APP_ENV: ${APP_ENV:-local}
+      DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-assessment-local-password}@postgres:5432/assessment
       REDIS_URL: redis://redis:6379/0
+      STORAGE_DIR: /data/storage
       CELERY_TASK_ALWAYS_EAGER: "false"
+      SECRET_KEY: ${SECRET_KEY:-local-development-secret-change-before-production}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-Admin@123456}
+      INSPECTOR_INITIAL_PASSWORD: ${INSPECTOR_INITIAL_PASSWORD:-Inspector@123456}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://127.0.0.1:5173,http://127.0.0.1:5174}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX-^https?://(127\\.0\\.0\\.1|localhost)(:\\d+)?$}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-200}
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - app_storage:/data/storage
   worker:
     build: .
+    entrypoint: []
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
-    environment:
-      DATABASE_URL: postgresql+psycopg://assessment:assessment@postgres:5432/assessment
-      REDIS_URL: redis://redis:6379/0
-      CELERY_TASK_ALWAYS_EAGER: "false"
+    environment: *backend_environment
     depends_on:
-      - postgres
-      - redis
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - app_storage:/data/storage
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: assessment
       POSTGRES_USER: assessment
-      POSTGRES_PASSWORD: assessment
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-assessment-local-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assessment -d assessment"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
       - postgres_data:/var/lib/postgresql/data
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
 
 volumes:
   postgres_data:
   redis_data:
+  app_storage:

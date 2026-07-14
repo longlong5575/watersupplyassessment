@@ -10,6 +10,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if "score_source_mappings" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "score_source_mappings",
         sa.Column("indicator_id", sa.String(length=36), nullable=False),

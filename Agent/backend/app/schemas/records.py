@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -41,11 +41,11 @@ class PaymentDataPatch(BaseModel):
 
 
 class ReportTaskRequest(BaseModel):
-    source: str = "dashboard"
-    period: str = ""
+    source: Literal["dashboard", "mobile", "upload"] = "dashboard"
+    period: str = Field(default="", max_length=40)
     projectId: str | None = None
-    townNames: list[str] = Field(default_factory=list)
-    townIds: list[str] = Field(default_factory=list)
-    uploadIds: list[str] = Field(default_factory=list)
-    methodText: str = ""
-    outputs: list[str] = Field(default_factory=lambda: ["separate", "summary"])
+    townNames: list[str] = Field(default_factory=list, max_length=200)
+    townIds: list[str] = Field(default_factory=list, max_length=200)
+    uploadIds: list[str] = Field(default_factory=list, max_length=200)
+    methodText: str = Field(default="", max_length=5000)
+    outputs: list[Literal["separate", "summary"]] = Field(default_factory=lambda: ["separate", "summary"], min_length=1, max_length=2)

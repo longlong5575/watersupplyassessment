@@ -65,7 +65,7 @@ def summarize_assessment_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ],
         "suggestions": [],
         "evidenceRefs": [],
-        "warnings": ["该结果为确定性 fallback，不参与评分和金额计算。"],
+        "warnings": ["该结果由确定性规则生成，不参与评分和金额计算。"],
         "confidence": 0.7 if entries else 0.4,
         "source": "deterministic-fallback",
     }

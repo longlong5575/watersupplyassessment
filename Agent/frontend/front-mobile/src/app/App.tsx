@@ -1,11 +1,11 @@
-﻿import { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { useEffect } from "react";
 import {
   ChevronRight, ChevronLeft, Search, Camera, X, CheckCircle,
   AlertCircle, ChevronDown, ChevronUp, Save, Send,
   Plus, Minus, MapPin, Building2, BarChart3,
   AlertTriangle, Info, Check, Package, Smartphone,
-  Trash2,
+  Trash2, Wrench, ClipboardList, Droplets, House,
 } from "lucide-react";
 import { NETWORK_STANDARDS, TREATMENT_STANDARDS } from "./assessmentStandards";
 
@@ -47,6 +47,14 @@ async function discoverApiBaseUrl(): Promise<string> {
 const DRAFT_STORAGE_KEY = "assessment-mobile-draft-v1";
 const SUBMITTED_STORAGE_KEY = "assessment-mobile-submitted-v1";
 const AUTH_STORAGE_KEY = "assessment-mobile-auth-v1";
+function authHeaders(): HeadersInit {
+  try {
+    const auth = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null") as { token?: string } | null;
+    return auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
+  } catch {
+    return {};
+  }
+}
 const SYNC_QUEUE_STORAGE_KEY = "assessment-mobile-sync-queue-v1";
 
 // ==================== TYPES ====================
@@ -414,13 +422,21 @@ function findL2(groups: L1Group[], id: string): L2Group | undefined {
   return undefined;
 }
 
+function roundScoreValue(value: number): number {
+  return Number((value + Number.EPSILON).toFixed(2));
+}
+
+function formatScoreValue(value: number): string {
+  return roundScoreValue(value).toString();
+}
+
 function calcOptionScore(oe: OptionEntry, opt: DeductionOption): number {
   if (oe.selection === "no_deduction") return 0;
-  if (oe.selection === "custom") return oe.customScore;
-  if (oe.adjustedScore !== null) return oe.adjustedScore;
-  if (opt.type === "fixed") return opt.value! * Math.min(oe.instances, opt.maxInstances ?? 999);
-  if (opt.type === "range") return oe.rangeValue;
-  if (opt.type === "severity") return oe.severity === "severe" ? opt.value! + 5 : opt.value!;
+  if (oe.selection === "custom") return roundScoreValue(oe.customScore);
+  if (oe.adjustedScore !== null) return roundScoreValue(oe.adjustedScore);
+  if (opt.type === "fixed") return roundScoreValue(opt.value! * Math.min(oe.instances, opt.maxInstances ?? 999));
+  if (opt.type === "range") return roundScoreValue(oe.rangeValue);
+  if (opt.type === "severity") return roundScoreValue(oe.severity === "severe" ? opt.value! + 5 : opt.value!);
   return 0;
 }
 
@@ -565,10 +581,10 @@ function buildMonthlyEntry(item: L3Item, current: ItemEntry, unqualified: boolea
 }
 
 function calcItemRaw(entry: ItemEntry, item: L3Item): number {
-  return entry.options.reduce((sum, oe) => {
+  return roundScoreValue(entry.options.reduce((sum, oe) => {
     const opt = item.options.find(o => o.id === oe.optionId);
     return sum + (opt ? calcOptionScore(oe, opt) : 0);
-  }, 0);
+  }, 0));
 }
 
 type SurveyDerivedKind = "sewage_collection" | "overall_effect" | "satisfaction_org" | "satisfaction_town" | "satisfaction_public";
@@ -581,9 +597,8 @@ interface SurveyDerivedScore {
 }
 
 function getSurveyDerivedKind(item: L3Item, l2?: L2Group): SurveyDerivedKind | null {
-  const text = `${l2?.name ?? ""} ${item.name} ${item.scoringMethod ?? ""} ${item.dataSource ?? ""}`;
-  if (text.includes("问卷调查") && item.name === "污水收集") return "sewage_collection";
-  if (text.includes("问卷调查") && item.name === "整体效果") return "overall_effect";
+  if (item.name === "污水收集") return "sewage_collection";
+  if (item.name === "整体效果") return "overall_effect";
   if (l2?.name.includes("满意度") && item.name === "实施机构满意度") return "satisfaction_org";
   if (l2?.name.includes("满意度") && item.name === "镇街满意度") return "satisfaction_town";
   if (l2?.name.includes("满意度") && item.name === "公众满意度") return "satisfaction_public";
@@ -705,12 +720,13 @@ function StatusTag({ status }: { status: EntryStatus }) {
 
 function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
   const [username, setUsername] = useState("inspector");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!username.trim()) {
-      setError("请输入员工账号");
+    if (!username.trim() || !password) {
+      setError("请输入员工账号和密码");
       return;
     }
     setLoading(true);
@@ -719,14 +735,17 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim() }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
-      if (!response.ok) throw new Error("登录失败");
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(typeof detail?.detail === "string" ? detail.detail : "登录失败，请稍后重试");
+      }
       const auth = await response.json();
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
-    } catch {
-      setError("账号不存在，请检查账号是否已初始化");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
     } finally {
       setLoading(false);
     }
@@ -748,6 +767,17 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
           onChange={event => { setUsername(event.target.value); setError(""); }}
           placeholder="请输入员工账号"
           className="w-full px-3 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          autoComplete="username"
+        />
+        <label className="block text-sm font-medium text-foreground mb-2 mt-4">登录密码</label>
+        <input
+          type="password"
+          value={password}
+          onChange={event => { setPassword(event.target.value); setError(""); }}
+          onKeyDown={event => { if (event.key === "Enter") submit(); }}
+          placeholder="请输入登录密码"
+          className="w-full px-3 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          autoComplete="current-password"
         />
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
@@ -930,7 +960,7 @@ function P0City({ onBack, onNext }: { onBack: () => void; onNext: (c: CityOption
     { id: "maonan", name: "茂南项目", sub: "茂南项目绩效考核标准" },
   ]);
   useEffect(() => {
-    fetch(`${API_BASE_URL}/mobile/projects`)
+    fetch(`${API_BASE_URL}/mobile/projects`, { headers: authHeaders() })
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         if (Array.isArray(data?.items) && data.items.length) {
@@ -1059,7 +1089,7 @@ function P0Cycle({ cityId, cityName, onBack, onNext }: {
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
     setLoading(true);
     setError("");
-    fetch(`${API_BASE_URL}/mobile/assessment-cycles${params}`)
+    fetch(`${API_BASE_URL}/mobile/assessment-cycles${params}`, { headers: authHeaders() })
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         const items: Array<{ id: string; name: string; status: string }> = Array.isArray(data?.items) ? data.items : [];
@@ -1187,7 +1217,7 @@ function P1Town({ cityId, projectName, cycleName, onBack, onNext, submittedData,
   useEffect(() => {
     setSelectedId("");
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
-    fetch(`${API_BASE_URL}/mobile/towns${params}`)
+    fetch(`${API_BASE_URL}/mobile/towns${params}`, { headers: authHeaders() })
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         if (Array.isArray(data?.items)) {
@@ -1331,7 +1361,7 @@ function P2Village({ town, cityId, completedVillages, readonlyVillages, onBack, 
 
   useEffect(() => {
     const params = cityId ? `?city_id=${encodeURIComponent(cityId)}` : "";
-    fetch(`${API_BASE_URL}/mobile/towns/${encodeURIComponent(town)}/villages${params}`)
+    fetch(`${API_BASE_URL}/mobile/towns/${encodeURIComponent(town)}/villages${params}`, { headers: authHeaders() })
       .then(response => response.ok ? response.json() : null)
       .then(data => {
         if (Array.isArray(data?.items)) setVillages(data.items);
@@ -1411,17 +1441,17 @@ function standardTypeForPrimary(type: PrimaryFacilityType): "treatment" | "netwo
   return type === "town_network" ? "network" : "treatment";
 }
 
-const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; icon: string }> = {
-  treatment: { label: "污水处理设施", sub: "含处理设备及附属构筑物", icon: "🏭" },
-  network:   { label: "纳厂/管网设施", sub: "接入已建处理设施",       icon: "🔧" },
-  survey:    { label: "调查问卷",      sub: "多方满意度问卷调查",      icon: "📋" },
-  water_quality: { label: "水质抽检情况", sub: "填写出水抽检指标及结论", icon: "💧" },
+const FACILITY_TYPE_INFO: Record<FacilityType, { label: string; sub: string; icon: typeof Building2 }> = {
+  treatment: { label: "污水处理设施", sub: "含处理设备及附属构筑物", icon: Building2 },
+  network:   { label: "纳厂/管网设施", sub: "接入已建处理设施",       icon: Wrench },
+  survey:    { label: "调查问卷",      sub: "多方满意度问卷调查",      icon: ClipboardList },
+  water_quality: { label: "水质抽检情况", sub: "填写出水抽检指标及结论", icon: Droplets },
 };
 
-const PRIMARY_FACILITY_TYPE_INFO: Record<PrimaryFacilityType, { label: string; sub: string; icon: string }> = {
-  town_plant: { label: "镇街污水厂", sub: "镇街污水处理厂考核", icon: "🏭" },
-  town_network: { label: "镇街污水收集管网", sub: "镇街收集管网考核", icon: "🔧" },
-  rural_treatment: { label: "农村污水处理设施", sub: "进入后继续选择项目点", icon: "🏘️" },
+const PRIMARY_FACILITY_TYPE_INFO: Record<PrimaryFacilityType, { label: string; sub: string; icon: typeof Building2 }> = {
+  town_plant: { label: "镇街污水厂", sub: "镇街污水处理厂考核", icon: Building2 },
+  town_network: { label: "镇街污水收集管网", sub: "镇街污水收集管网考核", icon: Wrench },
+  rural_treatment: { label: "农村污水处理设施", sub: "农村污水处理设施考核", icon: House },
 };
 
 function P2bFacilityChoice({ town, allowedTargets, completedTypes, readonlyTypes, onBack, onSelect }: {
@@ -1448,6 +1478,7 @@ function P2bFacilityChoice({ town, allowedTargets, completedTypes, readonlyTypes
           const completed = completedTypes.has(type);
           const readonlyLabel = readonlyTypes.get(type);
           const readOnly = !!readonlyLabel;
+          const TypeIcon = info.icon;
           return (
             <button
               key={type}
@@ -1456,13 +1487,14 @@ function P2bFacilityChoice({ town, allowedTargets, completedTypes, readonlyTypes
               className={`w-full text-left rounded-xl border-2 p-5 transition-colors active:bg-gray-50 ${completed ? "border-green-200 bg-green-50/60" : "border-border bg-white"}`}
             >
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center text-2xl shrink-0">{info.icon}</div>
+                <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center shrink-0">
+                  <TypeIcon className="w-6 h-6 text-primary" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-base font-semibold text-foreground">{info.label}</div>
-                  <p className="text-xs text-muted-foreground mt-1">{info.sub}</p>
-                  <p className={`text-xs font-medium mt-2 ${completed ? "text-green-700" : "text-primary"}`}>
-                    {readonlyLabel || (completed ? "修改" : type === "rural_treatment" ? "下一步选择村" : "进入镇街填报")}
-                  </p>
+                  {(readonlyLabel || completed) && (
+                    <p className="text-xs font-medium mt-1 text-green-700">{readonlyLabel || "修改"}</p>
+                  )}
                 </div>
                 {completed ? <CheckCircle className="w-5 h-5 text-green-600 shrink-0" /> : <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />}
               </div>
@@ -1516,6 +1548,7 @@ function P2bFacilityType({ town, village, primaryFacilityType, hasWaterQualityIt
         {availableTypes.map((t, i) => {
           const info = FACILITY_TYPE_INFO[t];
           const done = !!typeProgress[t];
+          const TypeIcon = info.icon;
           return (
             <button
               key={t}
@@ -1524,7 +1557,7 @@ function P2bFacilityType({ town, village, primaryFacilityType, hasWaterQualityIt
             >
               <div className="flex items-center gap-3">
                 <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${done ? "bg-green-100" : "bg-muted"}`}>
-                  {done ? <CheckCircle className="w-5 h-5 text-green-600" /> : info.icon}
+                  {done ? <CheckCircle className="w-5 h-5 text-green-600" /> : <TypeIcon className="w-5 h-5 text-primary" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
@@ -1814,6 +1847,7 @@ function PSurveyList({ town, village, surveyEntries, onBack, onOpen, onSummary }
                   <button
                     key={res}
                     onClick={() => onOpen(cat, res)}
+                    aria-label={`${CATEGORY_LABEL[cat]} ${RESPONDENT_LABEL[res]} ${done ? `已完成 ${score}分` : "待填写"}`}
                     className={`w-full px-4 py-3.5 flex items-center justify-between text-left active:bg-gray-50 ${i < CATEGORY_RESPONDENTS[cat].length - 1 ? "border-b border-border" : ""}`}
                   >
                     <div className="flex items-center gap-3">
@@ -2202,11 +2236,11 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
             <div className="text-[10px] text-primary-foreground/55">总分</div>
           </div>
           <div className="bg-red-500/20 rounded-lg p-2 text-center">
-            <div className="text-base font-bold text-red-200">-{deducted}</div>
+            <div className="text-base font-bold text-red-200">-{formatScoreValue(deducted)}</div>
             <div className="text-[10px] text-red-200/70">已扣分</div>
           </div>
           <div className="bg-green-500/20 rounded-lg p-2 text-center">
-            <div className="text-base font-bold text-green-200">{current}</div>
+            <div className="text-base font-bold text-green-200">{formatScoreValue(current)}</div>
             <div className="text-[10px] text-green-200/70">当前得分</div>
           </div>
         </div>
@@ -2231,7 +2265,7 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
             <div key={l1.id} className="mt-4 mx-4">
               <div className={`px-4 py-2.5 rounded-t-lg flex items-center justify-between ${l1BgColors[li] ?? "bg-gray-800"}`}>
                 <span className="text-sm font-semibold text-white">{l1.icon} {l1.name}</span>
-                <span className="text-xs text-white/65">{l1Total - l1Ded}/{l1Total}分</span>
+                <span className="text-xs text-white/65">{formatScoreValue(l1Total - l1Ded)}/{l1Total}分</span>
               </div>
 
               {l1.children.map(l2 => (
@@ -2259,12 +2293,12 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
                             ) : (
                               <StatusTag status={status} />
                             )}
-                            {ded > 0 && <span className="text-xs text-red-600 font-medium">-{ded}分</span>}
+                            {ded > 0 && <span className="text-xs text-red-600 font-medium">-{formatScoreValue(ded)}分</span>}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right">
-                            <div className="text-sm font-semibold text-foreground">{status === "pending" ? "—" : item.maxScore - ded}</div>
+                            <div className="text-sm font-semibold text-foreground">{status === "pending" ? "—" : formatScoreValue(item.maxScore - ded)}</div>
                             <div className="text-xs text-muted-foreground">/{item.maxScore}</div>
                           </div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -2324,8 +2358,8 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
     const opt = item.options[i];
     return sum + (opt ? calcOptionScore(oe, opt) : 0);
   }, 0);
-  const capped = Math.min(rawTotal, item.maxScore);
-  const current = derived ? derived.currentScore : item.maxScore - capped;
+  const capped = roundScoreValue(Math.min(rawTotal, item.maxScore));
+  const current = roundScoreValue(derived ? derived.currentScore : item.maxScore - capped);
   const overLimit = rawTotal > item.maxScore;
   const knowledgeTips = knowledgeGuidanceForItem(item);
   const monthlyRule = isMonthlyUnqualifiedRuleItem(item);
@@ -2387,11 +2421,11 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
             <div className="text-[10px] text-primary-foreground/55">指标分值</div>
           </div>
           <div className={`rounded-lg p-2 text-center ${capped > 0 ? "bg-red-500/25" : "bg-white/10"}`}>
-            <div className={`text-base font-bold ${capped > 0 ? "text-red-200" : "text-primary-foreground"}`}>-{capped}</div>
+            <div className={`text-base font-bold ${capped > 0 ? "text-red-200" : "text-primary-foreground"}`}>-{formatScoreValue(capped)}</div>
             <div className={`text-[10px] ${capped > 0 ? "text-red-200/65" : "text-primary-foreground/55"}`}>已扣分</div>
           </div>
           <div className={`rounded-lg p-2 text-center ${capped > 0 ? "bg-amber-400/20" : "bg-green-500/20"}`}>
-            <div className={`text-base font-bold ${capped > 0 ? "text-amber-200" : "text-green-200"}`}>{current}</div>
+            <div className={`text-base font-bold ${capped > 0 ? "text-amber-200" : "text-green-200"}`}>{formatScoreValue(current)}</div>
             <div className={`text-[10px] ${capped > 0 ? "text-amber-200/65" : "text-green-200/65"}`}>当前得分</div>
           </div>
         </div>
@@ -2537,8 +2571,8 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
           const maxInstances = getOptionMaxInstances(opt);
           const instances = clampOptionInstances(oe.instances, opt);
           const fixedBaseScore = opt.value ?? 0;
-          const countScore = fixedBaseScore * instances;
-          const countScoreLimit = fixedBaseScore * maxInstances;
+          const countScore = roundScoreValue(fixedBaseScore * instances);
+          const countScoreLimit = roundScoreValue(fixedBaseScore * maxInstances);
           const quickCounts = Array.from(new Set([1, 2, 3, 5, 10, maxInstances].filter(v => v <= maxInstances)));
 
           return (
@@ -2554,13 +2588,13 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                       <span className="text-xs text-green-600 font-medium">✓ 无扣分</span>
                     )}
                     {oe.selection === "standard" && score > 0 && (
-                      <span className="text-xs text-red-600 font-medium">扣 {score} 分</span>
+                      <span className="text-xs text-red-600 font-medium">扣 {formatScoreValue(score)} 分</span>
                     )}
                     {oe.selection === "standard" && score === 0 && (
                       <span className="text-xs text-muted-foreground">请选择扣分值</span>
                     )}
                     {oe.selection === "custom" && (
-                      <span className="text-xs text-amber-600 font-medium">其他：扣 {oe.customScore} 分</span>
+                      <span className="text-xs text-amber-600 font-medium">其他：扣 {formatScoreValue(oe.customScore)} 分</span>
                     )}
                     {oe.photos.length > 0 && (
                       <span className="text-[11px] text-blue-500">📷 {oe.photos.length}张</span>
@@ -2653,11 +2687,11 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-xs text-slate-500">自动计算</span>
                               <span className="text-sm font-bold text-primary">
-                                {fixedBaseScore} × {instances}{unit} = {countScore} 分
+                                {formatScoreValue(fixedBaseScore)} × {instances}{unit} = {formatScoreValue(countScore)} 分
                               </span>
                             </div>
                             {countScoreLimit > countScore && (
-                              <p className="text-[11px] text-slate-500">本扣分原因最多可扣 {countScoreLimit} 分。</p>
+                              <p className="text-[11px] text-slate-500">本扣分原因最多可扣 {formatScoreValue(countScoreLimit)} 分。</p>
                             )}
                             {rawTotal > item.maxScore && (
                               <p className="text-[11px] text-red-600">本指标扣分已超过满分，最终按 {item.maxScore} 分封顶。</p>
@@ -2924,10 +2958,20 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? derived.completed : entries[i.id]?.done;
   }).length;
-  const pendingCount = allItems.filter(i => {
+  const incompleteCount = allItems.filter(i => {
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? !derived.completed : !entries[i.id]?.done;
   }).length;
+  const missingPhotoCount = allItems.filter(item => {
+    if (calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries)) return false;
+    const entry = entries[item.id];
+    return entry?.options.some(optionEntry => {
+      if (optionEntry.selection !== "standard" || optionEntry.photos.length > 0) return false;
+      const option = item.options.find(candidate => candidate.id === optionEntry.optionId);
+      return option ? calcOptionScore(optionEntry, option) > 0 : false;
+    });
+  }).length;
+  const pendingCount = incompleteCount + missingPhotoCount;
   const hasDeductCount = allItems.filter(i => calcEntryDeduction(entries, groups, i.id, surveyEntries) > 0).length;
   const totalPhotos = allItems.reduce((s, i) => {
     const e = entries[i.id];
@@ -3084,11 +3128,11 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                   <div className="text-xs text-muted-foreground mt-0.5">总分</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-red-600">-{deducted}</div>
+                  <div className="text-3xl font-bold text-red-600">-{formatScoreValue(deducted)}</div>
                   <div className="text-xs text-muted-foreground mt-0.5">已扣分</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-green-600">{current}</div>
+                  <div className="text-3xl font-bold text-green-600">{formatScoreValue(current)}</div>
                   <div className="text-xs text-muted-foreground mt-0.5">当前得分</div>
                 </div>
               </div>
@@ -3123,7 +3167,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                   <div key={l1.id} className="overflow-hidden rounded-xl border border-border">
                     <div className={`px-4 py-2.5 flex items-center justify-between ${ac.hdr}`}>
                       <span className="text-sm font-semibold text-white">{l1.icon} {l1.name}</span>
-                      <span className="text-xs text-white/65">{l1Total - l1Ded}/{l1Total}分</span>
+                      <span className="text-xs text-white/65">{formatScoreValue(l1Total - l1Ded)}/{l1Total}分</span>
                     </div>
                     <div className="bg-white divide-y divide-border">
                       {l1.children.flatMap(l2 => l2.items.map(item => ({ item, l2 }))).map(({ item, l2 }) => {
@@ -3435,7 +3479,8 @@ function PTownComplete({ town, completedVillages, onBack, onSubmit, submitting, 
 
 function formatSubmittedSyncTime(value?: string): string {
   if (!value) return "时间未记录";
-  const date = new Date(value);
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "时间未记录";
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -3675,6 +3720,30 @@ function AssessmentApp() {
   const [isTownSubmitting, setIsTownSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [standardVersionName, setStandardVersionName] = useState("");
+  const [autoLoginChecked, setAutoLoginChecked] = useState(false);
+
+  useEffect(() => {
+    if (auth?.token) {
+      setAutoLoginChecked(true);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/auth/local-session`, { method: "POST" })
+      .then(async response => {
+        if (!response.ok) return null;
+        return response.json() as Promise<AuthState>;
+      })
+      .then(nextAuth => {
+        if (cancelled || !nextAuth?.token) return;
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+        setAuth(nextAuth);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setAutoLoginChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, [auth?.token]);
 
   useEffect(() => {
     if (!auth?.token) return;
@@ -3699,7 +3768,7 @@ function AssessmentApp() {
         const params = new URLSearchParams({ facility_type: primaryFacilityType });
         if (cityId) params.set("city_id", cityId);
         if (cycleId) params.set("cycle_id", cycleId);
-        const response = await fetch(`${API_BASE_URL}/mobile/indicator-standards?${params.toString()}`);
+        const response = await fetch(`${API_BASE_URL}/mobile/indicator-standards?${params.toString()}`, { headers: authHeaders() });
         if (response.ok) {
           const data = await response.json();
           if (cancelled) return;
@@ -3866,10 +3935,22 @@ function AssessmentApp() {
 
   // Called from the hub after the selected facility, survey, and water-quality records are completed.
   const handleVillageSubmit = () => {
-    const combinedScores = Object.values(scoreByType);
+    const scoringType = standardTypeForPrimary(primaryFacilityType);
+    const refreshedMax = totalMaxScore(standardGroups);
+    const refreshedDeducted = roundScoreValue(getAllItems(standardGroups).reduce(
+      (sum, item) => sum + calcEntryDeduction(entries, standardGroups, item.id, surveyEntries),
+      0,
+    ));
+    const refreshedScore: TypeScore = {
+      maxScore: refreshedMax,
+      currentScore: roundScoreValue(refreshedMax - refreshedDeducted),
+      deductedScore: refreshedDeducted,
+    };
+    const refreshedScores = { ...scoreByType, [scoringType]: refreshedScore };
+    const combinedScores = Object.values(refreshedScores);
     const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
-    const combinedCurrent = combinedScores.reduce((s, v) => s + v.currentScore, 0);
-    const combinedDeducted = combinedScores.reduce((s, v) => s + v.deductedScore, 0);
+    const combinedCurrent = roundScoreValue(combinedScores.reduce((s, v) => s + v.currentScore, 0));
+    const combinedDeducted = roundScoreValue(combinedScores.reduce((s, v) => s + v.deductedScore, 0));
     const record: VillageRecord = {
       village,
       facilityType: primaryFacilityType,
@@ -3883,6 +3964,7 @@ function AssessmentApp() {
       surveyEntries,
       waterQuality,
     };
+    setScoreByType(refreshedScores);
     setCompletedVillages(prev => [...prev.filter(r => r.village !== village || r.primaryFacilityType !== primaryFacilityType), record]);
     setPage("success");
   };
@@ -3907,28 +3989,28 @@ function AssessmentApp() {
   });
 
   const markPackageSynced = (pkg: TownPackage) => {
+    const syncedAt = new Date().toISOString();
     setSubmittedData(prev => ({
       ...prev,
       [pkg.town]: mergeVillageRecords(prev[pkg.town] ?? [], pkg.villages),
     }));
-    setSyncQueue(prev => prev.map(item => item.pkg.exportedAt === pkg.exportedAt
-      ? { ...item, syncStatus: "synced", syncedAt: new Date().toISOString(), lastError: undefined }
-      : item));
-  };
-
-  const stagePackageForSync = (pkg: TownPackage) => {
     setSyncQueue(prev => {
-      const next: SyncQueueItem = {
-        localId: makeLocalId(),
-        town: pkg.town,
-        pkg,
-        syncStatus: "pending_sync",
-        createdAt: new Date().toISOString(),
-      };
-      return [...prev.filter(item => item.pkg.exportedAt !== pkg.exportedAt), next];
+      const existing = prev.find(item => item.pkg.exportedAt === pkg.exportedAt);
+      if (!existing) {
+        return [...prev, {
+          localId: makeLocalId(),
+          town: pkg.town,
+          pkg,
+          syncStatus: "synced",
+          createdAt: syncedAt,
+          syncedAt,
+        }];
+      }
+      return prev.map(item => item.localId === existing.localId
+        ? { ...item, syncStatus: "synced", syncedAt, lastError: undefined }
+        : item);
     });
   };
-
   const queuePackage = (pkg: TownPackage, error: unknown) => {
     const message = error instanceof Error ? error.message : "同步失败";
     setSyncQueue(prev => {
@@ -4032,7 +4114,10 @@ function AssessmentApp() {
       if (response.status === 405) {
         throw new Error("清空失败：正在运行的后端版本尚未更新。解决方法：先点击“停止服务”，再重新点击“点我启动”，然后重试。");
       }
-      if (response.status === 409 || response.status === 422) {
+      if (response.status === 409) {
+        throw new Error(`清空失败：${backendReason || "当前数据已复核或锁定"}。解决方法：请联系管理员将相关记录退回后再清空。`);
+      }
+      if (response.status === 422) {
         throw new Error(`清空失败：${backendReason || "当前项目与考核季度不匹配"}。解决方法：返回上一级，重新选择正确的项目和季度。`);
       }
       if (response.status >= 500) {
@@ -4222,7 +4307,6 @@ function AssessmentApp() {
             onBack={() => setPage(primaryFacilityType === "rural_treatment" ? "village" : "facility_choice")}
             onEnter={t => {
               setFtype(t);
-              if (t === standardTypeForPrimary(primaryFacilityType) && !typeProgress[t]) setEntries({});
               setPage(t === "survey" ? "survey_list" : t === "water_quality" ? "water_quality" : "criteria");
             }}
             onSubmitVillage={handleVillageSubmit}
@@ -4286,7 +4370,6 @@ function AssessmentApp() {
               const pkg = buildPackage();
               try {
                 if (!auth?.token) throw new Error("登录状态已失效，请重新登录");
-                stagePackageForSync(pkg);
                 await submitTownPackageToBackend(pkg, auth.token);
                 markPackageSynced(pkg);
                 setTown(""); setVillage("");
@@ -4407,7 +4490,11 @@ function AssessmentApp() {
             </svg>
           </div>
         </div>
-        <div className="absolute inset-0">{auth ? renderFieldPage() : <MobileLoginPage onLogin={setAuth} />}</div>
+        <div className="absolute inset-0">
+          {auth ? renderFieldPage() : autoLoginChecked ? <MobileLoginPage onLogin={setAuth} /> : (
+            <div className="h-full flex items-center justify-center bg-background text-sm text-muted-foreground">正在进入系统...</div>
+          )}
+        </div>
         {showToast && (
           <div className="absolute bottom-16 inset-x-4 z-50 flex items-center gap-3 bg-[#1a3a52] text-white px-4 py-3.5 rounded-xl shadow-lg">
             <CheckCircle className="w-5 h-5 text-green-400 shrink-0" />

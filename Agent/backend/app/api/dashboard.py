@@ -3,7 +3,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_session
-from app.models import AssessmentCycle, AssessmentRecord, AssessmentScore, Attachment, City, SurveyRecord, Town, Village, WaterQualityRecord
+from app.core.security import admin_user
+from app.models import AssessmentCycle, AssessmentRecord, AssessmentScore, Attachment, City, SurveyRecord, Town, User, Village, WaterQualityRecord
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -28,6 +29,7 @@ def towns(
     year: int | None = None,
     quarter: int | None = None,
     session: Session = Depends(get_session),
+    _: User = Depends(admin_user),
 ):
     query = select(Town).where(Town.is_active.is_(True)).order_by(Town.sort_order, Town.name)
     if city_id:
@@ -55,10 +57,33 @@ def towns(
         record_ids = [record.id for record in records]
         completed_count = sum(1 for record in records if record.status in {"submitted", "reviewed", "locked"})
         village_count = session.scalar(select(func.count(Village.id)).where(Village.town_id == town.id, Village.is_active.is_(True))) or 0
-        project_point_count = village_count or len(town.assessment_targets or []) or 1
+        assessment_targets = set(town.assessment_targets or [])
+        project_point_count = (
+            (village_count if "rural_treatment" in assessment_targets else 0)
+            + sum(1 for target in ("town_plant", "town_network") if target in assessment_targets)
+        )
+        project_point_count = project_point_count or village_count or len(assessment_targets) or 1
+        treatment_point_count = (
+            (village_count if "rural_treatment" in assessment_targets else 0)
+            + (1 if "town_plant" in assessment_targets else 0)
+        )
+        network_point_count = 1 if "town_network" in assessment_targets else 0
+        completed_records = [record for record in records if record.status in {"submitted", "reviewed", "locked"}]
+        treatment_completed_count = 0
+        network_completed_count = 0
+        for completed_record in completed_records:
+            raw = completed_record.raw_payload if isinstance(completed_record.raw_payload, dict) else {}
+            primary_type = raw.get("primaryFacilityType") or raw.get("primary_facility_type")
+            standard_type = raw.get("standardFacilityType") or raw.get("standard_facility_type")
+            if primary_type == "town_network" or standard_type == "network":
+                network_completed_count += 1
+            else:
+                treatment_completed_count += 1
         deduction_total = 0
         survey_count = 0
+        survey_project_point_count = 0
         water_quality_count = 0
+        water_quality_project_point_count = 0
         attachment_count = 0
         pending_review_count = 0
         reviewed_count = 0
@@ -69,7 +94,13 @@ def towns(
         if record_ids:
             deduction_total = session.scalar(select(func.coalesce(func.sum(AssessmentScore.deduction), 0)).where(AssessmentScore.record_id.in_(record_ids))) or 0
             survey_count = session.scalar(select(func.count(SurveyRecord.id)).where(SurveyRecord.record_id.in_(record_ids))) or 0
+            survey_project_point_count = session.scalar(
+                select(func.count(func.distinct(SurveyRecord.record_id))).where(SurveyRecord.record_id.in_(record_ids))
+            ) or 0
             water_quality_count = session.scalar(select(func.count(WaterQualityRecord.id)).where(WaterQualityRecord.record_id.in_(record_ids))) or 0
+            water_quality_project_point_count = session.scalar(
+                select(func.count(func.distinct(WaterQualityRecord.record_id))).where(WaterQualityRecord.record_id.in_(record_ids))
+            ) or 0
             attachment_count = session.scalar(select(func.count(Attachment.id)).where(Attachment.record_id.in_(record_ids))) or 0
             attachments = list(session.scalars(select(Attachment).where(Attachment.record_id.in_(record_ids))).all())
             attachments_by_record: dict[str, list[Attachment]] = {}
@@ -109,10 +140,16 @@ def towns(
                 "recordCount": len(record_ids),
                 "completedCount": completed_count,
                 "villageCount": max(project_point_count, len(record_ids)),
+                "treatmentCompletedCount": treatment_completed_count,
+                "treatmentPointCount": treatment_point_count,
+                "networkCompletedCount": network_completed_count,
+                "networkPointCount": network_point_count,
                 "status": status,
                 "deductionTotal": float(deduction_total),
                 "surveyCount": survey_count,
+                "surveyProjectPointCount": survey_project_point_count,
                 "waterQualityCount": water_quality_count,
+                "waterQualityProjectPointCount": water_quality_project_point_count,
                 "attachmentCount": attachment_count,
                 "pendingReviewCount": pending_review_count,
                 "reviewedCount": reviewed_count,
@@ -140,14 +177,14 @@ def towns(
 
 
 @router.get("/overview")
-def overview(session: Session = Depends(get_session)):
+def overview(session: Session = Depends(get_session), _: User = Depends(admin_user)):
     total = session.scalar(select(func.count(AssessmentRecord.id))) or 0
     submitted = session.scalar(select(func.count(AssessmentRecord.id)).where(AssessmentRecord.status == "submitted")) or 0
     return {"totalRecords": total, "submittedRecords": submitted, "completionRate": round(submitted / total * 100, 1) if total else 0}
 
 
 @router.get("/issues")
-def issues(session: Session = Depends(get_session)):
+def issues(session: Session = Depends(get_session), _: User = Depends(admin_user)):
     items = []
     scores = session.execute(
         select(AssessmentScore, AssessmentRecord)
@@ -160,7 +197,7 @@ def issues(session: Session = Depends(get_session)):
 
 
 @router.get("/deduction-ranking")
-def deduction_ranking(session: Session = Depends(get_session)):
+def deduction_ranking(session: Session = Depends(get_session), _: User = Depends(admin_user)):
     totals: dict[str, float] = {}
     rows = session.execute(select(Town.name, func.coalesce(func.sum(AssessmentScore.deduction), 0)).join(AssessmentRecord, AssessmentRecord.town_id == Town.id).join(AssessmentScore, AssessmentScore.record_id == AssessmentRecord.id).group_by(Town.name)).all()
     for town, value in rows:
@@ -169,7 +206,7 @@ def deduction_ranking(session: Session = Depends(get_session)):
 
 
 @router.get("/villages")
-def villages(town_id: str | None = None, session: Session = Depends(get_session)):
+def villages(town_id: str | None = None, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     query = select(Village).where(Village.is_active.is_(True))
     if town_id:
         query = query.where(Village.town_id == town_id)

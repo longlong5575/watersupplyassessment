@@ -43,7 +43,7 @@ def resolve_city(session: Session, raw: dict[str, Any], town: Town | None = None
     if city is None:
         city = session.scalar(select(City).order_by(City.created_at))
     if city is None:
-        raise ValueError("A valid city is required")
+        raise ValueError("请选择有效项目")
     return city
 
 
@@ -64,7 +64,7 @@ def resolve_cycle(session: Session, raw: dict[str, Any], city_id: str) -> Assess
     if cycle is None and not cycle_name:
         cycle = session.scalar(select(AssessmentCycle).where(AssessmentCycle.city_id == city_id, AssessmentCycle.status == "active"))
     if cycle is None:
-        raise ValueError("A valid assessment cycle is required")
+        raise ValueError("请选择有效考核周期")
     return cycle
 
 
@@ -84,9 +84,9 @@ def resolve_town(session: Session, raw: dict[str, Any]) -> Town:
             statement = statement.where(Town.city_id == effective_city_id)
         town = session.scalar(statement)
     if town is None or not town.is_active:
-        raise ValueError("A valid town is required")
+        raise ValueError("请选择有效镇街")
     if effective_city_id and town.city_id != effective_city_id:
-        raise ValueError("Town does not belong to the selected project")
+        raise ValueError("所选镇街不属于当前项目")
     return town
 
 
@@ -97,7 +97,7 @@ def resolve_village(session: Session, raw: dict[str, Any], town_id: str) -> Vill
     if village is None and village_name:
         village = session.scalar(select(Village).where(Village.town_id == town_id, Village.name == village_name))
     if village is not None and (village.town_id != town_id or not village.is_active):
-        raise ValueError("Village does not belong to the selected town")
+        raise ValueError("所选项目点不属于当前镇街")
     return village
 
 
@@ -139,7 +139,7 @@ def split_town_package(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return records or [raw]
 
 
-def create_assessment_record(session: Session, raw: dict[str, Any]) -> AssessmentRecord:
+def create_assessment_record(session: Session, raw: dict[str, Any], owner_user_id: str | None = None) -> AssessmentRecord:
     town = resolve_town(session, raw)
     city = resolve_city(session, raw, town)
     cycle = resolve_cycle(session, raw, city.id)
@@ -154,7 +154,7 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
         raise ValueError("镇污水厂和镇污水收集管网考核不能绑定村级项目点")
     if version is None:
         raise ValueError("需要先发布对应评分标准版本")
-    record = find_existing_record(session, raw, city.id, cycle.id, town.id, village.id if village else None, version.id if version else None)
+    record = find_existing_record(session, raw, city.id, cycle.id, town.id, village.id if village else None, version.id if version else None, owner_user_id)
     if record is not None and record.status == "locked":
         raise ValueError("考核记录已锁定，不能修改")
     requested_status = raw.get("status")
@@ -162,6 +162,7 @@ def create_assessment_record(session: Session, raw: dict[str, Any]) -> Assessmen
     if record is None:
         record = AssessmentRecord(
             city_id=city.id,
+            owner_user_id=owner_user_id,
             cycle_id=cycle.id,
             town_id=town.id,
             village_id=village.id if village else None,
@@ -197,6 +198,7 @@ def find_existing_record(
     town_id: str,
     village_id: str | None,
     version_id: str | None,
+    owner_user_id: str | None = None,
 ) -> AssessmentRecord | None:
     statement = select(AssessmentRecord).where(
         AssessmentRecord.city_id == city_id,
@@ -204,6 +206,8 @@ def find_existing_record(
         AssessmentRecord.town_id == town_id,
         AssessmentRecord.village_id == village_id,
     )
+    if owner_user_id is not None:
+        statement = statement.where(AssessmentRecord.owner_user_id == owner_user_id)
     facility_type = _raw_facility_type(raw)
     for record in session.scalars(statement).all():
         if _raw_facility_type(record.raw_payload or {}) == facility_type:
@@ -493,7 +497,7 @@ def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecor
     if record.status == "locked":
         raise ValueError("考核记录已锁定，不能修改")
     if record.status == "reviewed":
-        raise ValueError("Reviewed records must be returned before resubmission")
+        raise ValueError("已复核记录必须先退回，才能重新提交")
     facility_type = _raw_facility_type(record.raw_payload or {})
     expected_ids = set(session.scalars(
         select(Indicator.id).where(
@@ -508,11 +512,16 @@ def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecor
         for key, entry in _entry_items((record.raw_payload or {}).get("entries", {}))
         if entry.get("done") is True
     }
+    completed_ids.update(
+        score.indicator_id
+        for score in record.scores
+        if score.source and score.source != "manual"
+    )
     missing_ids = expected_ids - completed_ids
     if missing_ids:
         raise ValueError(f"还有 {len(missing_ids)} 个评分项未完成检查")
     if expected_ids and {score.indicator_id for score in record.scores} != expected_ids:
-        raise ValueError("Assessment score details are incomplete")
+        raise ValueError("考核评分明细不完整")
     record.status = "submitted"
     record.submitted_at = datetime.now(timezone.utc)
     session.flush()

@@ -1,4 +1,4 @@
-param([switch]$Silent)
+﻿param([switch]$Silent)
 
 $ErrorActionPreference = "Stop"
 
@@ -41,7 +41,7 @@ function Show-Message([string]$Message, [int]$Icon = 64) {
 
 try {
   if (Test-Path -LiteralPath $logDir) {
-    foreach ($name in @("backend-server.pid", "backend-launcher.pid", "front-server.pid", "front-launcher.pid", "front-mobile-server.pid", "front-mobile-launcher.pid")) {
+    foreach ($name in @("backend-server.pid", "backend-launcher.pid", "front-server.pid", "front-launcher.pid", "front-mobile-server.pid", "front-mobile-launcher.pid", "admin-account-server.pid")) {
       Stop-FromPidFile (Join-Path $logDir $name)
     }
   }

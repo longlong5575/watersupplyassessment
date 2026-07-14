@@ -65,6 +65,18 @@ DEDUCTION_OPTION_COLUMNS = {
     "meta": "JSON DEFAULT '{}'",
 }
 
+ASSESSMENT_RECORD_COLUMNS = {
+    "owner_user_id": "VARCHAR(36)",
+}
+USER_COLUMNS = {
+    "password_hash": "TEXT",
+    "failed_login_attempts": "INTEGER DEFAULT 0",
+    "locked_until": "DATETIME",
+    "last_login_at": "DATETIME",
+    "password_changed_at": "DATETIME",
+    "token_version": "INTEGER DEFAULT 0",
+}
+
 
 def _ensure_columns(table: str, columns: dict[str, str]) -> None:
     with engine.begin() as connection:
@@ -88,4 +100,6 @@ def ensure_local_schema() -> None:
     _ensure_columns("towns", TOWN_COLUMNS)
     _ensure_columns("villages", VILLAGE_COLUMNS)
     _ensure_columns("deduction_options", DEDUCTION_OPTION_COLUMNS)
+    _ensure_columns("users", USER_COLUMNS)
+    _ensure_columns("assessment_records", ASSESSMENT_RECORD_COLUMNS)
     _ensure_table("agent_runs", AGENT_RUN_COLUMNS)

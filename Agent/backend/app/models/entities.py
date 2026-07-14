@@ -28,6 +28,12 @@ class User(IdMixin, TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120))
     role: Mapped[str] = mapped_column(String(30), default="inspector")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class City(IdMixin, TimestampMixin, Base):
@@ -112,6 +118,7 @@ class DeductionOption(IdMixin, TimestampMixin, Base):
 class AssessmentRecord(IdMixin, TimestampMixin, Base):
     __tablename__ = "assessment_records"
     city_id: Mapped[str] = mapped_column(ForeignKey("cities.id"), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     cycle_id: Mapped[str] = mapped_column(ForeignKey("assessment_cycles.id"), index=True)
     town_id: Mapped[str] = mapped_column(ForeignKey("towns.id"), index=True)
     village_id: Mapped[str | None] = mapped_column(ForeignKey("villages.id"), nullable=True)

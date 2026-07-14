@@ -106,7 +106,7 @@ def serialize(record: AssessmentRecord, session: Session) -> dict[str, Any]:
 
 
 @router.get("/api/records")
-def list_records(status: str | None = None, town: str | None = None, risk: str | None = None, session: Session = Depends(get_session)):
+def list_records(status: str | None = None, town: str | None = None, risk: str | None = None, session: Session = Depends(get_session), user=Depends(admin_user)):
     query = select(AssessmentRecord)
     if status: query = query.where(AssessmentRecord.status == status)
     items = session.scalars(query.order_by(AssessmentRecord.updated_at.desc())).all()
@@ -125,7 +125,7 @@ def list_records(status: str | None = None, town: str | None = None, risk: str |
 
 
 @router.get("/api/records/{record_id}")
-def get_record(record_id: str, session: Session = Depends(get_session)):
+def get_record(record_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     record = session.get(AssessmentRecord, record_id)
     if record is None: raise HTTPException(status_code=404, detail="未找到考核记录")
     data = serialize(record, session)

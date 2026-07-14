@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent.parent if ROOT.parent.name.lower() == "watersupplyassessment" else ROOT.parent
 RUN_SCRIPTS_NAME = "".join(chr(c) for c in [0x8fd0, 0x884c, 0x811a, 0x672c])
 RUNTIME = WORKSPACE / RUN_SCRIPTS_NAME / "watersupply-agent-runtime"
-RESULTS = RUNTIME / "test-results" / "live-three-groups"
+RESULTS = RUNTIME / "test-results" / "live-full-acceptance"
 DB_PATH = RUNTIME / "storage" / "assessment.db"
 
 os.environ["DATABASE_URL"] = f"sqlite:///{DB_PATH.as_posix()}"
@@ -58,6 +58,30 @@ def prepare_cycles() -> dict[str, str]:
             cycle_ids[city.name] = cycle.id
         session.commit()
     return cycle_ids
+
+
+def cleanup_live_data(cycle_ids: dict[str, str]) -> None:
+    with SessionLocal() as session:
+        project_ids = {
+            city.name: city.id
+            for city in session.scalars(select(City).where(City.name.in_(cycle_ids))).all()
+        }
+    try:
+        with httpx.Client(base_url=BASE_URL, timeout=120) as client:
+            login = client.post("/api/auth/login", json={"username": "admin", "password": "Admin@123456"})
+            if login.status_code >= 300:
+                return
+            headers = {"Authorization": f"Bearer {login.json()['token']}"}
+            for project_name, cycle_id in cycle_ids.items():
+                project_id = project_ids.get(project_name)
+                if project_id:
+                    client.delete(
+                        "/api/mobile/assessment-records",
+                        headers=headers,
+                        params={"city_id": project_id, "cycle_id": cycle_id, "period": PERIOD},
+                    )
+    except httpx.HTTPError:
+        pass
 
 
 def cleanup_schema(cycle_ids: dict[str, str]) -> None:
@@ -137,28 +161,33 @@ def main() -> None:
     reports: list[dict] = []
     try:
         with httpx.Client(base_url=BASE_URL, timeout=120) as client:
-            inspector_token = require(client.post("/api/auth/login", json={"username": "inspector"}), "检查员登录")["token"]
-            admin_token = require(client.post("/api/auth/login", json={"username": "admin"}), "管理员登录")["token"]
+            inspector_token = require(client.post("/api/auth/login", json={"username": "inspector", "password": "Inspector@123456"}), "检查员登录")["token"]
+            admin_token = require(client.post("/api/auth/login", json={"username": "admin", "password": "Admin@123456"}), "管理员登录")["token"]
             inspector = {"Authorization": f"Bearer {inspector_token}"}
             admin = {"Authorization": f"Bearer {admin_token}"}
-            projects = require(client.get("/api/mobile/projects"), "读取项目")["items"]
+            projects = require(client.get("/api/mobile/projects", headers=admin), "读取项目")["items"]
             by_name = {item["name"]: item for item in projects}
 
             scenarios = [
                 ("郁南项目", "rural_treatment"),
                 ("郁南项目", "town_network"),
+                ("郁南项目", "town_plant"),
+                ("茂南项目", "town_plant"),
+                ("茂南项目", "town_network"),
                 ("茂南项目", "town_plant"),
             ]
             used_towns: set[str] = set()
+            towns_by_project: dict[str, list[str]] = {"郁南项目": [], "茂南项目": []}
             for scenario_index, (project_name, facility_type) in enumerate(scenarios, 1):
                 project = by_name[project_name]
-                towns = require(client.get("/api/mobile/towns", params={"city_id": project["id"]}), "读取镇街")["items"]
+                towns = require(client.get("/api/mobile/towns", headers=admin, params={"city_id": project["id"]}), "读取镇街")["items"]
                 town = next(item for item in towns if facility_type in item["assessmentTargets"] and item["name"] not in used_towns)
                 used_towns.add(town["name"])
+                towns_by_project[project_name].append(town["name"])
                 village = None
                 if facility_type == "rural_treatment":
-                    village = require(client.get(f"/api/mobile/towns/{town['id']}/villages"), "读取村点")["items"][0]
-                standards = require(client.get("/api/mobile/indicator-standards", params={
+                    village = require(client.get(f"/api/mobile/towns/{town['id']}/villages", headers=admin), "读取村点")["items"][0]
+                standards = require(client.get("/api/mobile/indicator-standards", headers=admin, params={
                     "city_id": project["id"], "cycle_id": cycle_ids[project_name], "facility_type": facility_type,
                 }), "读取评分标准")
                 leaves = [item for item in standards["items"] if item["level"] == 3]
@@ -171,7 +200,7 @@ def main() -> None:
                 created = require(client.post("/api/mobile/assessment-records", headers=inspector, json=payload), "保存考核")
                 record_id = created["recordIds"][0]
                 require(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector), "提交考核")
-                detail = require(client.get(f"/api/records/{record_id}"), "读取评分结果")
+                detail = require(client.get(f"/api/records/{record_id}", headers=admin), "读取评分结果")
                 deduction = round(sum(float(item["deduction"]) for item in detail["scores"]), 2)
                 assert round(float(detail["totalScore"]), 2) == round(100 - deduction, 2)
                 score = next(item for item in detail["scores"] if float(item["deduction"]) > 0)
@@ -180,7 +209,6 @@ def main() -> None:
                 photo_document = fitz.open()
                 photo_page = photo_document.new_page(width=1200, height=800)
                 photo_page.draw_rect((40, 40, 1160, 760), color=(0.1, 0.35, 0.55), width=10)
-                photo_page.insert_text((390, 400), "SITE PHOTO SAMPLE", fontsize=32, color=(0.1, 0.35, 0.55))
                 photo_pixmap = photo_page.get_pixmap(alpha=False)
                 photo_bytes = photo_pixmap.tobytes("png")
                 photo_document.close()
@@ -193,7 +221,7 @@ def main() -> None:
 
                 pdf = fitz.open()
                 page = pdf.new_page()
-                page.insert_text((72, 90), "Water quality test report")
+                page.draw_rect((72, 90, 520, 680), color=(0.1, 0.35, 0.55), width=4)
                 pdf_bytes = pdf.tobytes()
                 pdf.close()
                 require(client.post(
@@ -208,12 +236,12 @@ def main() -> None:
                     "source": "dashboard", "projectId": project["id"], "period": PERIOD,
                     "townNames": [town["name"]], "outputs": ["separate"],
                 }), "生成报告")
-                result = require(client.get(f"/api/report-tasks/{task['id']}"), "读取报告任务")
+                result = require(client.get(f"/api/report-tasks/{task['id']}", headers=admin), "读取报告任务")
                 assert result["status"] == "completed", result.get("error")
                 report = result["reports"][0]
-                preview = require(client.get(f"/api/reports/{report['id']}/preview"), "预览报告")
+                preview = require(client.get(f"/api/reports/{report['id']}/preview", headers=admin), "预览报告")
                 assert preview["content"]["paragraphCount"] >= 20 and preview["content"]["tableCount"] >= 6
-                download = client.get(f"/api/reports/{report['id']}/download")
+                download = client.get(f"/api/reports/{report['id']}/download", headers=admin)
                 if download.status_code != 200 or len(download.content) < 10000:
                     raise RuntimeError("报告下载失败或文件不完整")
                 output = RESULTS / report["name"]
@@ -228,12 +256,35 @@ def main() -> None:
                     "tableCount": preview["content"]["tableCount"],
                 })
 
+            for project_name, town_names in towns_by_project.items():
+                project = by_name[project_name]
+                task = require(client.post("/api/report-tasks", headers=admin, json={
+                    "source": "dashboard", "projectId": project["id"], "period": PERIOD,
+                    "townNames": town_names, "outputs": ["summary"],
+                }), "生成汇总报告")
+                result = require(client.get(f"/api/report-tasks/{task['id']}", headers=admin), "读取汇总报告任务")
+                assert result["status"] == "completed", result.get("error")
+                report = result["reports"][0]
+                preview = require(client.get(f"/api/reports/{report['id']}/preview", headers=admin), "预览汇总报告")
+                download = client.get(f"/api/reports/{report['id']}/download", headers=admin)
+                if download.status_code != 200 or len(download.content) < 10000:
+                    raise RuntimeError("汇总报告下载失败或文件不完整")
+                output = RESULTS / report["name"]
+                output.write_bytes(download.content)
+                reports.append({
+                    "project": project_name, "town": "汇总", "facilityType": "summary",
+                    "score": None, "deduction": None, "path": str(output),
+                    "paragraphCount": preview["content"]["paragraphCount"],
+                    "tableCount": preview["content"]["tableCount"],
+                })
+
             for project_name, cycle_id in cycle_ids.items():
                 project = by_name[project_name]
-                require(client.delete("/api/mobile/assessment-records", headers=inspector, params={
+                require(client.delete("/api/mobile/assessment-records", headers=admin, params={
                     "city_id": project["id"], "cycle_id": cycle_id, "period": PERIOD,
                 }), "清理测试数据")
     finally:
+        cleanup_live_data(cycle_ids)
         cleanup_schema(cycle_ids)
 
     import json

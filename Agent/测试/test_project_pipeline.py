@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import re
@@ -43,7 +43,8 @@ def assert_ok(response, label: str):
 
 
 def login(client: TestClient, username: str) -> dict[str, str]:
-    data = assert_ok(client.post("/api/auth/login", json={"username": username}), f"login {username}")
+    password = "Admin@123456" if username == "admin" else "Inspector@123456"
+    data = assert_ok(client.post("/api/auth/login", json={"username": username, "password": password}), f"login {username}")
     return {"Authorization": f"Bearer {data['token']}"}
 
 
@@ -192,6 +193,7 @@ def main():
     with TestClient(app) as client:
         inspector = login(client, "inspector")
         admin = login(client, "admin")
+        client.headers.update(admin)
         projects = assert_ok(client.get("/api/mobile/projects"), "projects")["items"]
         assert {item["name"] for item in projects} == {"郁南项目", "茂南项目"}
         by_name = {item["name"]: item for item in projects}
@@ -422,8 +424,8 @@ def main():
         ), "clear score entries")
         assert float(cleared_scores["totalScore"]) == 0
 
-        # Clearing submitted data is scoped to one project and cycle and removes
-        # dependent review/agent/report rows plus managed files.
+        # Clearing submitted data only removes the current account's records and attachments.
+        # Administrator-generated reports remain intact and cannot be deleted by a field account.
         adjusted_record_id = adjusted_created["recordIds"][0]
         assert_ok(client.post(f"/api/mobile/assessment-records/{adjusted_record_id}/submit", headers=inspector), "submit clear fixture")
         attachment = client.post(
@@ -457,8 +459,9 @@ def main():
             "city_id": yunan["id"], "cycle_id": yunan_cycle["id"], "period": yunan_cycle["name"],
         }), "clear project cycle data")
         assert cleared["recordCount"] >= 5
-        assert cleared["reportCount"] == len(clear_result["reports"])
-        assert all(not path.exists() for path in [*clear_report_paths, clear_attachment_path])
+        assert cleared["reportCount"] == 0
+        assert clear_attachment_path.exists() is False
+        assert all(path.exists() for path in clear_report_paths)
         after_clear = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={
             "city_id": yunan["id"], "cycle_id": yunan_cycle["id"],
         }), "records after project clear")

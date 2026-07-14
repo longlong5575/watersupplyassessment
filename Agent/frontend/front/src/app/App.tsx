@@ -83,7 +83,8 @@ type Page =
   | "confirm"
   | "progress"
   | "result"
-  | "history";
+  | "history"
+  | "account";
 
 type TownSurveyStatus = "completed" | "inprogress" | "pending";
 
@@ -174,6 +175,7 @@ type ReportPreviewContent = {
 
 type AuthUser = {
   id: string;
+  username?: string;
   name: string;
   role: "admin" | "inspector" | string;
 };
@@ -402,10 +404,16 @@ type BackendTownRow = {
   recordCount: number;
   completedCount: number;
   villageCount: number;
+  treatmentCompletedCount?: number;
+  treatmentPointCount?: number;
+  networkCompletedCount?: number;
+  networkPointCount?: number;
   status: TownSurveyStatus;
   deductionTotal?: number;
   surveyCount?: number;
+  surveyProjectPointCount?: number;
   waterQualityCount?: number;
+  waterQualityProjectPointCount?: number;
   attachmentCount?: number;
   pendingReviewCount?: number;
   reviewedCount?: number;
@@ -455,7 +463,9 @@ function mapBackendReports(rows: BackendReportRow[]): Report[] {
 
 function formatPlatformTime(value?: string | null): string {
   if (!value) return "-";
-  const date = new Date(value);
+  // SQLite stores UTC timestamps without an offset; normalize them before displaying Chinese local time.
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("zh-CN", {
     year: "numeric",
@@ -468,29 +478,42 @@ function formatPlatformTime(value?: string | null): string {
   }).format(date).replace(/\//g, "-");
 }
 
+async function downloadReport(report: Report) {
+  if (!report.downloadUrl) return;
+  const response = await fetch(report.downloadUrl, { headers: authHeaders() });
+  if (!response.ok) throw new Error(await response.text());
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = report.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
 function downloadReports(reports: Report[]) {
   reports.filter(report => report.downloadUrl).forEach((report, index) => {
     window.setTimeout(() => {
-      const link = document.createElement("a");
-      link.href = report.downloadUrl!;
-      link.download = report.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      void downloadReport(report).catch(error => {
+        console.warn("下载报告失败", error);
+        window.alert(`报告“${report.name}”下载失败，请确认后端正在运行且文件存在。`);
+      });
     }, index * 250);
   });
 }
 
-async function openReportFolder(report: Report) {
+async function openReportFile(report: Report) {
   try {
-    const response = await fetch(`${API_BASE_URL}/reports/${report.id}/open-folder`, {
+    const response = await fetch(`${API_BASE_URL}/reports/${report.id}/open`, {
       method: "POST",
       headers: authHeaders(),
     });
     if (!response.ok) throw new Error(await response.text());
   } catch (error) {
-    console.warn("打开报告目录失败", error);
-    window.alert("打开报告目录失败，请确认后端正在运行且报告文件存在。");
+    console.warn("打开报告失败", error);
+    window.alert("打开报告失败，请确认本机已安装 Word，且后端正在运行、报告文件存在。");
   }
 }
 
@@ -521,10 +544,10 @@ function mapBackendTownRows(rows: BackendTownRow[], current: TownSurvey[]): Town
       status: row.status,
       facilityType: existing?.facilityType ?? "treatment",
       surveys: [
-        { label: "污水处理设施", done: row.completedCount, total: row.villageCount },
-        { label: "管网设施", done: row.completedCount, total: row.villageCount },
-        { label: "调查问卷", done: row.surveyCount ?? 0, total: Math.max(row.recordCount, 1) },
-        { label: "水质抽检情况", done: row.waterQualityCount ?? 0, total: 1 },
+        { label: "污水处理设施", done: row.treatmentCompletedCount ?? 0, total: row.treatmentPointCount ?? 0 },
+        { label: "管网设施", done: row.networkCompletedCount ?? 0, total: row.networkPointCount ?? 0 },
+        { label: "调查问卷", done: row.surveyProjectPointCount ?? 0, total: Math.max(row.recordCount, 1) },
+        { label: "水质抽检情况", done: row.waterQualityProjectPointCount ?? 0, total: Math.max(row.recordCount, 1) },
       ],
       recordCount: row.recordCount,
       completedCount: row.completedCount,
@@ -819,10 +842,10 @@ function Sidebar({ current, onNav, user, onLogout }: { current: Page; onNav: (p:
         })}
       </nav>
       <div className="px-3 py-4 border-t space-y-0.5" style={{ borderColor: "var(--sidebar-border)" }}>
-        <div className="px-3 py-2.5 text-xs opacity-70">
+        <button onClick={() => onNav("account")} className="w-full rounded px-3 py-2.5 text-left text-xs opacity-70 hover:bg-white/10 hover:opacity-100" title="修改自己的登录密码">
           <div className="font-medium opacity-100">{user.name}</div>
-          <div className="font-mono mt-0.5">{user.role === "admin" ? "管理员" : "普通用户"}</div>
-        </div>
+          <div className="font-mono mt-0.5">账号安全</div>
+        </button>
         <button onClick={onLogout} className="w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm opacity-50 hover:opacity-80 transition-colors">
           <LogOut size={16} />
           退出登录
@@ -857,12 +880,13 @@ function TopBar({ title, subtitle, breadcrumbs }: { title: string; subtitle?: st
 
 function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
   const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    if (!username.trim()) {
-      setError("请输入账号");
+    if (!username.trim() || !password) {
+      setError("请输入账号和密码");
       return;
     }
     setLoading(true);
@@ -871,14 +895,17 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim() }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
-      if (!response.ok) throw new Error("登录失败");
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(typeof detail?.detail === "string" ? detail.detail : "登录失败，请稍后重试");
+      }
       const auth = await response.json();
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
       onLogin(auth);
-    } catch {
-      setError("账号不存在，请检查账号是否已初始化");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
     } finally {
       setLoading(false);
     }
@@ -899,6 +926,18 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
           className="w-full border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
           placeholder="请输入员工账号"
           style={{ background: "var(--input-background)" }}
+          autoComplete="username"
+        />
+        <label className="block text-xs font-medium text-muted-foreground mb-2 mt-4">登录密码</label>
+        <input
+          type="password"
+          value={password}
+          onChange={event => { setPassword(event.target.value); setError(""); }}
+          onKeyDown={event => { if (event.key === "Enter") submit(); }}
+          className="w-full border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+          placeholder="请输入登录密码"
+          style={{ background: "var(--input-background)" }}
+          autoComplete="current-password"
         />
         {error && <p className="mt-2 text-xs text-[var(--status-error)]">{error}</p>}
         <button
@@ -933,21 +972,21 @@ function HomePage({ onNav, reports }: { onNav: (p: Page) => void; reports: Repor
             <div className="flex-1">
               <h2 className="text-base font-semibold text-foreground mb-1.5">自动生成正式绩效考核报告</h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                上传资料包，系统自动完成资料识别、金额核算、正文生成和格式校验，输出可直接使用的 DOCX 成品报告。
+                使用已复核的数据看板结果，系统自动完成评分汇总、金额口径整理、正文生成和格式校验，输出可直接使用的 DOCX 成品报告。
               </p>
               <button
                 onClick={() => onNav("dataupload")}
                 className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 rounded text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
                 style={{ background: "var(--primary)" }}
               >
-                <UploadCloud size={16} />
-                上传数据生成报告
+                <BarChart2 size={16} />
+                生成绩效考核报告
               </button>
             </div>
             <div className="hidden md:flex flex-col gap-2 shrink-0">
               {[
-                { icon: FolderOpen, color: "text-blue-600", label: "必填", desc: "资料包文件" },
-                { icon: Plus, color: "text-muted-foreground", label: "选填", desc: "金额计算方法" },
+                { icon: BarChart2, color: "text-blue-600", label: "数据", desc: "已复核考核记录" },
+                { icon: Clock, color: "text-muted-foreground", label: "周期", desc: "当前项目和季度" },
                 { icon: FileText, color: "text-[var(--accent)]", label: "输出", desc: "成品 DOCX 报告" },
               ].map(({ icon: Icon, color, label, desc }) => (
                 <div key={label} className="flex items-center gap-3 bg-muted rounded px-3 py-2">
@@ -1467,7 +1506,7 @@ function OutputOptions({ selected, onToggle }: { selected: Set<string>; onToggle
 
 // ─── Page 3: Confirm ──────────────────────────────────────────────────────────
 
-function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFiles, methodText, outputSelected, onToggleOutput, reportPeriod }: {
+function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFiles, methodText, outputSelected, onToggleOutput, reportPeriod, projectName }: {
   onNav: (p: Page) => void;
   dataSource: "upload" | "mobile";
   packageFiles: File[];
@@ -1477,9 +1516,11 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
   outputSelected: Set<string>;
   onToggleOutput: (id: string) => void;
   reportPeriod: string;
+  projectName: string;
 }) {
   const hasMethod = methodFiles.length > 0 || methodText.trim().length > 0;
   const packageNames = packageFiles.map(f => f.name).join("、");
+  const reportTitle = projectName.includes("茂南") ? "茂南城镇设施绩效考核报告" : "郁南镇村污水处理设施绩效考核报告";
 
 
   return (
@@ -1503,7 +1544,7 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
               } />
             )}
             {dataSource === "mobile" && (
-              <Row label="数据来源" value="数据看板（已完成镇街）" />
+              <Row label="数据来源" value="数据看板（已复核镇街）" />
             )}
             <Row label="已识别镇街" value={`${selectedTowns.length} 个`} mono extra={
               <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -1564,13 +1605,13 @@ function ConfirmPage({ onNav, dataSource, packageFiles, selectedTowns, methodFil
               {outputSelected.has("separate") && selectedTowns.map(town => (
                 <div key={town} className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
                   <FileText size={13} className="text-primary shrink-0" />
-                  {town}{reportPeriod}村级设施考核报告（正文）.docx
+                  {town}-{reportPeriod}-{reportTitle}（正文）.docx
                 </div>
               ))}
               {outputSelected.has("summary") && (
                 <div className="flex items-center gap-3 text-xs text-muted-foreground font-mono">
                   <FileText size={13} className="text-[var(--accent)] shrink-0" />
-                  {reportPeriod}村级设施绩效考核综合报告（汇总）.docx
+                  {projectName || "项目"}-{reportPeriod}-{reportTitle}汇总报告.docx
                 </div>
               )}
             </div>
@@ -1655,7 +1696,7 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({
-            source: dataSource,
+            source: dataSource === "mobile" ? "dashboard" : dataSource,
             projectId,
             period: reportPeriod,
             townNames: selectedTowns,
@@ -1670,11 +1711,16 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
         const task = await response.json();
         const pollTask = async () => {
           if (cancelled) return;
-          const statusResponse = await fetch(`${API_BASE_URL}/report-tasks/${task.id}`);
+          const statusResponse = await fetch(`${API_BASE_URL}/report-tasks/${task.id}`, { headers: authHeaders() });
           if (!statusResponse.ok) throw new Error(localizeBackendMessage(`报告任务状态查询失败，状态码：${statusResponse.status}`));
           const latest = await statusResponse.json();
+          const progress = Math.max(0, Math.min(100, Number(latest.progress ?? 0)));
+          setStep(Math.min(steps.length, Math.ceil(progress / 100 * steps.length)));
           if (latest.status === "completed") {
-            onReportsReady(mapBackendReports(latest.reports ?? []));
+            const readyReports = mapBackendReports(latest.reports ?? []);
+            if (readyReports.length === 0) throw new Error("报告任务已完成，但没有生成可下载的报告文件。");
+            onReportsReady(readyReports);
+            setLogs(prev => [...prev, `成品报告已输出，共 ${readyReports.length} 份文件`]);
             setBackendDone(true);
             return;
           }
@@ -1698,25 +1744,6 @@ function ProgressPage({ onNav, onStart, onReportsReady, dataSource, methodFiles,
     };
   }, []);
 
-  useEffect(() => {
-    if (step >= steps.length) return;
-    const timer = setTimeout(() => {
-      setStep(s => s + 1);
-      setLogs(prev => {
-        const msgs: Record<number, string> = {
-          0: isMobile ? "正在读取数据看板数据…" : "正在解压资料包…",
-          1: `已识别 ${selectedTowns.length} 个镇街附件`,
-          2: `考核数据抽取完成，共 ${selectedTowns.length * 12} 项指标`,
-          3: `金额核算完成，${calcMethodLabel}`,
-          4: "正在生成正式报告…",
-          5: "报告校验通过",
-          6: `成品报告已输出，共 ${(outputSelected.has("separate") ? selectedTowns.length : 0) + (outputSelected.has("summary") ? 1 : 0)} 份文件`,
-        };
-        return [...prev, msgs[step] ?? ""];
-      });
-    }, 1400);
-    return () => clearTimeout(timer);
-  }, [step]);
 
   const done = step >= steps.length;
 
@@ -1858,14 +1885,12 @@ function formatElapsed(s: number): string {
   return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分钟`;
 }
 
-function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, outputSelected, selectedTowns, elapsedSeconds, generatedAt, reportPeriod, generatedReports, onPreviewReport }: {
+function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, elapsedSeconds, generatedAt, reportPeriod, generatedReports, onPreviewReport }: {
   onNav: (p: Page) => void;
   dataSource: "upload" | "mobile";
   packageFiles: File[];
   methodFiles: File[];
   methodText: string;
-  outputSelected: Set<string>;
-  selectedTowns: string[];
   elapsedSeconds: number | null;
   generatedAt: string | null;
   reportPeriod: string;
@@ -1876,22 +1901,7 @@ function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, 
   const isMobile = dataSource === "mobile";
 
   const nowStr = generatedAt ?? new Date().toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-");
-  const townReports: Report[] = selectedTowns.map((town, i) => ({
-    id: `r${i + 1}`,
-    name: `${town}${reportPeriod}村级设施考核报告（正文）`,
-    town,
-    period: reportPeriod,
-    status: "completed" as ReportStatus,
-    size: `${((i * 137 % 8 + 8) / 10).toFixed(1)} MB`,
-    createdAt: nowStr,
-  }));
-
-  const summaryReport: Report = { id: "r-summary", name: `${reportPeriod}村级设施绩效考核综合报告（汇总）`, town: "全区汇总", period: reportPeriod, status: "completed", size: "4.8 MB", createdAt: nowStr };
-  const fallbackReports: Report[] = [
-    ...(outputSelected.has("separate") ? townReports : []),
-    ...(outputSelected.has("summary") ? [summaryReport] : []),
-  ];
-  const reports = generatedReports.length > 0 ? generatedReports : fallbackReports;
+  const reports = generatedReports;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1950,18 +1960,18 @@ function ResultPage({ onNav, dataSource, packageFiles, methodFiles, methodText, 
                       <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{r.size}</td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3">
-                          <a href={r.downloadUrl ?? "#"} className={`text-xs text-primary hover:underline flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}>
+                          <button type="button" onClick={() => void downloadReport(r).catch(() => window.alert("报告下载失败，请确认后端正在运行且文件存在。"))} disabled={!r.downloadUrl} className={`text-xs text-primary hover:underline flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}>
                             <Download size={12} /> 下载
-                          </a>
+                          </button>
                           <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                             <Eye size={12} /> 预览
                           </button>
                           <button
-                            onClick={() => openReportFolder(r)}
+                            onClick={() => openReportFile(r)}
                             disabled={!r.downloadUrl}
                             className={`text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}
                           >
-                            <FolderOpen size={12} /> 目录
+                            <FileText size={12} /> 打开
                           </button>
                         </div>
                       </td>
@@ -2095,18 +2105,18 @@ function HistoryPage({ onNav, reports, onPreviewReport }: { onNav: (p: Page) => 
                   <td className="px-3 py-3 text-xs text-muted-foreground font-mono">{formatPlatformTime(r.createdAt)}</td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-3">
-                      <a href={r.downloadUrl} className="text-xs text-primary hover:underline flex items-center gap-1">
+                      <button type="button" onClick={() => void downloadReport(r).catch(() => window.alert("报告下载失败，请确认后端正在运行且文件存在。"))} disabled={!r.downloadUrl} className="text-xs text-primary hover:underline flex items-center gap-1">
                         <Download size={12} /> 下载
-                      </a>
+                      </button>
                       <button onClick={() => onPreviewReport(r)} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                         <Eye size={12} /> 预览
                       </button>
                       <button
-                        onClick={() => openReportFolder(r)}
+                        onClick={() => openReportFile(r)}
                         disabled={!r.downloadUrl}
                         className={`text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 ${r.downloadUrl ? "" : "opacity-50 pointer-events-none"}`}
                       >
-                        <FolderOpen size={12} /> 目录
+                        <FileText size={12} /> 打开
                       </button>
                     </div>
                   </td>
@@ -2126,8 +2136,8 @@ const PIE_COLORS = ["#1a3a5c", "#e8edf3"];
 
 function TownPieCard({ town }: { town: TownSurvey }) {
   const surveys = visibleTownSurveys(town);
-  const totalDone = surveys.reduce((s, x) => s + x.done, 0);
-  const totalAll = surveys.reduce((s, x) => s + x.total, 0);
+  const totalDone = town.completedCount ?? 0;
+  const totalAll = Math.max(town.villageCount ?? 0, totalDone, 1);
   const pieData = [
     { name: "已完成", value: totalDone },
     { name: "未完成", value: totalAll - totalDone },
@@ -2268,6 +2278,86 @@ function paymentDraftFromContext(context?: PaymentContext | null): PaymentDraft 
     adjustedNetworkOperationFeeTenThousandYuanPerYear: value(context?.adjustedNetworkOperationFeeTenThousandYuanPerYear),
     note: context?.note ?? "",
   };
+}
+
+function AccountSecurityPage({ auth, onLogout }: { auth: AuthState; onLogout: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setError("请完整填写当前密码和新密码。");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("两次输入的新密码不一致。");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${auth.token}` },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(typeof detail?.detail === "string" ? detail.detail : "密码修改失败，请稍后重试。");
+      }
+      setMessage("密码已修改。为保护账号安全，请使用新密码重新登录。");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      window.setTimeout(onLogout, 1200);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "密码修改失败，请稍后重试。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <TopBar title="账号安全" breadcrumbs={["账号安全"]} />
+      <div className="w-full max-w-2xl px-8 py-6 space-y-5">
+        <section className="border border-border bg-card rounded-lg p-6">
+          <h2 className="text-base font-semibold text-foreground">当前账号</h2>
+          <dl className="mt-4 grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
+            <dt className="text-muted-foreground">账号</dt><dd className="text-foreground">{auth.user.username || auth.user.name}</dd>
+            <dt className="text-muted-foreground">姓名</dt><dd className="text-foreground">{auth.user.name}</dd>
+            <dt className="text-muted-foreground">角色</dt><dd className="text-foreground">{auth.user.role === "admin" ? "管理员" : "现场采集员"}</dd>
+          </dl>
+        </section>
+        <section className="border border-border bg-card rounded-lg p-6">
+          <h2 className="text-base font-semibold text-foreground">修改登录密码</h2>
+          <p className="mt-1 text-sm text-muted-foreground">请设置便于本人记忆且不与他人共享的登录密码。</p>
+          <div className="mt-5 space-y-4">
+            <label className="block text-sm text-foreground">当前密码
+              <input type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} autoComplete="current-password" className="mt-2 w-full rounded border border-border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-sm text-foreground">新密码
+              <input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} autoComplete="new-password" className="mt-2 w-full rounded border border-border px-3 py-2 text-sm" />
+            </label>
+            <label className="block text-sm text-foreground">确认新密码
+              <input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} onKeyDown={event => { if (event.key === "Enter") submit(); }} autoComplete="new-password" className="mt-2 w-full rounded border border-border px-3 py-2 text-sm" />
+            </label>
+          </div>
+          {error && <p className="mt-4 text-sm text-[var(--status-error)]">{error}</p>}
+          {message && <p className="mt-4 text-sm text-[var(--status-success)]">{message}</p>}
+          <button onClick={submit} disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50" style={{ background: "var(--primary)" }}>
+            {saving && <Loader2 size={15} className="animate-spin" />}
+            保存新密码
+          </button>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 type ReviewRecordDetail = ReviewRecordRow & {
@@ -2427,7 +2517,7 @@ function StandardsPage() {
   const [notice, setNotice] = useState("");
 
   const loadVersions = async () => {
-    const response = await fetch(`${API_BASE_URL}/indicator-versions`);
+    const response = await fetch(`${API_BASE_URL}/indicator-versions`, { headers: authHeaders() });
     const data = response.ok ? await response.json() : { items: [] };
     const rows = Array.isArray(data.items) ? data.items : [];
     setVersions(rows);
@@ -2435,7 +2525,7 @@ function StandardsPage() {
   };
 
   const loadDetail = async (id: string) => {
-    const response = await fetch(`${API_BASE_URL}/indicator-versions/${id}`);
+    const response = await fetch(`${API_BASE_URL}/indicator-versions/${id}`, { headers: authHeaders() });
     if (response.ok) {
       const detail = await response.json();
       setSelected(detail);
@@ -2727,7 +2817,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
     if (statusFilter) params.set("status", statusFilter);
     if (riskFilter) params.set("risk", riskFilter);
     const query = params.toString() ? `?${params.toString()}` : "";
-    fetch(`${API_BASE_URL}/records${query}`)
+    fetch(`${API_BASE_URL}/records${query}`, { headers: authHeaders() })
       .then(response => response.ok ? response.json() : { items: [] })
       .then(data => setRecords(Array.isArray(data.items) ? data.items : []))
       .catch(() => setRecords([]));
@@ -2738,7 +2828,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   const view = async (id: string) => {
     setBusy(id);
     try {
-      const response = await fetch(`${API_BASE_URL}/records/${id}`);
+      const response = await fetch(`${API_BASE_URL}/records/${id}`, { headers: authHeaders() });
       if (response.ok) {
         const detail = await response.json();
         setSelected({
@@ -2765,7 +2855,7 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
   };
 
   const loadAgentRuns = async (recordId: string) => {
-    const response = await fetch(`${API_BASE_URL}/agent/records/${recordId}/runs`);
+    const response = await fetch(`${API_BASE_URL}/agent/records/${recordId}/runs`, { headers: authHeaders() });
     const data = response.ok ? await response.json() : { items: [] };
     setAgentRuns(Array.isArray(data.items) ? data.items : []);
   };
@@ -4031,13 +4121,15 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
       id: "upload" as const,
       icon: FolderOpen,
       label: "资料包上传",
-      desc: "上传已整理的镇街资料包，系统自动识别镇街并生成考核报告",
+      desc: "尚未启用，当前请使用数据看板数据生成报告",
+      disabled: true,
     },
     {
       id: "mobile" as const,
       icon: BarChart2,
       label: "使用数据看板数据",
-      desc: "直接使用数据看板中已采集的调研数据，自动读取各镇街调研结果生成报告",
+      desc: "使用数据看板中已复核的考核数据生成正式报告",
+      disabled: false,
     },
   ];
 
@@ -4050,10 +4142,12 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
           {options.map(opt => {
             const active = selected === opt.id;
             return (
-              <div
+              <button
+                type="button"
                 key={opt.id}
+                disabled={opt.disabled}
                 onClick={() => setSelected(opt.id)}
-                className={`flex items-start gap-5 p-5 rounded-lg border-2 cursor-pointer transition-colors ${active ? "border-primary bg-blue-50" : "border-border bg-card hover:border-primary/40 hover:bg-muted/20"}`}
+                className={`w-full text-left flex items-start gap-5 p-5 rounded-lg border-2 transition-colors ${opt.disabled ? "cursor-not-allowed opacity-55 border-border bg-muted/20" : "cursor-pointer"} ${active ? "border-primary bg-blue-50" : opt.disabled ? "" : "border-border bg-card hover:border-primary/40 hover:bg-muted/20"}`}
               >
                 <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${active ? "border-primary" : "border-border"}`}>
                   {active && <div className="w-2.5 h-2.5 rounded-full" style={{ background: "var(--primary)" }} />}
@@ -4067,7 +4161,7 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
                     <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{opt.desc}</p>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -4089,29 +4183,48 @@ function DataUploadSelectPage({ onNav }: { onNav: (p: Page) => void }) {
 
 // ─── Page: MobileData ─────────────────────────────────────────────────────────
 
-function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSelectedTowns, reportPeriod, setReportPeriod }: {
+function MobileDataPage({ onNav, cities, projectId, setProjectId, setSelectedTowns, reportPeriod, setReportPeriod, reportYear, reportQuarter }: {
   onNav: (p: Page) => void;
-  towns: TownSurvey[];
   cities: CityOption[];
   projectId: string;
   setProjectId: React.Dispatch<React.SetStateAction<string>>;
   setSelectedTowns: React.Dispatch<React.SetStateAction<string[]>>;
   reportPeriod: string;
   setReportPeriod: React.Dispatch<React.SetStateAction<string>>;
+  reportYear: string;
+  reportQuarter: string;
 }) {
   const [removedTowns, setRemovedTowns] = useState<Set<string>>(new Set());
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
   const [precheck, setPrecheck] = useState<ReportPrecheck | null>(null);
   const [precheckLoading, setPrecheckLoading] = useState(false);
+  const [reportTowns, setReportTowns] = useState<TownSurvey[]>([]);
+  const targetReportPeriod = `${reportYear}年第${reportQuarter}季度`;
 
-  const visibleTowns = towns.filter(t => t.cityId === projectId && t.status === "completed" && !removedTowns.has(t.name));
+  useEffect(() => {
+    if (!projectId) {
+      setReportTowns([]);
+      return;
+    }
+    let cancelled = false;
+    const params = new URLSearchParams({ year: reportYear, quarter: reportQuarter, city_id: projectId });
+    fetch(`${API_BASE_URL}/dashboard/towns?${params.toString()}`, { headers: authHeaders() })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("报告数据读取失败")))
+      .then(data => {
+        if (!cancelled) setReportTowns(mapBackendTownRows(Array.isArray(data.items) ? data.items : [], []));
+      })
+      .catch(() => { if (!cancelled) setReportTowns([]); });
+    return () => { cancelled = true; };
+  }, [projectId, reportYear, reportQuarter]);
+
+  const visibleTowns = reportTowns.filter(t => t.cityId === projectId && ((t.reviewedCount ?? 0) + (t.lockedCount ?? 0) > 0) && !removedTowns.has(t.name));
   const visibleTownNames = visibleTowns.map(t => t.name);
   const visibleTownKey = visibleTownNames.join("|");
   const canProceed = Boolean(projectId) && visibleTowns.length > 0;
   useEffect(() => {
     if (!projectId || visibleTowns.length === 0) {
       setPrecheck(null);
-      setReportPeriod("");
+      setReportPeriod(targetReportPeriod);
       return;
     }
     let cancelled = false;
@@ -4121,6 +4234,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         source: "dashboard",
+        period: targetReportPeriod,
         projectId,
         townNames: visibleTownNames,
         outputs: ["separate", "summary"],
@@ -4146,7 +4260,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
       })
       .finally(() => { if (!cancelled) setPrecheckLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, visibleTownKey]);
+  }, [projectId, visibleTownKey, targetReportPeriod]);
 
 
   return (
@@ -4171,7 +4285,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
           <div className="px-6 py-4 border-b border-border flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold text-foreground">当前看板数据概览</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">以下为数据看板中已完成镇街采集数据{removedTowns.size > 0 && `，本次生成已排除 ${removedTowns.size} 个镇街`}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">以下为当前项目和周期中已复核的镇街数据{removedTowns.size > 0 && `，本次生成已排除 ${removedTowns.size} 个镇街`}</p>
             </div>
             {removedTowns.size > 0 && (
               <button onClick={() => setRemovedTowns(new Set())} className="text-xs text-primary hover:underline">恢复本次生成名单</button>
@@ -4206,7 +4320,7 @@ function MobileDataPage({ onNav, towns, cities, projectId, setProjectId, setSele
                     </td>
                   ))}
                   <td className="px-3 py-3">
-                    <StatusBadge status="completed" />
+                    <span className="inline-flex rounded border border-[var(--status-success)]/30 bg-[var(--status-success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-success)]">已复核</span>
                   </td>
                   <td className="px-3 py-3">
                     {removeConfirm === t.name ? (
@@ -4285,13 +4399,52 @@ function AssessmentApp() {
   const [generatedReports, setGeneratedReports] = useState<Report[]>([]);
   const [previewReport, setPreviewReport] = useState<Report | null>(null);
   const progressStartRef = useRef<number | null>(null);
+  const [autoLoginChecked, setAutoLoginChecked] = useState(false);
 
   useEffect(() => {
+    if (auth?.token) {
+      setAutoLoginChecked(true);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/auth/local-admin-session`, { method: "POST" })
+      .then(async response => {
+        if (!response.ok) return null;
+        return response.json() as Promise<AuthState>;
+      })
+      .then(nextAuth => {
+        if (cancelled || !nextAuth?.token) return;
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+        setAuth(nextAuth);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setAutoLoginChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, [auth?.token]);
+
+  useEffect(() => {
+    if (!auth?.token) return;
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
+      .then(response => {
+        if (!cancelled && response.status === 401) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setAuth(null);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [auth?.token]);
+
+  useEffect(() => {
+    if (!auth?.token) return;
     let cancelled = false;
 
     async function loadReports() {
       try {
-        const response = await fetch(`${API_BASE_URL}/reports`);
+        const response = await fetch(`${API_BASE_URL}/reports`, { headers: authHeaders() });
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled && Array.isArray(data.items)) setHistoryReports(mapBackendReports(data.items));
@@ -4302,7 +4455,7 @@ function AssessmentApp() {
 
     async function loadCities() {
       try {
-        const response = await fetch(`${API_BASE_URL}/mobile/projects`);
+        const response = await fetch(`${API_BASE_URL}/mobile/projects`, { headers: authHeaders() });
         const data = response.ok ? await response.json() : { items: [] };
         if (!cancelled && Array.isArray(data.items)) setCities(data.items);
         if (!cancelled && Array.isArray(data.items) && data.items.length) setReportProjectId(current => current || data.items[0].id);
@@ -4319,7 +4472,7 @@ function AssessmentApp() {
         if (dashboardCityId) params.set("city_id", dashboardCityId);
         if (dashboardTownId) params.set("town_id", dashboardTownId);
         const query = params.toString() ? `?${params.toString()}` : "";
-        const response = await fetch(`${API_BASE_URL}/dashboard/towns${query}`);
+        const response = await fetch(`${API_BASE_URL}/dashboard/towns${query}`, { headers: authHeaders() });
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled && Array.isArray(data.items)) {
@@ -4342,7 +4495,7 @@ function AssessmentApp() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [dashboardPeriod.year, dashboardPeriod.quarter, dashboardCityId, dashboardTownId]);
+  }, [auth?.token, dashboardPeriod.year, dashboardPeriod.quarter, dashboardCityId, dashboardTownId]);
 
   function toggleOutput(id: string) {
     setOutputSelected(prev => {
@@ -4373,7 +4526,7 @@ function AssessmentApp() {
           selectedQuarter={dashboardPeriod.quarter}
           setSelectedQuarter={(quarter) => setDashboardPeriod(period => ({ ...period, quarter }))}
           selectedCityId={dashboardCityId}
-          setSelectedCityId={setDashboardCityId}
+          setSelectedCityId={(cityId) => { setDashboardCityId(cityId); if (cityId) setReportProjectId(cityId); }}
           selectedTownId={dashboardTownId}
           setSelectedTownId={setDashboardTownId}
           overview={dashboardOverview}
@@ -4386,13 +4539,14 @@ function AssessmentApp() {
       case "mobile": return (
         <MobileDataPage
           onNav={(p) => { if (p === "confirm") setDataSource("mobile"); setPage(p); }}
-          towns={towns}
           cities={cities}
           projectId={reportProjectId}
           setProjectId={setReportProjectId}
           setSelectedTowns={setSelectedTowns}
           reportPeriod={reportPeriod}
           setReportPeriod={setReportPeriod}
+          reportYear={dashboardPeriod.year}
+          reportQuarter={dashboardPeriod.quarter}
         />
       );
       case "upload": return (
@@ -4426,6 +4580,7 @@ function AssessmentApp() {
             outputSelected={outputSelected}
             onToggleOutput={toggleOutput}
             reportPeriod={reportPeriod}
+            projectName={cities.find(city => city.id === reportProjectId)?.name ?? ""}
           />
         );
       }
@@ -4462,8 +4617,6 @@ function AssessmentApp() {
           packageFiles={packageFiles}
           methodFiles={methodFiles}
           methodText={methodText}
-          outputSelected={outputSelected}
-          selectedTowns={confirmedTowns}
           elapsedSeconds={elapsedSeconds}
           generatedAt={generatedAt}
           reportPeriod={reportPeriod}
@@ -4472,10 +4625,15 @@ function AssessmentApp() {
         />
       );
       case "history": return <HistoryPage onNav={setPage} reports={historyReports} onPreviewReport={setPreviewReport} />;
+      case "account": return <AccountSecurityPage auth={auth!} onLogout={() => { localStorage.removeItem(AUTH_STORAGE_KEY); setAuth(null); setPage("home"); }} />;
     }
   }
 
-  if (!auth) return <LoginPage onLogin={setAuth} />;
+  if (!auth) {
+    return autoLoginChecked ? <LoginPage onLogin={setAuth} /> : (
+      <div className="h-screen w-screen flex items-center justify-center bg-background text-sm text-muted-foreground">正在进入系统...</div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden" style={{ fontFamily: "var(--font-sans)" }}>

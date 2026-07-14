@@ -1,0 +1,41 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PPP农村污水考核系统 - 管理员账号管理</title>
+  <style>
+    :root { font-family: "Microsoft YaHei", "SimSun", sans-serif; color: #1f2937; background: #f1f5f9; }
+    * { box-sizing: border-box; } body { margin: 0; } main { max-width: 1080px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { margin: 0; font-size: 22px; } h2 { margin: 0 0 14px; font-size: 17px; } p { margin: 6px 0; }
+    .hidden { display: none !important; } .card { background: #fff; border: 1px solid #d8e0e8; border-radius: 8px; padding: 20px; }
+    .login { width: min(100%, 400px); margin: 72px auto; } .layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; }.muted { color: #64748b; font-size: 13px; }
+    label { display:block; margin:12px 0 6px; font-size:13px; color:#475569; } input,select { width:100%; min-height:38px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:5px; font:inherit; }
+    button { min-height:36px; padding:7px 12px; border:1px solid #cbd5e1; border-radius:5px; background:#fff; font:inherit; cursor:pointer; }.primary { color:#fff; border-color:#1d4ed8; background:#2563eb; }.danger { color:#b91c1c; border-color:#fecaca; }
+    .notice { display:none; margin:0 0 14px; padding:10px 12px; border-radius:5px; font-size:13px; }.notice.error { display:block; color:#b91c1c; background:#fef2f2; }.notice.success { display:block; color:#166534; background:#f0fdf4; }
+    table { width:100%; border-collapse:collapse; font-size:13px; } th,td { padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:left; } th { color:#64748b; background:#f8fafc; } td.actions { white-space:nowrap; }
+    @media(max-width:800px){ .layout{grid-template-columns:1fr;} main{padding:18px 12px;} .table-wrap{overflow-x:auto;} }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="login-view" class="card login">
+      <h1>管理员账号管理</h1><p class="muted">仅管理员可访问，不显示在平台端和移动端。</p>
+      <p id="login-message" class="notice"></p>
+      <label>管理员账号<input id="login-username" autocomplete="username"></label>
+      <label>登录密码<input id="login-password" type="password" autocomplete="current-password"></label>
+      <button id="login-button" class="primary" style="width:100%;margin-top:16px">登录</button>
+    </section>
+    <section id="admin-view" class="hidden">
+      <header class="top"><div><h1>管理员账号管理</h1><p id="operator" class="muted"></p></div><button id="logout-button">退出</button></header>
+      <p id="admin-message" class="notice"></p>
+      <div class="layout">
+        <section class="card table-wrap"><div class="top"><h2>账号列表</h2><button id="refresh-button">刷新</button></div><table><thead><tr><th>账号名</th><th>姓名</th><th>权限</th><th>状态</th><th>操作</th></tr></thead><tbody id="user-rows"></tbody></table></section>
+        <section class="card"><h2>新增账号</h2><label>账号名<input id="new-username" autocomplete="off" placeholder="创建后不可修改"></label><label>姓名<input id="new-name"></label><label>权限<select id="new-role"><option value="inspector">普通用户</option><option value="admin">管理员</option></select></label><button id="create-button" class="primary" style="width:100%;margin-top:16px">创建账号并生成密码</button><p class="muted">系统会自动生成含字母和数字的随机 8 位密码，并仅展示一次。</p></section>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

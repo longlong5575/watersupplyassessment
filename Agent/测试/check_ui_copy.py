@@ -49,6 +49,11 @@ FORBIDDEN_SNIPPETS = [
     "奖励金额",
 ]
 
+FORBIDDEN_SNIPPETS.extend([
+    "href={r.downloadUrl}",
+    "openReportFolder(",
+])
+
 FORBIDDEN_PATTERNS = [
     re.compile(r'placeholder="[^"]*[A-Za-z]{3,}[^"]*"'),
     re.compile(r'setError\("[^"]*[A-Za-z]{3,}'),

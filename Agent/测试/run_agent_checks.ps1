@@ -20,7 +20,7 @@ if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
   if (Test-Path -LiteralPath $candidate) { $pythonExe = $candidate }
 }
 $pythonPackages = Join-Path (Join-Path $runtimeRoot "backend") "python-packages-current"
-if (-not (Test-Path -LiteralPath $pythonPackages)) {
+if (-not (Test-Path -LiteralPath $pythonPackages) -or -not (Test-Path -LiteralPath (Join-Path $pythonPackages "jwt"))) {
   & (Join-Path (Join-Path $agentRoot "内部脚本") "init-recipient.ps1")
 }
 if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
@@ -93,6 +93,21 @@ $summary = [ordered]@{
   mobileBuild = $false
 }
 
+$powerShellScripts = @(
+  Get-ChildItem -LiteralPath $agentRoot -File -Filter "*.ps1"
+  Get-ChildItem -LiteralPath (Join-Path $agentRoot "内部脚本") -File -Filter "*.ps1"
+  Get-Item -LiteralPath $PSCommandPath
+)
+foreach ($scriptFile in $powerShellScripts) {
+  $tokens = $null
+  $parseErrors = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$tokens, [ref]$parseErrors)
+  if ($parseErrors.Count -gt 0) {
+    throw ("PowerShell脚本语法错误：" + $scriptFile.FullName + " - " + ($parseErrors.Message -join "；"))
+  }
+}
+Write-Output "PASS: Windows启动与停止脚本语法检查"
+
 Push-Location $backend
 try {
   Invoke-Checked { & $pythonExe -m compileall -q app }
@@ -107,6 +122,11 @@ Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_calculation_rules.p
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_option_generation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_integrity.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_save_validation.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_auth_security.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_account_data_isolation.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_api_access_control.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_upload_safety.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_fresh_database_migration.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_no_taishan_residue.py") }
 
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "check_report_quality.py") }

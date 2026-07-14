@@ -1,5 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -155,18 +156,23 @@ def inspect_report(path: Path) -> dict[str, object]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="检查郁南和茂南正式报告内容、结构与格式。")
+    parser.add_argument("--report-root", type=Path, help="指定需要检查的报告目录。")
+    parser.add_argument("--all-reports", action="store_true", help="检查目录内全部 DOCX，而非每项目最新正文和汇总。")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parent
     agent_root = root.parent
     base = agent_root.parent.parent if agent_root.parent.name.lower() == "watersupplyassessment" else agent_root.parent
     runtime_root = Path(os.environ.get("WATERSUPPLY_RUNTIME_DIR") or base / "运行脚本" / "watersupply-agent-runtime")
     result_root = runtime_root / "test-results"
-    report_root = result_root / "project-pipeline" / "storage" / "generated_reports"
-    reports = latest_reports(report_root)
-    if len(reports) < 4:
-        raise FileNotFoundError(f"未找到郁南和茂南两类正文及汇总报告：{report_root}")
+    report_root = args.report_root or (result_root / "project-pipeline" / "storage" / "generated_reports")
+    reports = sorted(report_root.rglob("*.docx")) if args.all_reports else latest_reports(report_root)
+    minimum = 1 if args.report_root else 4
+    if len(reports) < minimum:
+        raise FileNotFoundError(f"未找到足够的郁南和茂南报告：{report_root}")
     items = [inspect_report(path) for path in reports]
     result = {"passed": all(item["passed"] for item in items), "items": items}
-    output = result_root / "report-quality-summary.json"
+    output = result_root / ("report-quality-summary-all.json" if args.all_reports else "report-quality-summary.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))

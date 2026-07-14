@@ -92,15 +92,19 @@ def docx_preview(path: Path) -> dict:
 
 
 def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tuple[City | None, AssessmentCycle | None, dict]:
+    if payload.source == "upload":
+        raise HTTPException(status_code=422, detail="资料包自动识别尚未启用，请使用已复核的数据看板数据生成报告")
     project = session.get(City, payload.projectId) if payload.projectId else None
     cycle = None
-    if payload.source == "dashboard":
+    if payload.source in {"dashboard", "mobile"}:
         cycle_query = (
             select(AssessmentCycle)
             .join(AssessmentRecord, AssessmentRecord.cycle_id == AssessmentCycle.id)
             .where(AssessmentRecord.status.in_(["submitted", "reviewed", "locked"]))
             .order_by(AssessmentRecord.updated_at.desc())
         )
+        if payload.period.strip():
+            cycle_query = cycle_query.where(AssessmentCycle.name == payload.period.strip())
         if project is not None:
             cycle_query = cycle_query.where(AssessmentRecord.city_id == project.id)
         if payload.townNames:
@@ -114,6 +118,8 @@ def resolve_report_request(payload: ReportTaskRequest, session: Session) -> tupl
         if project is not None:
             cycle_query = cycle_query.where(AssessmentCycle.city_id == project.id)
         cycle = session.scalar(cycle_query)
+    if cycle is None and payload.period.strip():
+        raise HTTPException(status_code=422, detail="所选报告周期没有可用的已提交考核数据")
     if cycle is None:
         fallback_query = select(AssessmentCycle).where(AssessmentCycle.status == "active")
         if project is not None:
@@ -186,7 +192,7 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
 def create_task(payload: ReportTaskRequest, session: Session = Depends(get_session), user=Depends(admin_user)):
     project, cycle, task_payload = resolve_report_request(payload, session)
     snapshot = build_task_snapshot(session, project, cycle, task_payload)
-    if task_payload.get("source") == "dashboard":
+    if task_payload.get("source") in {"dashboard", "mobile"}:
         try:
             validate_report_dataset(snapshot)
         except RuntimeError as exc:
@@ -215,7 +221,7 @@ def create_task(payload: ReportTaskRequest, session: Session = Depends(get_sessi
 
 
 @router.get("/api/report-tasks/{task_id}")
-def get_task(task_id: str, session: Session = Depends(get_session)):
+def get_task(task_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     task = session.get(ReportTask, task_id)
     if task is None: raise HTTPException(status_code=404, detail="未找到报告任务")
     reports = session.scalars(select(Report).where(Report.task_id == task.id)).all()
@@ -223,7 +229,7 @@ def get_task(task_id: str, session: Session = Depends(get_session)):
 
 
 @router.get("/api/report-tasks")
-def list_tasks(session: Session = Depends(get_session), status: str | None = None):
+def list_tasks(session: Session = Depends(get_session), status: str | None = None, user=Depends(admin_user)):
     query = select(ReportTask).order_by(ReportTask.created_at.desc())
     if status:
         query = query.where(ReportTask.status == status)
@@ -232,12 +238,12 @@ def list_tasks(session: Session = Depends(get_session), status: str | None = Non
 
 
 @router.get("/api/reports")
-def reports(session: Session = Depends(get_session)):
+def reports(session: Session = Depends(get_session), user=Depends(admin_user)):
     return {"items": [serialize_report(item) for item in session.scalars(select(Report).order_by(Report.created_at.desc())).all()]}
 
 
 @router.get("/api/reports/{report_id}/download")
-def download(report_id: str, session: Session = Depends(get_session)):
+def download(report_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     report = session.get(Report, report_id)
     if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)
@@ -246,7 +252,7 @@ def download(report_id: str, session: Session = Depends(get_session)):
 
 
 @router.get("/api/reports/{report_id}/preview")
-def preview(report_id: str, session: Session = Depends(get_session)):
+def preview(report_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     report = session.get(Report, report_id)
     if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)
@@ -255,8 +261,28 @@ def preview(report_id: str, session: Session = Depends(get_session)):
     return {"report": serialize_report(report), "content": docx_preview(path)}
 
 
+@router.post("/api/reports/{report_id}/open")
+def open_report_file(report_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
+    report = session.get(Report, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="未找到报告")
+    path = Path(report.storage_key)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="报告文件不存在")
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="无法使用本机文档程序打开报告，请改用下载功能") from exc
+    return {"ok": True}
+
+
 @router.post("/api/reports/{report_id}/open-folder")
-def open_report_folder(report_id: str, session: Session = Depends(get_session)):
+def open_report_folder(report_id: str, session: Session = Depends(get_session), user=Depends(admin_user)):
     report = session.get(Report, report_id)
     if report is None: raise HTTPException(status_code=404, detail="未找到报告")
     path = Path(report.storage_key)

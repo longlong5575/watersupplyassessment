@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.core.security import hash_password
 from app.models import AssessmentCycle, City, DeductionOption, Indicator, IndicatorVersion, ScoreSourceMapping, Town, User, Village
 from app.services.project_catalog import PROJECT_CATALOG
 from app.services.standard_catalog import item_score_total, load_standard_groups
@@ -314,8 +318,24 @@ def seed_database(session: Session) -> None:
     for project in PROJECT_CATALOG:
         _seed_project(session, project)
 
-    if session.scalar(select(User).where(User.username == "admin")) is None:
-        session.add(User(username="admin", display_name="系统管理员", role="admin"))
-    if session.scalar(select(User).where(User.username == "inspector")) is None:
-        session.add(User(username="inspector", display_name="现场采集员", role="inspector"))
+    now = datetime.now(timezone.utc)
+    users = (
+        ("admin", "系统管理员", "admin", settings.admin_initial_password),
+        ("inspector", "现场采集员", "inspector", settings.inspector_initial_password),
+    )
+    for username, display_name, role, initial_password in users:
+        user = session.scalar(select(User).where(User.username == username))
+        if user is None:
+            session.add(
+                User(
+                    username=username,
+                    display_name=display_name,
+                    role=role,
+                    password_hash=hash_password(initial_password),
+                    password_changed_at=now,
+                )
+            )
+        elif not user.password_hash:
+            user.password_hash = hash_password(initial_password)
+            user.password_changed_at = now
     session.commit()

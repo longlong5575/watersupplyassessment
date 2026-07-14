@@ -21,7 +21,7 @@ function Invoke-Pnpm {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
   if (Get-Command "pnpm" -ErrorAction SilentlyContinue) { & pnpm @Arguments; return }
   if (Get-Command "npx" -ErrorAction SilentlyContinue) { & npx --yes pnpm@10.12.1 @Arguments; return }
-  throw "Node.js with npm/npx is required to initialize the frontends."
+  throw "初始化前端需要 Node.js 和 npm/npx，请先安装 Node.js。"
 }
 
 function Initialize-Frontend([string]$directory) {
@@ -63,7 +63,7 @@ function Install-PythonRequirements {
     $previousPythonPath = $env:PYTHONPATH
     $env:PYTHONPATH = (($TargetDir, $previousPythonPath) | Where-Object { $_ }) -join ";"
     try {
-      & $PythonExe -c "import fastapi, uvicorn, multipart, docx, fitz, sqlalchemy, alembic, psycopg, celery, pydantic_settings, httpx"
+      & $PythonExe -c "import fastapi, uvicorn, multipart, docx, fitz, sqlalchemy, alembic, psycopg, celery, pydantic_settings, httpx, jwt"
     }
     finally {
       $env:PYTHONPATH = $previousPythonPath
@@ -76,12 +76,12 @@ function Install-PythonRequirements {
   & $PythonExe -m pip --version | Out-Null
   if ($LASTEXITCODE -ne 0) {
     & $PythonExe -m ensurepip --upgrade
-    if ($LASTEXITCODE -ne 0) { throw "Python pip initialization failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Python 的 pip 初始化失败。" }
   }
   & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir -r requirements.txt
   if ($LASTEXITCODE -ne 0) {
     & $PythonExe -m pip install --disable-pip-version-check --upgrade --target $TargetDir --timeout 30 --retries 2 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
-    if ($LASTEXITCODE -ne 0) { throw "Backend dependency installation failed." }
+    if ($LASTEXITCODE -ne 0) { throw "后端依赖安装失败，请检查网络后重新启动。" }
   }
   Set-Content -LiteralPath $marker -Value $requirementsHash -Encoding ASCII
 }
