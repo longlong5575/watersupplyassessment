@@ -16,6 +16,7 @@ from app.models import (
     SurveyRecord, Town, User, Village, WaterQualityRecord,
 )
 from app.services.assessment_ingest import (
+    AssessmentRecordConflictError,
     create_assessment_record,
     split_town_package,
     stamp_water_quality_audit,
@@ -218,6 +219,17 @@ def create_record(payload: dict[str, Any], session: Session = Depends(get_sessio
     with RECORD_CREATE_LOCK:
         try:
             records = [create_assessment_record(session, item, owner_user_id=user.id) for item in split_town_package(raw)]
+        except AssessmentRecordConflictError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail={
+                "code": "record_conflict",
+                "message": str(exc),
+                "recordId": exc.record_id,
+                "serverUpdatedAt": exc.updated_at,
+                "town": exc.town,
+                "facilityType": exc.facility_type,
+                "solution": "在已提交数据中选择“采用后台最新数据”，重新进入该考核对象后再修改。",
+            }) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         session.commit()
@@ -225,6 +237,7 @@ def create_record(payload: dict[str, Any], session: Session = Depends(get_sessio
             session.refresh(record)
     response = _record_payload(records[0])
     response["recordIds"] = [record.id for record in records]
+    response["records"] = [_record_payload(record) for record in records]
     return response
 
 

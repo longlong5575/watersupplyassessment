@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import json
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -217,6 +218,23 @@ def main() -> None:
                 payload = make_payload(project, cycle_ids[project_name], town, village, facility_type, standards)
                 created = require(client.post("/api/mobile/assessment-records", headers=inspector, json=payload), "保存考核")
                 record_id = created["recordIds"][0]
+                if scenario_index == 1:
+                    device_a_payload = deepcopy(payload)
+                    device_b_payload = deepcopy(payload)
+                    for candidate in (device_a_payload, device_b_payload):
+                        candidate["villages"][0]["backendRecordId"] = record_id
+                        candidate["villages"][0]["serverUpdatedAt"] = created["updatedAt"]
+                    device_a_payload["villages"][0]["deviceNote"] = "设备甲已更新"
+                    device_b_payload["villages"][0]["deviceNote"] = "设备乙的过期修改"
+                    device_a_result = require(client.post("/api/mobile/assessment-records", headers=inspector, json=device_a_payload), "设备甲更新考核")
+                    assert device_a_result["records"][0]["id"] == record_id
+                    device_b_result = client.post("/api/mobile/assessment-records", headers=inspector, json=device_b_payload)
+                    assert device_b_result.status_code == 409
+                    conflict_detail = device_b_result.json()["detail"]
+                    assert conflict_detail["code"] == "record_conflict"
+                    assert conflict_detail["recordId"] == record_id
+                    restored_record = require(client.get(f"/api/records/{record_id}", headers=admin), "读取最新考核记录")
+                    assert restored_record["raw"].get("deviceNote") == "设备甲已更新"
                 if facility_type == "rural_treatment":
                     invalid_override = client.put(
                         f"/api/mobile/assessment-records/{record_id}/water-quality",
@@ -257,6 +275,15 @@ def main() -> None:
                 ), "上传检测报告")
                 require(client.post(f"/api/records/{record_id}/review", headers=admin), "平台复核")
                 require(client.post(f"/api/agent/records/{record_id}/analysis", headers=admin), "分析校验")
+
+                precheck = require(client.post("/api/report-tasks/precheck", headers=admin, json={
+                    "source": "dashboard", "projectId": project["id"], "period": PERIOD,
+                    "townNames": [town["name"]], "outputs": ["separate"],
+                }), "检查金额资料完整性")
+                assert precheck["ok"] is True
+                assert precheck["paymentCheck"]["items"]
+                assert any(item["recordId"] == record_id for item in precheck["paymentCheck"]["items"])
+                assert precheck["paymentCheck"]["incompleteCount"] >= 1
 
                 task = require(client.post("/api/report-tasks", headers=admin, json={
                     "source": "dashboard", "projectId": project["id"], "period": PERIOD,

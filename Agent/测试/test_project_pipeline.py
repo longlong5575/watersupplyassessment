@@ -503,12 +503,28 @@ def main():
         assert {item["raw"]["primaryFacilityType"] for item in restored_maonan} == {"town_plant", "town_network"}
         assert all(item["editable"] is True for item in restored_maonan)
 
-        # Re-submitting an editable target updates the same record instead of creating a duplicate.
+        # Two devices start from the same server version. The second stale save must not overwrite the first.
+        restored_plant = next(item for item in restored_maonan if item["id"] == maonan_plant)
         updated_payload = record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator, note="复核后已更新现场检查记录")
+        updated_payload["villages"][0]["backendRecordId"] = restored_plant["id"]
+        updated_payload["villages"][0]["serverUpdatedAt"] = restored_plant["updatedAt"]
         updated = assert_ok(client.post("/api/mobile/assessment-records", json=updated_payload, headers=inspector), "update existing assessment")
         assert updated["recordIds"] == [maonan_plant]
+        assert updated["records"][0]["id"] == maonan_plant
+        stale_payload = record_payload(project=maonan, cycle=maonan_cycle, town="茂南区", village="", facility_type="town_plant", indicator=maonan_indicator, note="另一台设备上的过期修改")
+        stale_payload["villages"][0]["backendRecordId"] = restored_plant["id"]
+        stale_payload["villages"][0]["serverUpdatedAt"] = restored_plant["updatedAt"]
+        stale_update = client.post("/api/mobile/assessment-records", json=stale_payload, headers=inspector)
+        assert stale_update.status_code == 409
+        stale_detail = stale_update.json()["detail"]
+        assert stale_detail["code"] == "record_conflict"
+        assert stale_detail["recordId"] == maonan_plant
+        assert "未覆盖" in stale_detail["message"]
         restored_after_update = assert_ok(client.get("/api/mobile/assessment-records", headers=inspector, params={"city_id": maonan["id"], "cycle_id": maonan_cycle["id"]}), "restore updated records")["items"]
         assert len([item for item in restored_after_update if item["town"] == "茂南区"]) == 2
+        saved_plant = next(item for item in restored_after_update if item["id"] == maonan_plant)
+        assert "复核后已更新" in str(saved_plant["raw"])
+        assert "过期修改" not in str(saved_plant["raw"])
 
         # Locked records remain visible on mobile but cannot be edited or submitted again.
         assert_ok(client.post(f"/api/records/{maonan_network}/review", headers=admin), "review network")
@@ -560,6 +576,9 @@ def main():
             }), f"report precheck {town}")
             assert precheck["ok"] is True
             assert precheck["summary"]["recordCount"] >= 1
+            assert precheck["paymentCheck"]["items"]
+            assert precheck["paymentCheck"]["incompleteCount"] >= 1
+            assert all(item["status"] in {"可核定金额", "暂不核定金额"} for item in precheck["paymentCheck"]["items"])
             task = assert_ok(client.post("/api/report-tasks", headers=admin, json={
                 "source": "dashboard", "projectId": project["id"], "period": cycle["name"], "townNames": [town], "outputs": ["separate", "summary"]
             }), f"report {town}")

@@ -176,3 +176,120 @@ def build_payment_context(session: Session, record: AssessmentRecord) -> dict[st
         "basis": basis,
         "basisStatus": basis_status,
     }
+
+
+PAYMENT_FACILITY_LABELS = {
+    "rural_treatment": "农村污水处理设施",
+    "town_plant": "镇污水厂",
+    "town_network": "镇污水收集管网",
+}
+
+
+def _has_number(value: Any) -> bool:
+    if value in (None, ""):
+        return False
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _snapshot_point_name(record: dict[str, Any]) -> str:
+    return str(record.get("village") or record.get("town") or "未命名考核对象")
+
+
+def _unique(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(item for item in items if item))
+
+
+def _month_payment_missing(
+    *,
+    project_name: str,
+    facility_type: str,
+    month: dict[str, Any],
+) -> list[str]:
+    month_name = str(month.get("month") or "本期")
+    missing: list[str] = []
+    has_kq = _has_number(month.get("legacyKq")) or (
+        _has_number(month.get("influentCod")) and _has_number(month.get("effluentCod"))
+    )
+    if not has_kq:
+        missing.append(f"{month_name}月均进、出水COD浓度")
+    if facility_type == "town_plant" and not _has_number(month.get("monthlyVolumeTenThousandCubicMeters")):
+        missing.append(f"{month_name}处理水量QB")
+    if "郁南" in project_name and facility_type == "town_network" and not _has_number(month.get("averageDailyVolumeCubicMeters")):
+        missing.append(f"{month_name}日均处理水量")
+    return missing
+
+
+def build_payment_precheck(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """核对报告中最终付费金额所需资料，不将缺失值当作 0。"""
+    project_name = str(snapshot.get("projectName") or "")
+    items: list[dict[str, Any]] = []
+    for record in snapshot.get("records", []):
+        if not isinstance(record, dict):
+            continue
+        facility_type = str(record.get("facilityType") or "")
+        context = record.get("paymentContext") if isinstance(record.get("paymentContext"), dict) else {}
+        basis = context.get("basis") if isinstance(context.get("basis"), dict) else {}
+        months = context.get("months") if isinstance(context.get("months"), list) else []
+        missing: list[str] = []
+
+        if facility_type == "rural_treatment":
+            missing.append("全镇农村设施月度水量、水质和运行汇总数据")
+        else:
+            if not _has_number(context.get("appliedOperationCoefficient")):
+                missing.append("上一期已提交考核结果（或首个付费周期确认）")
+            if not basis:
+                missing.append("当前项目金额基础表数据")
+            elif "郁南" in project_name and facility_type == "town_plant":
+                if not _has_number(context.get("adjustedTreatmentUnitPriceYuanPerCubicMeter")) and not _has_number(basis.get("treatmentOperationUnitPriceYuanPerCubicMeter")):
+                    missing.append("污水处理运营服务费单价")
+            elif "郁南" in project_name and facility_type == "town_network":
+                if not _has_number(basis.get("networkAvailabilityFeeTenThousandYuanPerYear")):
+                    missing.append("管网可用性付费基数")
+                if not _has_number(context.get("adjustedNetworkOperationFeeTenThousandYuanPerYear")) and not _has_number(basis.get("networkOperationFeeTenThousandYuanPerYear")):
+                    missing.append("管网运营维护费基数")
+                if not _has_number(context.get("designScaleCubicMetersPerDay")):
+                    missing.append("设计规模或已确认负荷基数")
+            elif "茂南" in project_name and facility_type == "town_plant":
+                if not _has_number(basis.get("treatmentAvailabilityFeeTenThousandYuanPerYear")):
+                    missing.append("水质净化设施可用性付费基数")
+                if not _has_number(basis.get("treatmentOperationUnitPriceYuanPerCubicMeter")):
+                    missing.append("污水处理运营服务费单价")
+            elif "茂南" in project_name and facility_type == "town_network":
+                if not _has_number(basis.get("networkAvailabilityFeeTenThousandYuanPerYear")):
+                    missing.append("管网可用性付费基数")
+                if not _has_number(basis.get("adjustedNetworkOperationFeeYuanPerYear")):
+                    missing.append("调整后管网年运营维护费")
+
+            if not months:
+                missing.append("本期月度付费测算数据")
+            for month in months:
+                if isinstance(month, dict):
+                    missing.extend(_month_payment_missing(
+                        project_name=project_name,
+                        facility_type=facility_type,
+                        month=month,
+                    ))
+
+        missing = _unique(missing)
+        items.append({
+            "recordId": record.get("id"),
+            "town": record.get("town"),
+            "pointName": _snapshot_point_name(record),
+            "facilityType": facility_type,
+            "facilityLabel": PAYMENT_FACILITY_LABELS.get(facility_type, facility_type or "未标注设施类型"),
+            "ready": not missing,
+            "status": "可核定金额" if not missing else "暂不核定金额",
+            "missingItems": missing,
+        })
+
+    ready_count = sum(1 for item in items if item["ready"])
+    return {
+        "ready": bool(items) and ready_count == len(items),
+        "readyCount": ready_count,
+        "incompleteCount": len(items) - ready_count,
+        "items": items,
+    }

@@ -28,6 +28,15 @@ from app.models import (
 KNOWN_SURVEY_RESPONDENTS = ("implementation_org", "assessment_team", "gov_rep", "villager1", "villager2")
 
 
+class AssessmentRecordConflictError(ValueError):
+    def __init__(self, record: AssessmentRecord):
+        self.record_id = record.id
+        self.updated_at = record.updated_at.isoformat()
+        self.town = record.town.name
+        self.facility_type = _raw_facility_type(record.raw_payload or {})
+        super().__init__("服务器上的这条考核记录已被其他设备修改，本次保存已停止，未覆盖服务器数据")
+
+
 def unwrap_payload(payload: dict[str, Any]) -> dict[str, Any]:
     data = payload.get("data")
     return data if set(payload) == {"data"} and isinstance(data, dict) else payload
@@ -161,6 +170,13 @@ def create_assessment_record(session: Session, raw: dict[str, Any], owner_user_i
     record = find_existing_record(session, raw, city.id, cycle.id, town.id, village.id if village else None, version.id if version else None, owner_user_id)
     if record is not None and record.status == "locked":
         raise ValueError("考核记录已锁定，不能修改")
+    if record is not None:
+        expected_record_id = str(raw.get("backendRecordId") or "").strip()
+        expected_updated_at = str(raw.get("serverUpdatedAt") or "").strip()
+        if expected_record_id and expected_record_id != record.id:
+            raise AssessmentRecordConflictError(record)
+        if expected_updated_at and not _same_record_timestamp(expected_updated_at, record.updated_at):
+            raise AssessmentRecordConflictError(record)
     requested_status = raw.get("status")
     next_status = requested_status if requested_status in {"draft", "submitted"} else "draft"
     if record is None:
@@ -188,6 +204,19 @@ def create_assessment_record(session: Session, raw: dict[str, Any], owner_user_i
     if raw.get("waterQuality"):
         sync_water_quality(session, record, raw["waterQuality"])
     return record
+
+
+def _same_record_timestamp(expected: str, actual: datetime) -> bool:
+    try:
+        expected_value = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if expected_value.tzinfo is not None:
+        expected_value = expected_value.astimezone(timezone.utc).replace(tzinfo=None)
+    actual_value = actual
+    if actual_value.tzinfo is not None:
+        actual_value = actual_value.astimezone(timezone.utc).replace(tzinfo=None)
+    return expected_value == actual_value
 
 
 def _raw_facility_type(raw: dict[str, Any]) -> str:

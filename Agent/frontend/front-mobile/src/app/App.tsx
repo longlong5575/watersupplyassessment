@@ -191,6 +191,8 @@ interface VillageRecord {
   waterQuality?: WaterQualityEntry;
   backendStatus?: "submitted" | "returned" | "reviewed" | "locked";
   editable?: boolean;
+  backendRecordId?: string;
+  serverUpdatedAt?: string;
 }
 
 interface TownPackage {
@@ -208,10 +210,17 @@ interface SyncQueueItem {
   localId: string;
   town: string;
   pkg: TownPackage;
-  syncStatus: "pending_sync" | "synced" | "sync_failed";
+  syncStatus: "pending_sync" | "synced" | "sync_failed" | "sync_conflict";
   createdAt: string;
   syncedAt?: string;
   lastError?: string;
+}
+
+class SyncConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SyncConflictError";
+  }
 }
 
 function mergeVillageRecords(existing: VillageRecord[], incoming: VillageRecord[]): VillageRecord[] {
@@ -250,26 +259,56 @@ function makeLocalId() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-async function submitTownPackageToBackend(pkg: TownPackage, token: string) {
+async function throwBackendSyncError(response: Response, fallback: string): Promise<never> {
+  let detail: unknown = null;
+  try {
+    const body = await response.json();
+    detail = body?.detail;
+  } catch {
+    detail = null;
+  }
+  if (response.status === 409 && detail && typeof detail === "object" && (detail as { code?: string }).code === "record_conflict") {
+    const conflict = detail as { message?: string; solution?: string };
+    throw new SyncConflictError(`${conflict.message || "后台记录已被其他设备修改"}。${conflict.solution ? `解决方法：${conflict.solution}` : "请采用后台最新数据后重新修改。"}`);
+  }
+  const reason = typeof detail === "string" ? detail : "";
+  throw new Error(`${fallback}：${reason || `服务器返回 ${response.status}`}`);
+}
+
+async function submitTownPackageToBackend(pkg: TownPackage, token: string): Promise<TownPackage> {
   const createResponse = await fetch(`${API_BASE_URL}/mobile/assessment-records`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(pkg),
   });
-  if (!createResponse.ok) throw new Error(`创建考核记录失败：${createResponse.status}`);
+  if (!createResponse.ok) await throwBackendSyncError(createResponse, "保存考核记录失败");
 
   const record = await createResponse.json();
   const recordIds = Array.isArray(record.recordIds) && record.recordIds.length ? record.recordIds : [record.id];
-  const submitted = [];
+  const createdRecords = Array.isArray(record.records) ? record.records : [];
+  const submitted: Array<{ id?: string; updatedAt?: string }> = [];
   for (const recordId of recordIds) {
     const submitResponse = await fetch(`${API_BASE_URL}/mobile/assessment-records/${recordId}/submit`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!submitResponse.ok) throw new Error(`提交考核记录失败：${submitResponse.status}`);
+    if (!submitResponse.ok) await throwBackendSyncError(submitResponse, "提交考核记录失败");
     submitted.push(await submitResponse.json());
   }
-  return submitted;
+  return {
+    ...pkg,
+    villages: pkg.villages.map((village, index) => {
+      const created = createdRecords[index] ?? {};
+      const submittedRecord = submitted.find(item => item.id === created.id) ?? submitted[index] ?? created;
+      return {
+        ...village,
+        backendRecordId: submittedRecord.id ?? created.id ?? village.backendRecordId,
+        serverUpdatedAt: submittedRecord.updatedAt ?? created.updatedAt ?? village.serverUpdatedAt,
+        backendStatus: "submitted",
+        editable: true,
+      };
+    }),
+  };
 }
 
 function triggerDownload(pkg: TownPackage) {
@@ -1233,8 +1272,12 @@ function P1Town({ cityId, projectName, cycleName, onBack, onNext, submittedData,
       .catch(() => undefined);
   }, [cityId]);
   const selected = towns.find(town => town.id === selectedId);
-  const failedSyncCount = syncQueue.filter(item => item.syncStatus === "sync_failed").length;
-  const pendingSyncCount = syncQueue.filter(item => item.syncStatus === "pending_sync").length;
+  const currentSyncQueue = syncQueue.filter(item =>
+    (!cityId || item.pkg.cityId === cityId) && item.pkg.period === cycleName
+  );
+  const failedSyncCount = currentSyncQueue.filter(item => item.syncStatus === "sync_failed").length;
+  const pendingSyncCount = currentSyncQueue.filter(item => item.syncStatus === "pending_sync").length;
+  const conflictSyncCount = currentSyncQueue.filter(item => item.syncStatus === "sync_conflict").length;
   const completedTypesByTown = new Map<string, Set<PrimaryFacilityType>>();
   syncQueue
     .filter(item => item.syncStatus === "synced" && (!cityId || item.pkg.cityId === cityId) && item.pkg.period === cycleName)
@@ -1310,6 +1353,14 @@ function P1Town({ cityId, projectName, cycleName, onBack, onNext, submittedData,
       </div>
 
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0 space-y-2">
+        {conflictSyncCount > 0 && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="flex items-center justify-between gap-3">
+              <span>{conflictSyncCount} 个考核对象存在设备修改冲突，后台数据未被覆盖</span>
+              <button onClick={onViewSubmitted} className="font-semibold underline shrink-0">去处理</button>
+            </div>
+          </div>
+        )}
         {(failedSyncCount > 0 || pendingSyncCount > 0) && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <div className="flex items-center justify-between gap-3">
@@ -3501,7 +3552,7 @@ function formatSubmittedScore(value: number): string {
   return Number(value.toFixed(1)).toString();
 }
 
-function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onRetrySync, onDiscardSync, onClearSubmittedData }: {
+function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onRetrySync, onDiscardSync, onResolveConflict, onClearSubmittedData }: {
   projectName: string;
   cityId: string;
   cycleName: string;
@@ -3509,6 +3560,7 @@ function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onR
   onBack: () => void;
   onRetrySync: () => Promise<void>;
   onDiscardSync: () => void;
+  onResolveConflict: () => void;
   onClearSubmittedData: () => Promise<{ recordCount: number; reportCount: number }>;
 }) {
   const [expandedTown, setExpandedTown] = useState<string | null>(null);
@@ -3524,6 +3576,8 @@ function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onR
     }), {});
   const towns = Object.keys(displaySubmittedData);
   const pendingItems = scopedQueue.filter(item => item.syncStatus !== "synced");
+  const conflictItems = pendingItems.filter(item => item.syncStatus === "sync_conflict");
+  const retryableItems = pendingItems.filter(item => item.syncStatus === "sync_failed" || item.syncStatus === "pending_sync");
 
   const clearSubmittedData = async () => {
     if (!window.confirm(`确定清空“${projectName} · ${cycleName}”的全部已提交数据吗？`)) return;
@@ -3553,12 +3607,22 @@ function PSubmittedData({ projectName, cityId, cycleName, syncQueue, onBack, onR
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {pendingItems.length > 0 && (
+        {conflictItems.length > 0 && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
+            <p className="font-semibold">检测到 {conflictItems.length} 条设备修改冲突</p>
+            <p className="mt-1 leading-5">后台数据已由其他设备更新，系统已停止覆盖。采用后台最新数据后，可重新进入对应考核对象继续修改。</p>
+            {conflictItems.map(item => (
+              <p key={item.localId} className="mt-2 rounded-lg bg-white/70 px-3 py-2 leading-5">{item.town}：{item.lastError || "后台数据已更新"}</p>
+            ))}
+            <button onClick={onResolveConflict} className="mt-3 w-full rounded-lg bg-red-600 px-3 py-2 font-semibold text-white">采用后台最新数据</button>
+          </div>
+        )}
+        {retryableItems.length > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-semibold">还有数据包未同步到后台</p>
-                <p className="mt-1">{pendingItems.filter(item => item.syncStatus === "sync_failed").length} 个失败，{pendingItems.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
+                <p className="mt-1">{retryableItems.filter(item => item.syncStatus === "sync_failed").length} 个失败，{retryableItems.filter(item => item.syncStatus === "pending_sync").length} 个等待</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={onDiscardSync} disabled={retrying} className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-red-600 disabled:opacity-50">放弃</button>
@@ -3726,6 +3790,7 @@ function AssessmentApp() {
   const [submitError, setSubmitError] = useState("");
   const [standardVersionName, setStandardVersionName] = useState("");
   const [autoLoginChecked, setAutoLoginChecked] = useState(false);
+  const [recordsRefreshRevision, setRecordsRefreshRevision] = useState(0);
 
   useEffect(() => {
     if (auth?.token) {
@@ -3813,7 +3878,7 @@ function AssessmentApp() {
         if (cancelled || !Array.isArray(data?.items)) return;
         const recordsByTown = new Map<string, VillageRecord[]>();
         const updatedAtByTown = new Map<string, string>();
-        data.items.forEach((item: { status: VillageRecord["backendStatus"]; editable?: boolean; town: string; updatedAt?: string; raw?: Partial<VillageRecord> }) => {
+        data.items.forEach((item: { id?: string; status: VillageRecord["backendStatus"]; editable?: boolean; town: string; updatedAt?: string; raw?: Partial<VillageRecord> }) => {
           if (!item.raw || !item.town) return;
           const record: VillageRecord = {
             village: item.raw.village ?? PRIMARY_FACILITY_TYPE_INFO[item.raw.primaryFacilityType ?? "rural_treatment"].label,
@@ -3829,6 +3894,8 @@ function AssessmentApp() {
             waterQuality: item.raw.waterQuality,
             backendStatus: item.status,
             editable: item.editable !== false,
+            backendRecordId: item.id,
+            serverUpdatedAt: item.updatedAt,
           };
           recordsByTown.set(item.town, mergeVillageRecords(recordsByTown.get(item.town) ?? [], [record]));
           if (item.updatedAt) updatedAtByTown.set(item.town, item.updatedAt);
@@ -3864,7 +3931,7 @@ function AssessmentApp() {
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [auth?.token, cityId, cycleId, cycleName]);
+  }, [auth?.token, cityId, cycleId, cycleName, recordsRefreshRevision]);
   const [surveyEntries, setSurveyEntries] = useState<Record<string, SurveyFormEntry>>({});
   const [surveyTarget, setSurveyTarget] = useState<{ cat: SurveyCategory; res: SurveyRespondent } | null>(null);
   const [waterQuality, setWaterQuality] = useState<WaterQualityEntry>(() => emptyWaterQualityEntry());
@@ -3956,6 +4023,9 @@ function AssessmentApp() {
     const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
     const combinedCurrent = roundScoreValue(combinedScores.reduce((s, v) => s + v.currentScore, 0));
     const combinedDeducted = roundScoreValue(combinedScores.reduce((s, v) => s + v.deductedScore, 0));
+    const savedRecord = completedVillages.find(item =>
+      item.village === village && item.primaryFacilityType === primaryFacilityType
+    );
     const record: VillageRecord = {
       village,
       facilityType: primaryFacilityType,
@@ -3968,6 +4038,10 @@ function AssessmentApp() {
       entries,
       surveyEntries,
       waterQuality,
+      backendRecordId: savedRecord?.backendRecordId,
+      serverUpdatedAt: savedRecord?.serverUpdatedAt,
+      backendStatus: savedRecord?.backendStatus,
+      editable: savedRecord?.editable,
     };
     setScoreByType(refreshedScores);
     setCompletedVillages(prev => [...prev.filter(r => r.village !== village || r.primaryFacilityType !== primaryFacilityType), record]);
@@ -4012,24 +4086,25 @@ function AssessmentApp() {
         }];
       }
       return prev.map(item => item.localId === existing.localId
-        ? { ...item, syncStatus: "synced", syncedAt, lastError: undefined }
+        ? { ...item, pkg, syncStatus: "synced", syncedAt, lastError: undefined }
         : item);
     });
   };
   const queuePackage = (pkg: TownPackage, error: unknown) => {
     const message = error instanceof Error ? error.message : "同步失败";
+    const syncStatus: SyncQueueItem["syncStatus"] = error instanceof SyncConflictError ? "sync_conflict" : "sync_failed";
     setSyncQueue(prev => {
       const existing = prev.find(item => item.pkg.exportedAt === pkg.exportedAt);
       if (existing) {
         return prev.map(item => item.localId === existing.localId
-          ? { ...item, syncStatus: "sync_failed", lastError: message }
+          ? { ...item, syncStatus, lastError: message }
           : item);
       }
       return [...prev, {
         localId: makeLocalId(),
         town: pkg.town,
         pkg,
-        syncStatus: "sync_failed",
+        syncStatus,
         createdAt: new Date().toISOString(),
         lastError: message,
       }];
@@ -4040,11 +4115,11 @@ function AssessmentApp() {
     if (!auth?.token) return;
     if (!pending.length) return;
     setSubmitError("");
-    for (const item of pending) {
+    for (const item of pending.filter(current => current.syncStatus !== "sync_conflict" && current.syncStatus !== "synced")) {
       setSyncQueue(prev => prev.map(current => current.localId === item.localId ? { ...current, syncStatus: "pending_sync", lastError: undefined } : current));
       try {
-        await submitTownPackageToBackend(item.pkg, auth.token);
-        markPackageSynced(item.pkg);
+        const syncedPackage = await submitTownPackageToBackend(item.pkg, auth.token);
+        markPackageSynced(syncedPackage);
       } catch (error) {
         if (error instanceof Error && error.message.includes("401")) {
           localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -4053,18 +4128,20 @@ function AssessmentApp() {
           break;
         }
         queuePackage(item.pkg, error);
-        setSubmitError("仍有数据包同步失败，稍后可继续重试。");
+        setSubmitError(error instanceof SyncConflictError
+          ? "检测到其他设备的更新，未覆盖后台数据。请在已提交数据中处理修改冲突。"
+          : "仍有数据包同步失败，稍后可继续重试。");
       }
     }
   };
 
   const retryPendingSync = async () => {
-    await retrySyncItems(syncQueue.filter(item => item.syncStatus !== "synced"));
+    await retrySyncItems(syncQueue.filter(item => item.syncStatus === "pending_sync" || item.syncStatus === "sync_failed"));
   };
 
   const retryCurrentSubmittedSync = async () => {
     await retrySyncItems(syncQueue.filter(item =>
-      item.syncStatus !== "synced"
+      (item.syncStatus === "pending_sync" || item.syncStatus === "sync_failed")
       && (!cityId || item.pkg.cityId === cityId)
       && item.pkg.period === cycleName
     ));
@@ -4072,18 +4149,35 @@ function AssessmentApp() {
 
   const discardPendingSync = () => {
     if (!window.confirm("确定放弃所有同步失败和等待同步的数据包吗？此操作无法撤销。")) return;
-    setSyncQueue(prev => prev.filter(item => item.syncStatus === "synced"));
+    setSyncQueue(prev => prev.filter(item => item.syncStatus === "synced" || item.syncStatus === "sync_conflict"));
     setSubmitError("");
   };
 
   const discardCurrentPendingSync = () => {
     if (!window.confirm(`确定放弃“${city} · ${cycleName}”尚未同步的数据包吗？此操作无法撤销。`)) return;
     setSyncQueue(prev => prev.filter(item => !(
-      item.syncStatus !== "synced"
+      (item.syncStatus === "pending_sync" || item.syncStatus === "sync_failed")
       && (!cityId || item.pkg.cityId === cityId)
       && item.pkg.period === cycleName
     )));
     setSubmitError("");
+  };
+
+  const resolveCurrentSyncConflicts = () => {
+    const conflicts = syncQueue.filter(item =>
+      item.syncStatus === "sync_conflict"
+      && (!cityId || item.pkg.cityId === cityId)
+      && item.pkg.period === cycleName
+    );
+    if (!conflicts.length) return;
+    if (!window.confirm("确定采用后台最新数据吗？本机中与后台冲突的未同步修改将被放弃。")) return;
+    setSyncQueue(prev => prev.filter(item => !(
+      item.syncStatus === "sync_conflict"
+      && (!cityId || item.pkg.cityId === cityId)
+      && item.pkg.period === cycleName
+    )));
+    setSubmitError("");
+    setRecordsRefreshRevision(value => value + 1);
   };
 
   const clearCurrentSubmittedData = async (): Promise<{ recordCount: number; reportCount: number }> => {
@@ -4157,9 +4251,9 @@ function AssessmentApp() {
     async function syncPending() {
       for (const item of pending) {
         try {
-          await submitTownPackageToBackend(item.pkg, auth.token);
+          const syncedPackage = await submitTownPackageToBackend(item.pkg, auth.token);
           if (cancelled) return;
-          markPackageSynced(item.pkg);
+          markPackageSynced(syncedPackage);
         } catch (error) {
           if (cancelled) return;
           queuePackage(item.pkg, error);
@@ -4375,8 +4469,8 @@ function AssessmentApp() {
               const pkg = buildPackage();
               try {
                 if (!auth?.token) throw new Error("登录状态已失效，请重新登录");
-                await submitTownPackageToBackend(pkg, auth.token);
-                markPackageSynced(pkg);
+                const syncedPackage = await submitTownPackageToBackend(pkg, auth.token);
+                markPackageSynced(syncedPackage);
                 setTown(""); setVillage("");
                 setFtype("treatment"); setEntries({});
                 setPrimaryFacilityType("rural_treatment");
@@ -4389,7 +4483,9 @@ function AssessmentApp() {
               } catch (error) {
                 console.error(error);
                 queuePackage(pkg, error);
-                setSubmitError("提交失败，数据已离线暂存；后端恢复或重新登录后会自动重试。");
+                setSubmitError(error instanceof SyncConflictError
+                  ? "后台记录已被其他设备修改，本次保存没有覆盖后台数据。请到“已提交镇街数据”处理修改冲突。"
+                  : "提交失败，数据已离线暂存；后端恢复或重新登录后会自动重试。");
               } finally {
                 setIsTownSubmitting(false);
               }
@@ -4467,6 +4563,7 @@ function AssessmentApp() {
             onBack={() => setPage("town")}
             onRetrySync={retryCurrentSubmittedSync}
             onDiscardSync={discardCurrentPendingSync}
+            onResolveConflict={resolveCurrentSyncConflicts}
             onClearSubmittedData={clearCurrentSubmittedData}
           />
         );

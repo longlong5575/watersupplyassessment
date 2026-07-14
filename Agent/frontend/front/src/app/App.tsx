@@ -145,6 +145,21 @@ type ReportPrecheck = {
     indicatorVersionIds: string[];
     datasetHash?: string | null;
   };
+  paymentCheck?: {
+    ready: boolean;
+    readyCount: number;
+    incompleteCount: number;
+    items: Array<{
+      recordId?: string | null;
+      town?: string | null;
+      pointName: string;
+      facilityType: string;
+      facilityLabel: string;
+      ready: boolean;
+      status: string;
+      missingItems: string[];
+    }>;
+  };
 };
 
 const SURVEY_LABELS = ["污水处理设施", "管网设施", "调查问卷", "水质抽检情况"];
@@ -4220,7 +4235,7 @@ function MobileDataPage({ onNav, cities, projectId, setProjectId, setSelectedTow
   const visibleTowns = reportTowns.filter(t => t.cityId === projectId && ((t.reviewedCount ?? 0) + (t.lockedCount ?? 0) > 0) && !removedTowns.has(t.name));
   const visibleTownNames = visibleTowns.map(t => t.name);
   const visibleTownKey = visibleTownNames.join("|");
-  const canProceed = Boolean(projectId) && visibleTowns.length > 0;
+  const canProceed = Boolean(projectId) && visibleTowns.length > 0 && !precheckLoading && precheck?.ok !== false;
   useEffect(() => {
     if (!projectId || visibleTowns.length === 0) {
       setPrecheck(null);
@@ -4336,6 +4351,74 @@ function MobileDataPage({ onNav, cities, projectId, setProjectId, setSelectedTow
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div className="bg-card border border-border rounded-lg overflow-hidden">
+          <div className="px-6 py-4 border-b border-border flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">金额资料完整性检查</h3>
+              <p className="text-xs text-muted-foreground mt-1">资料不全时仍可生成报告，但不会把缺失值当作 0 元计算。</p>
+            </div>
+            {precheckLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin" />正在检查</span>
+            ) : precheck?.paymentCheck ? (
+              <span className={`inline-flex rounded border px-2.5 py-1 text-xs font-semibold ${precheck.paymentCheck.ready ? "border-[var(--status-success)]/30 bg-[var(--status-success-bg)] text-[var(--status-success)]" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
+                {precheck.paymentCheck.ready ? "全部可核定" : `${precheck.paymentCheck.incompleteCount} 个暂不核定`}
+              </span>
+            ) : null}
+          </div>
+
+          {precheck?.errors?.length ? (
+            <div className="mx-5 mt-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 space-y-1">
+              {precheck.errors.map((message, index) => <p key={`${message}-${index}`}>生成前需处理：{message}</p>)}
+            </div>
+          ) : null}
+
+          {precheck?.paymentCheck?.items?.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/20 text-xs text-muted-foreground">
+                    <th className="text-left px-5 py-3 font-medium">镇街</th>
+                    <th className="text-left px-3 py-3 font-medium">考核对象</th>
+                    <th className="text-left px-3 py-3 font-medium">设施类型</th>
+                    <th className="text-left px-3 py-3 font-medium">核对结果</th>
+                    <th className="text-left px-3 py-3 font-medium">待补资料</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {precheck.paymentCheck.items.map(item => (
+                    <tr key={item.recordId || `${item.town}-${item.pointName}-${item.facilityType}`} className="border-b border-border last:border-0 align-top">
+                      <td className="px-5 py-3 text-xs text-foreground whitespace-nowrap">{item.town || "-"}</td>
+                      <td className="px-3 py-3 text-xs text-foreground whitespace-nowrap">{item.pointName}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{item.facilityLabel}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${item.ready ? "border-[var(--status-success)]/30 bg-[var(--status-success-bg)] text-[var(--status-success)]" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs leading-5 text-muted-foreground min-w-[320px]">
+                        {item.ready ? "已具备当期金额核定条件" : item.missingItems.join("；")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : !precheckLoading ? (
+            <div className="px-6 py-8 text-center text-sm text-muted-foreground">请先选择有已复核数据的项目。</div>
+          ) : null}
+
+          {precheck?.warnings?.length ? (
+            <div className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
+                <div className="space-y-1">
+                  {precheck.warnings.map((message, index) => <p key={`${message}-${index}`}>{message}</p>)}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {/* Actions */}

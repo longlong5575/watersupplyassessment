@@ -15,6 +15,7 @@ from app.core.security import admin_user
 from app.models import AssessmentCycle, AssessmentRecord, City, Report, ReportTask, Town
 from app.schemas import ReportTaskRequest
 from app.services.report_dataset import build_report_dataset, validate_report_dataset
+from app.services.payment_context import build_payment_precheck
 from app.services.report_tasks import run_report_task
 
 
@@ -170,6 +171,12 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
             warnings.append(f"{town.get('town')}缺少问卷记录。")
         if town.get("attachmentCount", 0) <= 0:
             warnings.append(f"{town.get('town')}缺少附件材料。")
+    payment_check = build_payment_precheck(snapshot)
+    if payment_check["incompleteCount"]:
+        warnings.append(
+            f"有 {payment_check['incompleteCount']} 个考核对象的付费测算资料未齐全；"
+            "报告仍可生成，但不会将缺失值按 0 计算，最终金额将标注为暂不核定。"
+        )
     return {
         "ok": not errors,
         "errors": errors,
@@ -185,6 +192,7 @@ def precheck_task(payload: ReportTaskRequest, session: Session = Depends(get_ses
             "datasetHash": snapshot.get("hash"),
         },
         "towns": snapshot.get("towns", []),
+        "paymentCheck": payment_check,
     }
 
 
