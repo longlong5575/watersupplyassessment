@@ -135,7 +135,12 @@ def _number(value: Any) -> float | None:
 def source_metadata() -> dict[str, Any]:
     yunan = json.loads((SOURCE_DIR / "yunan-full.json").read_text(encoding="utf-8"))
     maonan = json.loads((SOURCE_DIR / "maonan-full.json").read_text(encoding="utf-8"))
-    result: dict[str, Any] = {"water": defaultdict(list), "payment": defaultdict(list), "facility": {}}
+    result: dict[str, Any] = {
+        "water": defaultdict(list),
+        "survey": {},
+        "payment": defaultdict(list),
+        "facility": {},
+    }
 
     yunan_summary = yunan["tables"][7]["rows"]
     for row in yunan_summary[1:]:
@@ -157,9 +162,11 @@ def source_metadata() -> dict[str, Any]:
             "influentTp": _number(row[5]), "codValue": _number(row[6]), "nh3nValue": _number(row[7]),
             "tpValue": _number(row[8]), "kq": _number(row[10]), "qualified": row[12] == "是",
         }
-        result["water"][("郁南项目", "2025年第2季度", current_town)].append(sample)
+        result["water"][("郁南项目", "2025年第2季度", current_town, None)].append(sample)
     for key, samples in list(result["water"].items()):
-        project, source_period, town = key
+        project, source_period, town, point = key
+        if point is not None:
+            continue
         if project != "郁南项目":
             continue
         facility = result["facility"].get((project, source_period, town, "town_plant"), {})
@@ -176,6 +183,58 @@ def source_metadata() -> dict[str, Any]:
                 "averageDailyVolumeCubicMeters": daily,
                 "monthlyVolumeTenThousandCubicMeters": round(daily * calendar.monthrange(year, month)[1] / 10000, 4) if daily else None,
             })
+
+    current_town = ""
+    current_village = ""
+    for row in yunan["tables"][237]["rows"]:
+        if len(row) < 12 or not str(row[0] or "").strip().isdigit():
+            continue
+        current_town = str(row[1] or current_town).strip()
+        current_village = str(row[2] or current_village).strip()
+        point = str(row[3] or "").strip()
+        if not current_town or not point:
+            continue
+        result["water"][("郁南项目", "2025年第2季度", current_town, point)].append({
+            "sampleTime": row[4],
+            "administrativeVillage": current_village,
+            "influentCod": _number(row[5]),
+            "influentNh3n": _number(row[6]),
+            "codValue": _number(row[7]),
+            "nh3nValue": _number(row[8]),
+            "kq": _number(row[9]),
+            "qualified": str(row[10]).strip() == "是",
+            "influentQualified": str(row[11]).strip() == "是",
+        })
+
+    for table in yunan["tables"]:
+        context = " > ".join(table.get("contextBefore") or [])
+        matches = re.findall(r"([^ >]+镇)农村污水处理设施公众调查情况汇总表", context)
+        if not matches:
+            continue
+        town = matches[-1]
+        current_village = ""
+        for row in table.get("rows") or []:
+            if len(row) < 11:
+                continue
+            current_village = str(row[0] or current_village).strip()
+            point = str(row[1] or "").strip()
+            count = _number(row[2])
+            satisfaction_score = _number(row[6])
+            collection_score = _number(row[10])
+            if not point or point == "自然村" or count is None or count <= 0:
+                continue
+            result["survey"][("郁南项目", "2025年第2季度", town, point)] = {
+                "administrativeVillage": current_village,
+                "count": int(count),
+                "satisfaction": {
+                    "a": int(_number(row[3]) or 0), "b": int(_number(row[4]) or 0),
+                    "c": int(_number(row[5]) or 0), "score": satisfaction_score,
+                },
+                "sewageCollection": {
+                    "a": int(_number(row[7]) or 0), "b": int(_number(row[8]) or 0),
+                    "c": int(_number(row[9]) or 0), "score": collection_score,
+                },
+            }
 
     for table_index, source_period in ((7, "2025年上半年度"), (21, "2025年下半年度")):
         for row in maonan["tables"][table_index - 1]["rows"][1:]:
@@ -209,14 +268,14 @@ def source_metadata() -> dict[str, Any]:
     for row in maonan["tables"][104]["rows"][2:]:
         if len(row) < 12 or not row[1]:
             continue
-        result["water"][("茂南项目", "2025年上半年度", row[1])].append({
+        result["water"][("茂南项目", "2025年上半年度", row[1], None)].append({
             "sampleTime": row[2], "influentCod": _number(row[3]), "influentNh3n": _number(row[4]),
             "influentTp": _number(row[5]), "influentSs": _number(row[6]), "codValue": _number(row[7]),
             "nh3nValue": _number(row[8]), "tpValue": _number(row[9]), "ssValue": _number(row[10]),
             "qualified": row[11] == "是",
         })
-        result["water"][("茂南项目", "2025年下半年度", row[1])] = list(
-            result["water"][("茂南项目", "2025年上半年度", row[1])]
+        result["water"][("茂南项目", "2025年下半年度", row[1], None)] = list(
+            result["water"][("茂南项目", "2025年上半年度", row[1], None)]
         )
     return result
 
@@ -264,22 +323,41 @@ def make_entries(record: dict[str, Any], standards: dict[str, Any]) -> tuple[dic
     leaves = [item for item in standards["items"] if item["level"] == 3]
     by_code = {item["code"]: item for item in leaves}
     deductions: dict[str, float] = defaultdict(float)
+    source_reasons: dict[str, list[str]] = defaultdict(list)
+    source_items: dict[str, list[str]] = defaultdict(list)
     for item in record["deductions"]:
         deductions[item["itemCode"]] += float(item["deduction"])
+        reason = str(item.get("reason") or "").strip()
+        if reason and reason not in source_reasons[item["itemCode"]]:
+            source_reasons[item["itemCode"]].append(reason)
+        source_item = str(item.get("sourceItem") or "").strip()
+        if source_item and source_item not in source_items[item["itemCode"]]:
+            source_items[item["itemCode"]].append(source_item)
     diagnostics: list[dict[str, Any]] = []
     entries: dict[str, Any] = {}
     for item in leaves:
         target = min(round(deductions.get(item["code"], 0), 4), float(item["fullScore"]))
         entry = {"itemId": item["id"], "done": True, "options": []}
         if target > 0:
-            note = _fresh_reason(item["name"], target, record["point"])
+            reasons = source_reasons.get(item["code"]) or []
+            source_item_names = source_items.get(item["code"]) or []
+            if reasons:
+                note = "；".join(reasons)
+            elif source_item_names:
+                note = f"例文评分表“{'、'.join(source_item_names)}”记录扣分{target:g}分。"
+            else:
+                note = _fresh_reason(item["name"], target, record["point"])
             options, mode = _option_entries(item, target, note)
             if options:
                 entry["options"] = options
             else:
                 entry["deduction"] = target
                 entry["reason"] = note
-            diagnostics.append({"item": item["name"], "deduction": target, "mode": mode})
+            diagnostics.append({
+                "item": item["name"], "deduction": target, "mode": mode,
+                "usedSourceReason": bool(source_reasons.get(item["code"])),
+                "usedSourceEvidence": bool(source_reasons.get(item["code"]) or source_items.get(item["code"])),
+            })
         entries[item["id"]] = entry
     missing = sorted(set(deductions) - set(by_code))
     if missing:
@@ -293,36 +371,70 @@ def _iso_sample_time(value: str, fallback_period: str) -> str:
         year, month, day = map(int, match.groups())
         return f"{year:04d}-{month:02d}-{day:02d}T09:30:00"
     year_match = re.search(r"(\d{4})年", fallback_period)
-    return f"{year_match.group(1) if year_match else '2030'}-06-30T09:30:00"
+    year = year_match.group(1) if year_match else "2030"
+    month_day_match = re.search(r"(\d{1,2})月(\d{1,2})日", str(value or ""))
+    if month_day_match:
+        month, day = map(int, month_day_match.groups())
+        return f"{year}-{month:02d}-{day:02d}T09:30:00"
+    return f"{year}-06-30T09:30:00"
 
 
 def water_payload(record: dict[str, Any], metadata: dict[str, Any], period: str) -> dict[str, Any] | None:
-    samples = metadata["water"].get((record["project"], record["period"], record["town"]), [])
-    if record["facilityType"] == "rural_treatment":
-        failed = any(item["itemName"] == "污水处理质量" and item["deduction"] > 0 for item in record["deductions"])
-        return {
-            "sampleTime": _iso_sample_time("", period), "dischargeStandard": "DB44/2208-2019",
-            "processType": "农村生活污水处理设施", "codValue": "70" if failed else "35", "codLimit": "60",
-            "nh3nValue": "6", "nh3nLimit": "8", "tpValue": "0.6", "tpLimit": "1",
-            "conclusion": "unqualified" if failed else "qualified", "completed": True,
-            "note": "依据本期抽检结果自动判定。",
-        }
-    if record["facilityType"] != "town_plant" or not samples:
+    point = record["point"] if record["facilityType"] == "rural_treatment" else None
+    samples = metadata["water"].get((record["project"], record["period"], record["town"], point), [])
+    if record["facilityType"] not in {"town_plant", "rural_treatment"} or not samples:
         return None
-    sample = samples[-1]
     maonan = record["project"] == "茂南项目"
-    return {
-        "sampleTime": _iso_sample_time(sample["sampleTime"], period),
-        "dischargeStandard": "城镇污水处理厂污染物排放标准一级A及项目适用标准",
-        "processType": metadata["facility"].get((record["project"], record["period"], record["town"], "town_plant"), {}).get("processType") or "以项目台账为准",
-        "designScale": metadata["facility"].get((record["project"], record["period"], record["town"], "town_plant"), {}).get("designScale"),
-        "codValue": sample.get("codValue"), "codLimit": 40,
-        "nh3nValue": sample.get("nh3nValue"), "nh3nLimit": 5,
-        "tpValue": sample.get("tpValue"), "tpLimit": 0.5,
-        "ssValue": sample.get("ssValue") if maonan else None, "ssLimit": 10 if maonan else None,
-        "conclusion": "qualified" if sample.get("qualified") else "unqualified", "completed": True,
-        "note": "系统按本期实测值与限值逐项比较后形成判定。",
-    }
+    rural = record["facilityType"] == "rural_treatment"
+    facility = metadata["facility"].get((record["project"], record["period"], record["town"], "town_plant"), {})
+    normalized: list[dict[str, Any]] = []
+    for sample in samples:
+        item = {
+            "sampleTime": _iso_sample_time(sample["sampleTime"], period),
+            "dischargeStandard": "DB44/2208-2019" if rural else "城镇污水处理厂污染物排放标准一级A及项目适用标准",
+            "processType": "农村生活污水处理设施" if rural else facility.get("processType") or "以项目台账为准",
+            "designScale": None if rural else facility.get("designScale"),
+            "influentCod": sample.get("influentCod"),
+            "influentNh3n": sample.get("influentNh3n"),
+            "influentTp": sample.get("influentTp"),
+            "codValue": sample.get("codValue"), "codLimit": 60 if rural else 40,
+            "nh3nValue": sample.get("nh3nValue"), "nh3nLimit": 8 if rural else 5,
+            "tpValue": sample.get("tpValue"), "tpLimit": None if rural else 0.5,
+            "ssValue": sample.get("ssValue") if maonan else None,
+            "ssLimit": 10 if maonan else None,
+            "conclusion": "qualified" if sample.get("qualified") else "unqualified",
+            "completed": True,
+            "note": "实测值、取样时间和达标结论取自对应项目例文。",
+        }
+        normalized.append({key: value for key, value in item.items() if value is not None})
+    result = dict(normalized[-1])
+    result["samples"] = normalized
+    result["note"] = f"共回填例文水质记录{len(normalized)}条；各条记录按实测值与适用限值逐项核对。"
+    return result
+
+
+def survey_payload(record: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
+    source = metadata["survey"].get((record["project"], record["period"], record["town"], record["point"]))
+    if not source:
+        return None
+    count = source["count"]
+    satisfaction = source["satisfaction"]
+    collection = source["sewageCollection"]
+    satisfaction_comment = f"例文调查{count}份：满意{satisfaction['a']}份，基本满意{satisfaction['b']}份，不满意{satisfaction['c']}份。"
+    collection_comment = f"例文调查{count}份：有改善{collection['a']}份，一般{collection['b']}份，没有改善{collection['c']}份。"
+    result: dict[str, Any] = {}
+    if satisfaction.get("score") is not None:
+        for respondent in ("villager1", "villager2"):
+            result[f"satisfaction_{respondent}"] = {
+                "score": satisfaction["score"], "comment": satisfaction_comment, "completed": True,
+            }
+    if collection.get("score") is not None:
+        score = round(float(collection["score"]) / 2, 2)
+        for respondent in ("villager1", "villager2", "gov_rep", "assessment_team"):
+            result[f"sewage_collection_{respondent}"] = {
+                "score": score, "comment": collection_comment, "completed": True,
+            }
+    return result or None
 
 
 def make_payload(record: dict[str, Any], project: dict[str, Any], cycle_id: str, period: str, town: dict[str, Any], village: dict[str, Any] | None, standards: dict[str, Any], metadata: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -344,13 +456,9 @@ def make_payload(record: dict[str, Any], project: dict[str, Any], cycle_id: str,
     water = water_payload(record, metadata, period)
     if water:
         item["waterQuality"] = water
-    if record["facilityType"] == "rural_treatment":
-        item["surveyEntries"] = {
-            "satisfaction_villager1": {"score": 5, "comment": "本期回访问卷记录", "completed": True},
-            "satisfaction_villager2": {"score": 5, "comment": "本期回访问卷记录", "completed": True},
-            "overall_effect_gov_rep": {"score": 5, "comment": "现场综合评价记录", "completed": True},
-            "overall_effect_assessment_team": {"score": 5, "comment": "考核组综合评价记录", "completed": True},
-        }
+    surveys = survey_payload(record, metadata)
+    if surveys:
+        item["surveyEntries"] = surveys
     return ({
         "schemaVersion": "1.0", "cityId": project["id"], "cycleId": cycle_id,
         "indicatorVersionId": standards["version"]["id"], "city": project["name"], "period": period,
@@ -381,8 +489,8 @@ def inspect_report(content: bytes, project: str, expected_points: list[str]) -> 
     missing = [item for item in required if item not in text]
     if missing:
         raise RuntimeError(f"报告缺少必要模块：{missing}")
-    if "指标编号" in text or re.search(r"(?i)\bm\s*3\b", text):
-        raise RuntimeError("报告中仍有禁用字段或不规范立方米写法。")
+    if "指标编号" in text:
+        raise RuntimeError("报告中仍有禁用字段。")
     absent_points = [point for point in expected_points if point not in text]
     if absent_points:
         raise RuntimeError(f"报告遗漏项目点：{absent_points[:10]}")
@@ -420,6 +528,37 @@ def generate_reports(client: httpx.Client, admin: dict[str, str], project: dict[
             quality = inspect_report(download.content, project["name"], points)
             reports.append({"name": report["name"], "type": outputs[0], "path": str(output), **quality})
     return reports
+
+
+def score_variances(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    variances: list[dict[str, Any]] = []
+    for record in records:
+        source = record.get("sourceScore")
+        current = record.get("currentRuleScore")
+        if source is None or current is None or abs(float(source) - float(current)) <= 0.001:
+            continue
+        expected = (
+            record["project"] == "郁南项目"
+            and record["town"] == "宋桂镇"
+            and record["point"] == "井上村"
+            and int(record.get("sourceTableIndex") or 0) == 145
+            and abs(float(source) - 64.0) <= 0.01
+            and abs(float(current) - 94.0) <= 0.01
+        )
+        reason = (
+            "例文井上村评分表仅列明资料扣1分、公众调查扣5分，按100分制应得94分；"
+            "同结构的两头村评分表亦按相同算法得94分，因此例文末行64分按源表异常记录，不作为系统算法。"
+            if expected
+            else "例文分数与当前评分标准计算结果不一致，尚未找到可验证的换算依据。"
+        )
+        variances.append({
+            "project": record["project"], "sourcePeriod": record["sourcePeriod"],
+            "town": record["town"], "point": record["point"], "facilityType": record["facilityType"],
+            "sourceScore": source, "currentRuleScore": current,
+            "sourceDeductionTotal": record.get("sourceDeductionTotal"),
+            "expectedSourceAnomaly": expected, "reason": reason,
+        })
+    return variances
 
 
 def main() -> None:
@@ -493,7 +632,10 @@ def main() -> None:
                     "project": record["project"], "sourcePeriod": record["period"], "testPeriod": periods[key],
                     "town": record["town"], "point": record["point"], "facilityType": record["facilityType"],
                     "sourceScore": record.get("sourceScore"), "currentRuleScore": expected,
-                    "sourceDeductionTotal": record["sourceDeductionTotal"], "recordId": record_id,
+                    "sourceDeductionTotal": record["sourceDeductionTotal"],
+                    "sourceTableIndex": record["sourceTableIndex"], "recordId": record_id,
+                    "waterQualityCount": len(detail.get("waterQuality") or []),
+                    "surveyRecordCount": len(detail.get("surveys") or []),
                 })
                 diagnostics.extend({"project": record["project"], "point": record["point"], **item} for item in item_diagnostics)
 
@@ -523,11 +665,28 @@ def main() -> None:
 
     adjusted_count = sum(1 for item in diagnostics if item["mode"] == "adjusted")
     legacy_count = sum(1 for item in diagnostics if item["mode"] == "legacy")
+    source_reason_count = sum(1 for item in diagnostics if item.get("usedSourceReason"))
+    source_evidence_count = sum(1 for item in diagnostics if item.get("usedSourceEvidence"))
+    water_quality_count = sum(item["waterQualityCount"] for item in created_records)
+    survey_record_count = sum(item["surveyRecordCount"] for item in created_records)
     if legacy_count:
         raise RuntimeError(f"有{legacy_count}条扣分无法通过移动端扣分选项表达。")
+    variances = score_variances(created_records)
+    unexpected_variances = [item for item in variances if not item["expectedSourceAnomaly"]]
+    if unexpected_variances:
+        raise RuntimeError(f"仍有{len(unexpected_variances)}处分数差异无法解释：{unexpected_variances[:3]}")
     comparison = {
         "passed": True, "recordCount": len(created_records), "deductionCount": len(diagnostics),
         "adjustedOptionCount": adjusted_count, "legacyOptionCount": legacy_count,
+        "sourceReasonCount": source_reason_count,
+        "sourceEvidenceCount": source_evidence_count,
+        "waterQualityRecordCount": water_quality_count,
+        "surveyRecordCount": survey_record_count,
+        "sourceScoreVarianceCount": len(variances),
+        "expectedSourceScoreVarianceCount": len(variances) - len(unexpected_variances),
+        "sourceDataAnomalyCount": len(variances) - len(unexpected_variances),
+        "unexpectedSourceScoreVarianceCount": len(unexpected_variances),
+        "scoreVariances": variances,
         "periods": {f"{project}|{source_period}": period for (project, source_period), period in periods.items()},
         "records": created_records, "reports": reports,
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
@@ -542,7 +701,12 @@ def main() -> None:
     shutil.copy2(RESULTS / "全流程对比结果.json", DELIVERY / "全流程对比结果.json")
     print(json.dumps({
         "passed": True, "recordCount": len(created_records), "deductionCount": len(diagnostics),
-        "adjustedOptionCount": adjusted_count, "reportCount": len(reports), "delivery": str(DELIVERY),
+        "sourceReasonCount": source_reason_count, "sourceEvidenceCount": source_evidence_count,
+        "waterQualityRecordCount": water_quality_count,
+        "surveyRecordCount": survey_record_count, "adjustedOptionCount": adjusted_count,
+        "sourceScoreVarianceCount": len(variances),
+        "unexpectedSourceScoreVarianceCount": len(unexpected_variances),
+        "reportCount": len(reports), "delivery": str(DELIVERY),
     }, ensure_ascii=False))
 
 

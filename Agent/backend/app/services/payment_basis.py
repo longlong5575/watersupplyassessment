@@ -156,9 +156,18 @@ def yunan_rural_payment_basis_for_point(point_name: str) -> dict[str, Any] | Non
 
 def payment_source_summary(project_name: str) -> str:
     basis = payment_basis_for_project(project_name)
-    tables = "、".join(item["name"] for item in basis.get("sourceTables", []))
     row_count = len(basis.get("facilityBasis") or [])
     if "郁南" in project_name:
         row_count = len(basis.get("townFacilityBasis") or []) + len(basis.get("ruralFacilityBasis") or [])
+        tables = "、".join(
+            item["name"].replace("附件18表1", "金额基础表1").replace("附件18表2", "金额基础表2").replace("附件18表3", "金额基础表3").replace("附件18表4至表5", "金额基础表4至表5")
+            for item in basis.get("sourceTables", [])
+        )
+        source_policy = "郁南金额基数和付费公式仅采用本项目确认的合同金额基础表及郁南例文。未提供经确认的新调价资料时沿用原始中标金额；调价后的单价或运营维护费必须由平台端明确录入，不引用茂南或其他项目金额。"
+        basis_status = "郁南项目金额基数已结构化"
+    else:
+        tables = "、".join(item["name"] for item in basis.get("sourceTables", []))
+        source_policy = basis["sourcePolicy"]
+        basis_status = basis["basisStatus"]
     row_summary = f"已结构化{row_count}个项目点金额基数。" if row_count else ""
-    return f"{basis['sourcePolicy']}当前金额基数状态：{basis['basisStatus']}。结构化来源包括：{tables}。{row_summary}"
+    return f"{source_policy}当前金额基数状态：{basis_status}。结构化来源包括：{tables}。{row_summary}"

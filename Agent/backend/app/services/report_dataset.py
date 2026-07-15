@@ -115,6 +115,12 @@ def build_report_dataset(
             ).all()
         )
         logs = list(session.scalars(select(ReviewLog).where(ReviewLog.record_id == record.id).order_by(ReviewLog.created_at)).all())
+        raw_payload = record.raw_payload or {}
+        score_calculation = raw_payload.get("scoreCalculation") if isinstance(raw_payload, dict) else {}
+        excluded_codes = set((score_calculation or {}).get("excludedIndicatorCodes") or [])
+        score_payloads = [_score_payload(session, score) for score in record.scores]
+        for score_payload in score_payloads:
+            score_payload["applicable"] = score_payload.get("indicatorCode") not in excluded_codes
         record_payloads.append(
             {
                 "id": record.id,
@@ -135,7 +141,8 @@ def build_report_dataset(
                 "totalScore": record.total_score,
                 "ownerUserId": record.owner_user_id,
                 "ownerDisplayName": (owner.display_name or owner.username) if owner else None,
-                "rawPayload": record.raw_payload or {},
+                "rawPayload": raw_payload,
+                "scoreCalculation": score_calculation or {},
                 "paymentContext": build_payment_context(session, record),
                 "submittedAt": record.submitted_at,
                 "reviewedAt": record.reviewed_at,
@@ -146,7 +153,7 @@ def build_report_dataset(
                 "waterQualityCount": len(water),
                 "attachmentCount": len(attachments),
                 "reviewLogCount": len(logs),
-                "scores": [_score_payload(session, score) for score in record.scores],
+                "scores": score_payloads,
                 "surveys": [
                     {"id": item.id, "surveyType": item.survey_type, "respondent": item.respondent, "score": item.score, "payload": item.payload}
                     for item in surveys

@@ -74,12 +74,8 @@ REPORT_BODY_LINE_SPACING_PT = 24
 
 
 def _normalize_report_text(value: Any) -> str:
-    """Normalize legacy source units and punctuation at the report boundary."""
+    """Normalize punctuation while preserving source engineering units."""
     text = "" if value is None else str(value)
-    text = re.sub(r"(?i)m\s*(?:\^\s*)?3", "立方米", text)
-    text = re.sub(r"(?i)立方米\s*/\s*d\b", "立方米/日", text)
-    text = re.sub(r"(?i)(?<=\d)\s*km\b", "公里", text)
-    text = re.sub(r"(?<=\d)\s*立方米", "立方米", text)
     text = text.replace("~", "至")
     text = re.sub(r"[。．\.](?:\s*[。．\.])+", "。", text)
     text = re.sub(r"([。！？；，、])\s*[。．\.]", r"\1", text)
@@ -188,6 +184,18 @@ PROJECT_REPORT_PROFILES = {
         "shortName": "郁南",
         "titleSuffix": "镇村污水处理设施绩效考核报告",
         "basis": "依据《PPP项目合同》、补充协议及郁南项目镇村考核报告确定的考核频次、考核对象、评分标准和水质限值执行。",
+        "purpose": "受项目实施机构委托，依据项目合同、补充协议及有关法律法规、标准规范，对镇级污水处理厂、镇区污水收集管网和农村生活污水处理设施的运营维护绩效进行客观评价，为整改复核和绩效付费提供依据。",
+        "requirements": "考核遵循客观、公正、资料与现场相互印证的原则。现场记录由考核人员和被考核单位确认，评分逐项对应现行标准；水质、问卷、处理水量和附件材料均须与本期考核对象关联。",
+        "basisGroups": [
+            "合同及项目文件：《郁南县整县生活污水处理设施捆绑PPP项目合同》、补充协议、运营维护资料及经确认的本期考核安排。",
+            "法律法规及政策文件：国家和广东省现行的环境保护、城镇排水与污水处理、农村生活污水治理等相关规定。",
+            "技术标准和规范：城镇污水处理厂污染物排放、广东省水污染物排放限值、农村生活污水处理排放以及设施运行维护相关标准。",
+        ],
+        "teamHeading": "1.4 考核成员及分工责任",
+        "teamBody": "考核工作由实施机构、考核单位、检测单位和镇街相关人员共同参与。考核单位负责现场检查、资料复核和评分汇总，检测单位负责取样检测并出具结果，被考核单位负责提供真实、完整的运行资料和现场条件。",
+        "frequency": "镇级设施按项目合同约定的季度周期开展考核，农村生活污水处理设施按约定周期抽取考核对象；具体纳入范围以本期已提交并复核的数据为准。",
+        "scoreMethodHeading": "考核评分",
+        "scheduleHeading": "考核时间",
         "methods": ["现场检查", "查阅资料", "问卷调查（村级考核有）", "水质检测", "评分复核"],
         "waterStandard": "镇级污水处理设施出水执行城镇一级A及广东省地方标准较严值；农村生活污水处理设施执行广东省《农村生活污水处理排放标准》（DB44/2208-2019）。",
         "waterRows": [
@@ -204,6 +212,18 @@ PROJECT_REPORT_PROFILES = {
         "shortName": "茂南",
         "titleSuffix": "城镇设施绩效考核报告",
         "basis": "依据茂南区水质净化处理设施全区捆绑PPP项目城镇设施绩效考核报告口径，对水质净化厂及配套管网分别开展周期绩效考核。",
+        "purpose": "依据项目合同及运营期绩效评价工作安排，对城镇水质净化厂和配套污水收集管网的运营维护情况进行评价，形成与绩效付费相衔接的考核结果，并对发现的问题提出整改建议。",
+        "requirements": "考核按照各设施批复转入运营后的考核周期组织实施。现场检查、资料核验和水质检测结果相互印证，所有扣分均须对应评分条目、事实说明和支撑材料。",
+        "basisGroups": [
+            "合同及项目文件：《茂南区水质净化处理设施全区捆绑PPP项目合同》、运营期绩效评价工作方案及经确认的运营维护资料。",
+            "法律法规及政策文件：国家和广东省现行的环境保护、城镇排水与污水处理、安全生产等相关规定。",
+            "技术标准和规范：城镇污水处理厂污染物排放、广东省水污染物排放限值、排水管渠与泵站运行维护等适用标准。",
+        ],
+        "teamHeading": "1.4 考核组组成单位及分工责任",
+        "teamBody": "现场考核由实施机构和考核单位组成考核小组，检测单位负责水质取样检测。考核组通过工作沟通、现场检查和资料复核确认本周期运行情况，被考核单位对现场记录及所提交资料的真实性、完整性负责。",
+        "frequency": "各城镇水质净化设施按照项目合同及批复转运营时间划分考核周期，本报告仅统计当前选择周期内已经提交并完成复核的考核对象。",
+        "scoreMethodHeading": "运维考核系数计算",
+        "scheduleHeading": "考核安排",
         "methods": ["现场检查", "查阅资料", "水质检测", "评分复核"],
         "waterStandard": "城镇污水处理设施出水执行《城镇污水处理厂污染物排放标准》一级A标准及广东省《水污染物排放限值》较严值。",
         "waterRows": [
@@ -495,6 +515,8 @@ def _deduction_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for record in records:
         for score in record.get("scores") or []:
+            if score.get("applicable") is False:
+                continue
             if float(score.get("deduction") or 0) <= 0:
                 continue
             rows.append([
@@ -551,6 +573,17 @@ def _all_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
         for score in record.get("scores") or []:
             full_score = float(score.get("indicatorFullScore") or 0)
             deduction = float(score.get("deduction") or 0)
+            if score.get("applicable") is False:
+                rows.append([
+                    len(rows) + 1,
+                    point_name,
+                    score.get("indicatorName") or "-",
+                    _fmt_score_value(full_score),
+                    "-",
+                    "-",
+                    score.get("reason") or "本考核对象无污水提升泵站，该项不适用且不计入评分。",
+                ])
+                continue
             rows.append([
                 len(rows) + 1,
                 point_name,
@@ -711,12 +744,14 @@ def _survey_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
     rows = []
     for record in records:
         for item in record.get("surveys") or []:
+            payload = item.get("payload") or {}
             rows.append([
                 len(rows) + 1,
                 record.get("village") or "-",
                 SURVEY_TYPE_LABELS.get(item.get("surveyType"), item.get("surveyType") or "-"),
                 RESPONDENT_LABELS.get(item.get("respondent"), item.get("respondent") or "-"),
                 item.get("score") if item.get("score") is not None else "-",
+                payload.get("comment") or payload.get("note") or "-",
             ])
     return rows
 
@@ -989,28 +1024,50 @@ def _add_assessment_summary_text(document, *, project_name: str, cycle_name: str
     deductions = _deduction_rows(records)
     town_count = len(towns) or len(_records_by_town(records))
     is_maonan = "茂南" in project_name
+    type_counts = {
+        facility_type: sum(1 for record in records if record.get("facilityType") == facility_type)
+        for facility_type in ("town_plant", "town_network", "rural_treatment")
+    }
+    scores = [float(record.get("totalScore") or 0) for record in records]
+    score_bands = {
+        "90分及以上": sum(score >= 90 for score in scores),
+        "80分至90分": sum(80 <= score < 90 for score in scores),
+        "80分以下": sum(score < 80 for score in scores),
+    }
+    band_text = "，".join(f"{label}{count}项" for label, count in score_bands.items() if count)
+    water_items = [item for record in records for item in (record.get("waterQuality") or [])]
+    qualified_values = {"qualified", "pass", "达标", "合格"}
+    qualified_water = sum(str(item.get("conclusion") or "").lower() in qualified_values for item in water_items)
+    scope_parts = [
+        f"{REPORT_TYPE_LABELS[facility_type]}{type_counts[facility_type]}项"
+        for facility_type in ("town_plant", "town_network", "rural_treatment")
+        if type_counts[facility_type]
+    ]
+    scope_text = "、".join(scope_parts) or f"考核对象{len(records)}项"
     document.add_heading("摘  要" if is_maonan else "摘要", level=1)
     if is_maonan:
-        _add_paragraph(document, f"本报告汇集{cycle_name}已完成提交并进入复核流程的现场考核数据，评价范围为茂南项目城镇水质净化厂及配套污水收集管网。评分、系数和付费测算均以平台留存记录及本期支撑资料为依据。")
+        _add_paragraph(document, f"根据茂南项目合同及运营期绩效评价工作安排，本报告对{cycle_name}已经完成提交和复核的城镇水质净化设施进行评价。评价范围包括{scope_text}；评分、运维考核系数和付费测算均以平台留存记录及本期支撑资料为依据。")
         document.add_heading("一、考核工作开展情况", level=2)
-        _add_paragraph(document, f"考核组围绕{town_count}个镇街或项目片区开展现场核查，并同步复核运行台账、维护记录、水质资料和问题整改证据。系统仅汇总状态为已提交、已复核或已锁定的记录，未提交对象不参与本期统计。")
+        _add_paragraph(document, f"考核组围绕{town_count}个镇街或项目片区开展现场检查，并同步复核生产运行、维护维修、在线监测、管网巡查、水质检测和问题整改资料。现场发现的问题对应记录在评分条目中；未提交的考核对象不纳入本期统计。")
         document.add_heading("二、考核评分情况", level=2)
-        _add_paragraph(document, f"本期覆盖{town_count}个镇街、{len(records)}个已提交、已复核或已锁定考核对象，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
+        _add_paragraph(document, f"本期纳入{len(records)}项考核记录，{band_text}。平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
+        if water_items:
+            _add_paragraph(document, f"本期报告归集水质抽检记录{len(water_items)}条，其中达标{qualified_water}条、不达标{len(water_items) - qualified_water}条；各项实测值、限值和判定结果在正文及附件中逐项列示。")
         document.add_heading("三、主要改进点", level=2)
-        _add_paragraph(document, "本期重点评价设施运行、现场管理、在线监测、管网巡查和问题整改等工作，并结合现场检查记录、运维资料和复核意见，分别说明各镇街考核对象的得分情况。")
+        _add_paragraph(document, "本期继续从设施运行、现场管理、在线监测、管网巡查和问题整改等方面评价运营维护成效。正文按镇街分别说明设施基本情况、考核得分和扣分事实，便于与整改台账衔接复核。")
         document.add_heading("四、发现的主要问题", level=2)
     else:
-        _add_paragraph(document, f"本报告依据郁南项目合同、补充协议及现行绩效考核标准，对{cycle_name}已完成现场填报和平台复核的镇街污水处理设施进行归集评价。报告中的事实、分值、水质结论和附件均由本期数据生成，不沿用既往报告结论。")
+        _add_paragraph(document, f"受项目实施机构委托，本报告依据郁南项目合同、补充协议及现行绩效考核标准，对{cycle_name}已经完成现场填报和平台复核的镇村污水处理设施进行归集评价。评价范围包括{scope_text}，报告中的事实、分值、水质结论和附件均取自本期数据。")
         document.add_heading("一、考核工作开展情况", level=2)
-        _add_paragraph(document, f"本期涉及{town_count}个镇街。考核过程包含现场检查、资料核对、必要的公众调查、水质检测和评分复核；每项扣分均关联具体评分条目及留存证据。")
+        _add_paragraph(document, f"本期涉及{town_count}个镇街。考核组按照设施类型开展现场检查、资料核对、水质检测和评分复核，并在农村设施考核中归集公众调查结果。每项扣分均关联具体评分条目、事实说明及留存证据，未提交对象不参与汇总。")
         document.add_heading("二、考核评分情况", level=2)
-        _add_paragraph(document, f"本期纳入报告的已提交、已复核或已锁定考核对象共{len(records)}个，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。各镇级设施、镇区管网和农村设施的具体评分情况见正文及附件评分表。")
+        _add_paragraph(document, f"本期纳入报告的考核对象共{len(records)}项，{band_text}。平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。各镇级设施、镇区管网和农村设施的具体结果见正文及附件评分表。")
+        if water_items:
+            _add_paragraph(document, f"本期报告归集水质抽检记录{len(water_items)}条，其中达标{qualified_water}条、不达标{len(water_items) - qualified_water}条。报告同时保留实测值、适用限值和判定结论，便于复核扣分及后续整改。")
         document.add_heading("三、发现的主要问题", level=2)
     if deductions:
-        leading = _deduction_rows(records)[:8]
         _add_paragraph(document, "根据现场检查记录和资料复核结果，本期主要问题如下。")
         _add_deduction_narrative(document, records, limit=8)
-        _add_simple_table(document, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"], leading)
     else:
         _add_deduction_narrative(document, records)
     document.add_heading("五、建议" if is_maonan else "四、建议", level=2)
@@ -1084,6 +1141,10 @@ def _add_town_type_sections(document, *, records: list[dict[str, Any]], project_
             stats = _score_stats(items)
             document.add_heading(f"{town_index}.{type_index} {label}", level=3)
             _add_paragraph(document, f"本类别共{len(items)}个考核对象，平均得分{stats['average']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
+            for record in items:
+                calculation = record.get("scoreCalculation") or {}
+                if calculation.get("mode") == "scaled_applicable":
+                    _add_paragraph(document, f"{_record_point_name(record)}：{calculation.get('description')}计算过程为{calculation.get('formula')}。")
             _add_simple_table(document, ["序号", "考核类型", "行政村", "项目点", "状态", "得分"], _record_score_rows(items))
             deductions = _deduction_rows(items)
             if deductions:
@@ -1128,62 +1189,50 @@ def _add_summary_town_type_sections(document, *, records: list[dict[str, Any]], 
         _add_town_type_sections(document, records=town_records, project_name=project_name, towns=[town_data] if town_data else None)
 
 
-def _add_yunan_summary_score_overview(document, records: list[dict[str, Any]], towns: list[dict[str, Any]]) -> None:
-    town_rows = []
-    for index, (town_name, town_data, items) in enumerate(_towns_for_report(records, towns), 1):
-        if items:
-            stats = _score_stats(items)
-            town_rows.append([index, town_name, len(items), f"{stats['average']:.2f}", f"{stats['max']:.2f}", f"{stats['min']:.2f}", f"{stats['deduction']:.2f}", _town_status_label(town_data or {}, items)])
-        else:
-            town_rows.append([index, town_name, 0, "-", "-", "-", "-", "\u672a\u63d0\u4ea4/\u672a\u590d\u6838"])
-    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u8003\u6838\u5bf9\u8c61\u6570", "\u5e73\u5747\u5f97\u5206", "\u6700\u9ad8\u5f97\u5206", "\u6700\u4f4e\u5f97\u5206", "\u7d2f\u8ba1\u6263\u5206", "\u72b6\u6001"], town_rows)
-
-    type_rows = []
-    by_type = _records_by_type(records)
-    for index, (facility_type, items) in enumerate(by_type.items(), 1):
+def _add_source_summary_score_overview(document, records: list[dict[str, Any]], project_name: str) -> None:
+    if _is_maonan_project(project_name):
+        sections = [
+            ("2.1.1 城镇水质净化厂考核情况", "town_plant"),
+            ("2.1.2 镇区污水收集管网考核情况", "town_network"),
+        ]
+    else:
+        sections = [
+            ("2.1.1 镇级污水处理厂考核情况", "town_plant"),
+            ("2.1.2 镇区污水收集管网考核情况", "town_network"),
+            ("2.1.3 农村污水处理设施总体考核情况", "rural_treatment"),
+        ]
+    for heading, facility_type in sections:
+        document.add_heading(heading, level=3)
+        items = [record for record in records if record.get("facilityType") == facility_type]
+        if not items:
+            _add_paragraph(document, "本期已提交并复核的数据中未包含该类考核对象。")
+            continue
         stats = _score_stats(items)
-        type_rows.append([index, REPORT_TYPE_LABELS.get(facility_type, facility_type), len(items), f"{stats['average']:.2f}", f"{stats['deduction']:.2f}"])
-    _add_simple_table(document, ["\u5e8f\u53f7", "\u8003\u6838\u5bf9\u8c61\u7c7b\u522b", "\u8bb0\u5f55\u6570", "\u5e73\u5747\u5f97\u5206", "\u7d2f\u8ba1\u6263\u5206"], type_rows)
-
-    object_rows = []
-    for index, record in enumerate(records, 1):
-        object_rows.append([
-            index,
-            record.get("town") or "-",
-            REPORT_TYPE_LABELS.get(record.get("facilityType"), record.get("facilityType") or "-"),
-            _record_point_name(record),
-            f"{float(record.get('totalScore') or 0):.2f}",
-            STATUS_LABELS.get(record.get("status"), record.get("status") or "-"),
-        ])
-    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u8003\u6838\u5bf9\u8c61", "\u9879\u76ee\u70b9", "\u5f97\u5206", "\u72b6\u6001"], object_rows)
-
-    deduction_rows = []
-    for index, (facility_type, items) in enumerate(by_type.items(), 1):
-        rows = _deduction_rows(items)
-        stats = _score_stats(items)
-        deduction_rows.append([
-            index,
-            REPORT_TYPE_LABELS.get(facility_type, facility_type),
-            len(rows),
-            f"{stats['deduction']:.2f}",
-            "有扣分事项，详见附件2考核评分表" if rows else "本期未记录扣分事项",
-        ])
-    _add_simple_table(document, ["\u5e8f\u53f7", "\u8003\u6838\u5bf9\u8c61\u7c7b\u522b", "\u6263\u5206\u9879\u6570", "\u7d2f\u8ba1\u6263\u5206", "\u8bf4\u660e"], deduction_rows)
-
-    support_rows = []
-    for index, record in enumerate(records, 1):
-        support_rows.append([
-            index,
-            record.get("town") or "-",
-            _record_point_name(record),
-            len(record.get("scores") or []),
-            len(record.get("waterQuality") or []),
-            len(record.get("attachments") or []),
-        ])
-    _add_simple_table(document, ["\u5e8f\u53f7", "\u9547\u8857", "\u9879\u76ee\u70b9", "\u8bc4\u5206\u6761\u76ee", "\u6c34\u8d28\u8bb0\u5f55", "\u73b0\u573a\u9644\u4ef6"], support_rows)
-
-    _add_paragraph(document, "\u6c47\u603b\u62a5\u544a\u4ec5\u5217\u793a\u5f53\u524d\u9879\u76ee\u3001\u5f53\u524d\u5468\u671f\u5185\u5df2\u63d0\u4ea4\u3001\u5df2\u590d\u6838\u6216\u5df2\u9501\u5b9a\u5e76\u7eb3\u5165\u62a5\u544a\u7684\u9547\u8857\u6570\u636e\uff1b\u8349\u7a3f\u3001\u9000\u56de\u548c\u672a\u63d0\u4ea4\u7684\u9547\u8857\u4e0d\u8fdb\u5165\u6c47\u603b\u8868\u3001\u6b63\u6587\u7ae0\u8282\u548c\u7edf\u8ba1\u8ba1\u7b97\u3002")
-    _add_paragraph(document, "\u5bf9\u5f97\u5206\u8f83\u4f4e\u6216\u6263\u5206\u8f83\u96c6\u4e2d\u7684\u9879\u76ee\u70b9\uff0c\u5e94\u7ed3\u5408\u73b0\u573a\u7167\u7247\u3001\u6c34\u8d28\u62bd\u68c0\u3001\u8fd0\u884c\u53f0\u8d26\u548c\u6574\u6539\u8bb0\u5f55\u9010\u9879\u590d\u6838\uff0c\u5f62\u6210\u4e0b\u4e00\u5468\u671f\u91cd\u70b9\u8ddf\u8e2a\u6e05\u5355\u3002")
+        bands = {
+            "90分及以上": sum(float(item.get("totalScore") or 0) >= 90 for item in items),
+            "80分至90分": sum(80 <= float(item.get("totalScore") or 0) < 90 for item in items),
+            "80分以下": sum(float(item.get("totalScore") or 0) < 80 for item in items),
+        }
+        distribution = "，".join(f"{label}{count}项" for label, count in bands.items() if count)
+        _add_paragraph(document, f"本期纳入{len(items)}项，{distribution}；平均得分{stats['average']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
+        rows = []
+        for index, record in enumerate(items, 1):
+            calculation = record.get("scoreCalculation") or {}
+            raw_deduction = sum(
+                float(score.get("deduction") or 0)
+                for score in record.get("scores") or []
+                if score.get("applicable") is not False
+            )
+            rows.append([
+                index,
+                record.get("town") or "-",
+                _record_point_name(record),
+                f"{float(record.get('totalScore') or 0):.2f}",
+                f"{raw_deduction:.2f}",
+                calculation.get("displayText") or "按满分100分直接计分",
+            ])
+        _add_simple_table(document, ["序号", "镇街", "项目点", "考核得分", "原始扣分", "计分说明"], rows)
+    _add_paragraph(document, "以上结果仅汇总当前项目、当前周期内已提交、已复核或已锁定的考核对象；草稿、退回和未提交对象不进入本期统计及报告结论。")
 
 
 def _add_yunan_work_section(document, *, project_name: str, cycle_name: str, scope_name: str, records: list[dict[str, Any]], profile: dict[str, Any], is_summary: bool) -> None:
@@ -1507,8 +1556,6 @@ def run_report_task(task_id: str) -> None:
 
 
 def _add_source_toc(document, rows: list[list[Any]]) -> None:
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     document.add_page_break()
@@ -1521,13 +1568,6 @@ def _add_source_toc(document, rows: list[list[Any]]) -> None:
     _apply_paragraph_format(toc, indent=False)
     marker = toc.add_run("[[STATIC_TOC]]")
     _apply_run_font(marker, REPORT_BODY_FONT, REPORT_BODY_SIZE_PT)
-
-    settings = document.settings._element
-    update_fields = settings.find(qn("w:updateFields"))
-    if update_fields is None:
-        update_fields = OxmlElement("w:updateFields")
-        settings.append(update_fields)
-    update_fields.set(qn("w:val"), "true")
 
     document.add_page_break()
 
@@ -1673,8 +1713,8 @@ def _add_facility_result_table(document, records: list[dict[str, Any]]) -> None:
 def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], towns: list[dict[str, Any]], is_summary: bool) -> None:
     document.add_heading("第二章 镇级设施运维考核情况", level=1)
     if is_summary:
-        document.add_heading("2.1 项目考核结果汇总", level=2)
-        _add_yunan_summary_score_overview(document, records, towns)
+        document.add_heading("2.1 镇村污水处理设施考核情况汇总", level=2)
+        _add_source_summary_score_overview(document, records, "郁南项目")
 
     town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
@@ -1710,8 +1750,8 @@ def _add_yunan_facility_sections(document, *, records: list[dict[str, Any]], tow
 def _add_maonan_result_sections(document, *, records: list[dict[str, Any]], towns: list[dict[str, Any]], is_summary: bool) -> None:
     document.add_heading("第二章 城镇水质净化设施考核结果", level=1)
     if is_summary:
-        document.add_heading("2.1 项目考核结果汇总", level=2)
-        _add_yunan_summary_score_overview(document, records, towns)
+        document.add_heading("2.1 各镇水质净化设施考核情况汇总", level=2)
+        _add_source_summary_score_overview(document, records, "茂南项目")
 
     town_items = _ordered_towns(towns) or [{"town": records[0].get("town") if records else "本镇", "assessmentTargets": _facility_types(records)}]
     for index, town_data in enumerate(town_items, 1):
@@ -1737,17 +1777,18 @@ def _add_maonan_result_sections(document, *, records: list[dict[str, Any]], town
 
 def _add_source_chapter_one(document, *, project_name: str, cycle_name: str, scope_name: str, profile: dict[str, Any]) -> None:
     document.add_heading("第一章 考核工作概述", level=1)
-    headings = [
-        ("1.1 考核目的", f"本次绩效考核旨在依据项目合同、补充协议及绩效考核标准，评价{scope_name}{cycle_name}污水处理设施运行维护、资料管理、水质达标和整改落实情况。"),
-        ("1.2 考核要求", "考核工作按照合同约定、评分标准和现场核查要求开展，评分结果以已提交、已复核或已锁定的数据为依据。"),
-        ("1.3 考核依据", profile["basis"]),
-        ("1.4 考核成员及分工责任", "考核成员及分工按委托单位、考核单位、检测单位和项目公司确认的现场安排执行。"),
-        ("1.5 考核频次", f"本报告对应{cycle_name}绩效考核周期。"),
-        ("1.7 考核时间", f"本次考核时间以{cycle_name}现场检查及资料复核工作安排为准。"),
-    ]
-    for heading, body in headings[:-1]:
-        document.add_heading(heading, level=2)
-        _add_paragraph(document, body)
+    document.add_heading("1.1 考核目的", level=2)
+    _add_paragraph(document, profile.get("purpose") or f"本次绩效考核用于评价{scope_name}{cycle_name}污水处理设施运营维护情况。")
+    document.add_heading("1.2 考核要求", level=2)
+    _add_paragraph(document, profile.get("requirements") or "考核工作按照合同约定、评分标准和现场核查要求开展。")
+    document.add_heading("1.3 考核依据", level=2)
+    basis_groups = profile.get("basisGroups") or [profile["basis"]]
+    for index, basis in enumerate(basis_groups, 1):
+        _add_paragraph(document, f"（{index}）{basis}")
+    document.add_heading(profile.get("teamHeading") or "1.4 考核成员及分工责任", level=2)
+    _add_paragraph(document, profile.get("teamBody") or "考核成员及分工按经确认的现场安排执行。")
+    document.add_heading("1.5 考核频次", level=2)
+    _add_paragraph(document, profile.get("frequency") or f"本报告对应{cycle_name}绩效考核周期。")
     document.add_heading("1.6 考核方法", level=2)
     method_details = [
         ("1.6.1 现场检查", "考核组对设施运行状态、厂区及站点环境、设备维护、安全防护、管网及检查井状况进行现场核查，并对发现的问题形成记录。"),
@@ -1759,13 +1800,13 @@ def _add_source_chapter_one(document, *, project_name: str, cycle_name: str, sco
     water_index = 4 if has_survey else 3
     method_details.extend([
         (f"1.6.{water_index} 水质检测", "依据本项目适用的排放标准开展取样检测，将实测结果与规定限值逐项比较；出现人工修正结论时，同时核查修正说明和支撑资料。"),
-        (f"1.6.{water_index + 1} 考核评分及系数计算", "考核组按照现行绩效考核标准逐项评分。扣分事项须对应具体评分条目、扣分依据和现场或资料证据，并据考核得分计算运维绩效考核系数。"),
+        (f"1.6.{water_index + 1} {profile.get('scoreMethodHeading') or '考核评分及系数计算'}", "考核组按照现行绩效考核标准逐项评分。扣分事项须对应具体评分条目、扣分依据和现场或资料证据，并据考核得分计算运维绩效考核系数。"),
     ])
     for heading, body in method_details:
         document.add_heading(heading, level=3)
         _add_paragraph(document, body)
-    document.add_heading(headings[-1][0], level=2)
-    _add_paragraph(document, headings[-1][1])
+    document.add_heading(f"1.7 {profile.get('scheduleHeading') or '考核时间'}", level=2)
+    _add_paragraph(document, f"本期现场检查、资料复核和水质检测按照{cycle_name}经确认的考核安排开展；具体日期和参与人员以本期现场记录及签认资料为准。")
 
 
 def _add_source_appendices(document, *, project_name: str, records: list[dict[str, Any]], profile: dict[str, Any]) -> None:
@@ -1831,6 +1872,13 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
             _add_paragraph(document, profile["waterStandard"])
             rows = _water_quality_rows(records)
             if rows:
+                sample_count = sum(len(record.get("waterQuality") or []) for record in records)
+                qualified_count = sum(
+                    str(item.get("conclusion") or "").lower() in {"qualified", "pass", "达标", "合格"}
+                    for record in records
+                    for item in (record.get("waterQuality") or [])
+                )
+                _add_paragraph(document, f"本期共归集水质采样记录{sample_count}条，其中达标{qualified_count}条、不达标{sample_count - qualified_count}条。下表列示各次采样的实测值、适用限值、自动判定和最终判定。")
                 _add_paginated_table(document, ["序号", "项目点", "取样时间", "检测指标", "实测值", "限值", "单位", "自动判定", "最终判定", "备注"], rows, page_weight=16)
             else:
                 _add_paragraph(document, "本期暂无已提交的水质抽检结果。")
@@ -1848,7 +1896,7 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
         elif "公众调查" in title:
             rows = _survey_rows(records)
             if rows:
-                _add_simple_table(document, ["序号", "项目点", "调查类型", "对象", "得分"], rows)
+                _add_paginated_table(document, ["序号", "项目点", "调查类型", "对象", "得分", "调查情况说明"], rows, page_weight=16)
             else:
                 _add_paragraph(document, "本期未开展公众调查或暂无相关资料。")
         elif "检测报告" in title:
@@ -1950,7 +1998,7 @@ def _source_toc_rows(project_name: str, *, is_summary: bool) -> list[list[Any]]:
     return [
         [1, "第一章", "考核工作概述"],
         [2, "第二章", "镇级设施运维考核情况"],
-        [3, "第三章", "考核评价系数的确定"],
+        [3, "第三章", "绩效付费计算"],
         [4, "第四章", "主要问题及整改建议"],
         [5, "附件1", "考核标准"],
         [6, "附件2", "考核评分表"],
@@ -2001,7 +2049,7 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
 
     document.add_heading("3.2 水质浓度系数", level=2)
     _add_paragraph(document, "水质浓度系数Kq根据进水CODCr、出水CODCr及出水达标情况确定。进水CODCr低于140mg/L时，按进出水浓度差折算；进水CODCr达到140mg/L但出水不达标时，按项目既有付费口径取0.9；其余区间按郁南项目既有付费资料执行。")
-    _add_paragraph(document, "镇区污水处理设施处理水量按附件18约定设置1.1倍设计规模上限；镇区管网负荷系数KQ按实际日均水量与设计规模折算，最高取1。县城区管网按附件18县城区管网基数列示，需补充售水量或经确认的负荷基数后核定KQ。")
+    _add_paragraph(document, "镇区污水处理设施处理水量按金额基础表约定设置1.1倍设计规模上限；镇区管网负荷系数KQ按实际日均水量与设计规模折算，最高取1。县城区管网按金额基础表中的县城区管网基数列示，需补充售水量或经确认的负荷基数后核定KQ。")
     _add_paragraph(document, "镇区污水处理设施月服务费公式：PCi=P0×QB×（3/4×Kq+1/4×E2）。其中，P0为处理单价（元/立方米），QB为核定月处理水量（万立方米），计算结果单位为万元。")
     _add_paragraph(document, "镇区污水收集管网月服务费公式：Pwi=P0/12×（5/6×KQ×Kq+1/6×E1×E2）。其中，P0为管网年服务费基数（万元/年），KQ为负荷系数，Kq为水质浓度系数，E1为枯水期进水水质系数，E2为运维绩效考核系数。")
     _add_paragraph(document, payment_source_summary("郁南项目"))
@@ -2181,7 +2229,7 @@ def _add_yunan_coefficient_chapter(document, records: list[dict[str, Any]]) -> N
 
     document.add_heading("3.5 金额核定条件", level=2)
     _add_simple_table(document, ["序号", "必需输入", "当前处理原则", "说明"], [
-        [1, "附件18金额基数", "已按郁南附件18结构化引用", "不引用茂南或其他项目金额资料"],
+        [1, "郁南金额基础表", "已按郁南项目确认资料结构化引用", "不引用茂南或其他项目金额资料"],
         [2, "上一期考核得分", "用于本期付费E2", "首个付费周期可按1执行，但需在平台端明确勾选"],
         [3, "月度水量、月均COD和达标结论", "逐月计算Kq、KQ和服务费", "缺失时只列公式和缺失条件，不输出最终应付金额"],
         [4, "农村设施全镇汇总数据", "全镇汇总后核定", "单个村点记录不替代全镇农村设施付费测算"],

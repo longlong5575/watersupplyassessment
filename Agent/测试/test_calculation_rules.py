@@ -35,6 +35,7 @@ from app.services.payment_basis import (  # noqa: E402
 from app.services.payment_context import adjacent_period_name, months_for_period  # noqa: E402
 from app.services.project_catalog import MAONAN_TOWNS  # noqa: E402
 from app.services.report_tasks import _add_maonan_payment_chapter, _format_report_time  # noqa: E402
+from app.services.scoring_policy import calculate_policy_score, scoring_policy  # noqa: E402
 
 
 def close(actual: float, expected: float, tolerance: float = 1e-8) -> None:
@@ -50,6 +51,15 @@ def main() -> None:
     close(yunan_operation_coefficient(90), 1)
     close(yunan_operation_coefficient(81), 0.9)
     close(town_average_coefficient([90, 81], project="yunan") or 0, 0.95)
+    yunan_network = scoring_policy("郁南项目", "桂圩镇", "town_network")
+    assert yunan_network["applicableMaxScore"] == 88
+    assert yunan_network["excludedScore"] == 12
+    assert calculate_policy_score(yunan_network, [{"score": 68.5, "deduction": 19.5}])["percentScore"] == 77.8
+    maonan_network = scoring_policy("茂南项目", "鳌头镇", "town_network")
+    assert maonan_network["applicableMaxScore"] == 82
+    assert maonan_network["excludedScore"] == 18
+    assert calculate_policy_score(maonan_network, [{"score": 77.4, "deduction": 4.6}])["percentScore"] == 94.4
+    assert scoring_policy("郁南项目", "建城镇", "town_network")["mode"] == "direct_100"
 
     # 茂南例文表4-3：108.29/12.21 按出水最低30计算，Kq=0.87（显示值）。
     kq = maonan_water_quality_coefficient(108.29, 12.21)

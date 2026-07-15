@@ -67,6 +67,14 @@ type SelectionType = "no_deduction" | "standard" | "custom";
 type CityOption = { id?: string; name: string; sub: string };
 type CycleOption = { id: string; name: string; status: string; backendId?: string };
 type AssessmentObjectInfo = { sectionCode?: string; title?: string; description?: string };
+type ScorePolicy = {
+  mode: "direct_100" | "scaled_applicable";
+  originalMaxScore: number;
+  excludedScore: number;
+  applicableMaxScore: number;
+  excludedIndicatorCodes: string[];
+  description: string;
+};
 type TownOption = {
   id: string;
   cityId?: string;
@@ -74,6 +82,7 @@ type TownOption = {
   chapterCode?: string;
   assessmentTargets: PrimaryFacilityType[];
   assessmentObject: Partial<Record<PrimaryFacilityType, AssessmentObjectInfo>>;
+  scorePolicies?: Partial<Record<PrimaryFacilityType, ScorePolicy>>;
 };
 type VillageOption = { id: string; name: string; administrativeVillage?: string; chapterCode?: string; assessmentObject?: AssessmentObjectInfo };
 
@@ -96,6 +105,7 @@ interface DeductionOption {
 
 interface L3Item {
   id: string;
+  code?: string;
   name: string;
   maxScore: number;
   description: string;
@@ -399,7 +409,7 @@ function mergeStandardItems(groups: L1Group[], rules: Record<string, { targetId:
 let TREATMENT: L1Group[] = mergeStandardItems(TREATMENT_STANDARDS as unknown as L1Group[], TREATMENT_MERGE_RULES);
 let NETWORK: L1Group[] = NETWORK_STANDARDS as unknown as L1Group[];
 
-function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; name: string; level: number; fullScore: number; facilityType?: string | null; description?: string; evaluationStandard?: string; standardText?: string; scoringMethod?: string; dataSource?: string; calculationMethod?: string; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType; unit?: string; maxInstances?: number; min?: number; max?: number }> }>) {
+function applyBackendStandards(type: "treatment" | "network", items: Array<{ id: string; parentId: string | null; code?: string; name: string; level: number; fullScore: number; facilityType?: string | null; description?: string; evaluationStandard?: string; standardText?: string; scoringMethod?: string; dataSource?: string; calculationMethod?: string; deductionOptions?: Array<{ id: string; name: string; deduction: number; type?: DeductionType; unit?: string; maxInstances?: number; min?: number; max?: number }> }>) {
   const l1 = items.filter(item => item.level === 1);
   const l2 = items.filter(item => item.level === 2);
   const l3 = items.filter(item => item.level === 3);
@@ -412,6 +422,7 @@ function applyBackendStandards(type: "treatment" | "network", items: Array<{ id:
       name: child.name,
       items: l3.filter(item => item.parentId === child.id).map(item => ({
         id: item.id,
+        code: item.code,
         name: item.name,
         maxScore: item.fullScore,
         description: item.description || item.dataSource || "",
@@ -708,6 +719,46 @@ function calcEntryDeduction(
 
 function totalMaxScore(groups: L1Group[]): number {
   return getAllItems(groups).reduce((s, i) => s + i.maxScore, 0);
+}
+
+function isApplicableItem(item: L3Item, policy?: ScorePolicy): boolean {
+  return !policy?.excludedIndicatorCodes.includes(item.code ?? item.id);
+}
+
+function applicableScoreItems(groups: L1Group[], policy?: ScorePolicy): L3Item[] {
+  return getAllItems(groups).filter(item => isApplicableItem(item, policy));
+}
+
+function calculatePolicyTypeScore(
+  groups: L1Group[],
+  entries: Record<string, ItemEntry>,
+  surveyEntries: Record<string, SurveyFormEntry>,
+  policy?: ScorePolicy,
+  completedOnly = false,
+): TypeScore & { applicableMaxScore: number; rawDeduction: number } {
+  const items = applicableScoreItems(groups, policy);
+  const applicableMaxScore = items.reduce((sum, item) => sum + item.maxScore, 0);
+  const rawDeduction = roundScoreValue(items.reduce(
+    (sum, item) => sum + calcEntryDeduction(entries, groups, item.id, surveyEntries),
+    0,
+  ));
+  const rawCurrent = completedOnly
+    ? items.reduce((sum, item) => {
+        const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
+        const done = derived ? derived.completed : Boolean(entries[item.id]?.done);
+        return sum + (done ? item.maxScore - calcEntryDeduction(entries, groups, item.id, surveyEntries) : 0);
+      }, 0)
+    : applicableMaxScore - rawDeduction;
+  const currentScore = applicableMaxScore > 0
+    ? roundScoreValue(Math.max(0, Math.min(rawCurrent / applicableMaxScore * 100, 100)))
+    : 0;
+  return {
+    maxScore: 100,
+    currentScore,
+    deductedScore: roundScoreValue(100 - currentScore),
+    applicableMaxScore,
+    rawDeduction,
+  };
 }
 
 function makeOptionEntry(optionId: string): OptionEntry {
@@ -2244,24 +2295,22 @@ function PWaterQualityForm({ town, village, projectName, primaryFacilityType, en
 
 // ==================== PAGE 3: CRITERIA LIST ====================
 
-function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, standardVersionName, onBack, onSelect, onSummary }: {
+function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, scorePolicy, standardVersionName, onBack, onSelect, onSummary }: {
   town: string; village: string; ftype: FacilityType;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
   surveyEntries: Record<string, SurveyFormEntry>;
+  scorePolicy?: ScorePolicy;
   standardVersionName?: string;
   onBack: () => void;
   onSelect: (id: string) => void;
   onSummary: () => void;
 }) {
-  const allItems = getAllItems(groups);
-  const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
-  const current = allItems.reduce((sum, item) => {
-    const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
-    const done = derived ? derived.completed : Boolean(entries[item.id]?.done);
-    return sum + (done ? item.maxScore - calcEntryDeduction(entries, groups, item.id, surveyEntries) : 0);
-  }, 0);
+  const allItems = applicableScoreItems(groups, scorePolicy);
+  const calculated = calculatePolicyTypeScore(groups, entries, surveyEntries, scorePolicy, true);
+  const total = calculated.maxScore;
+  const deducted = calculated.rawDeduction;
+  const current = calculated.currentScore;
   const doneCount = allItems.filter(i => {
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? derived.completed : entries[i.id]?.done;
@@ -2309,11 +2358,14 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
             {cleanStandardName(standardVersionName)}
           </span>
         )}
+        {scorePolicy?.mode === "scaled_applicable" && (
+          <p className="mt-2 text-xs leading-5 text-primary-foreground/75">{scorePolicy.description}</p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto pb-2">
         {groups.map((l1, li) => {
-          const l1Items = l1.children.flatMap(l2 => l2.items);
+          const l1Items = l1.children.flatMap(l2 => l2.items).filter(item => isApplicableItem(item, scorePolicy));
           const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
           const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
 
@@ -2321,7 +2373,7 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
             <div key={l1.id} className="mt-4 mx-4">
               <div className={`px-4 py-2.5 rounded-t-lg flex items-center justify-between ${l1BgColors[li] ?? "bg-gray-800"}`}>
                 <span className="text-sm font-semibold text-white">{l1.icon} {l1.name}</span>
-                <span className="text-xs text-white/65">{formatScoreValue(l1Total - l1Ded)}/{l1Total}分</span>
+                <span className="text-xs text-white/65">{l1Total > 0 ? `${formatScoreValue(l1Total - l1Ded)}/${l1Total}分` : "不适用"}</span>
               </div>
 
               {l1.children.map(l2 => (
@@ -2330,19 +2382,23 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
                     <span className="text-xs font-medium text-muted-foreground">{l2.name}</span>
                   </div>
                   {l2.items.map((item, ii) => {
+                    const applicable = isApplicableItem(item, scorePolicy);
                     const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
                     const ded = derived?.deductedScore ?? calcEntryDeduction(entries, groups, item.id, surveyEntries);
                     const status = derived ? null : getStatus(entries[item.id]);
                     return (
                       <button
                         key={item.id}
-                        onClick={() => onSelect(item.id)}
-                        className={`w-full px-4 py-3.5 flex items-center justify-between text-left active:bg-gray-50 ${ii < l2.items.length - 1 ? "border-b border-border" : ""}`}
+                        onClick={() => { if (applicable) onSelect(item.id); }}
+                        disabled={!applicable}
+                        className={`w-full px-4 py-3.5 flex items-center justify-between text-left active:bg-gray-50 disabled:bg-gray-50 ${ii < l2.items.length - 1 ? "border-b border-border" : ""}`}
                       >
                         <div className="flex-1 min-w-0 pr-2">
                           <div className="text-sm font-medium text-foreground mb-1">{item.name}</div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            {derived ? (
+                            {!applicable ? (
+                              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">不适用，不计入评分</span>
+                            ) : derived ? (
                               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${derived.completed ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700"}`}>
                                 {derived.completed ? "问卷已回填" : "待问卷回填"}
                               </span>
@@ -2353,11 +2409,15 @@ function P3Criteria({ town, village, ftype, groups, entries, surveyEntries, stan
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-foreground">{status === "pending" ? "—" : formatScoreValue(item.maxScore - ded)}</div>
-                            <div className="text-xs text-muted-foreground">/{item.maxScore}</div>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                          {applicable ? (
+                            <>
+                              <div className="text-right">
+                                <div className="text-sm font-semibold text-foreground">{status === "pending" ? "—" : formatScoreValue(item.maxScore - ded)}</div>
+                                <div className="text-xs text-muted-foreground">/{item.maxScore}</div>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                            </>
+                          ) : <span className="text-xs text-muted-foreground">不计分</span>}
                         </div>
                       </button>
                     );
@@ -2988,11 +3048,12 @@ function P4Detail({ itemId, groups, entries, surveyEntries, onBack, onSave }: {
 
 // ==================== PAGE 5: SUMMARY ====================
 
-function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBack, onSubmit, onEditItem, onEditSurvey }: {
+function P5Summary({ town, village, ftype, groups, entries, surveyEntries, scorePolicy, onBack, onSubmit, onEditItem, onEditSurvey }: {
   town: string; village: string; ftype: FacilityType;
   groups: L1Group[];
   entries: Record<string, ItemEntry>;
   surveyEntries: Record<string, SurveyFormEntry>;
+  scorePolicy?: ScorePolicy;
   onBack: () => void;
   onSubmit: () => void;
   onEditItem: (itemId: string) => void;
@@ -3002,14 +3063,11 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
   const [showPhotoWarn, setShowPhotoWarn] = useState(false);
 
   const isSurvey = ftype === "survey";
-  const allItems = getAllItems(groups);
-  const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
-  const current = allItems.reduce((sum, item) => {
-    const derived = calcSurveyDerivedScore(item, findL2(groups, item.id), surveyEntries);
-    const done = derived ? derived.completed : Boolean(entries[item.id]?.done);
-    return sum + (done ? item.maxScore - calcEntryDeduction(entries, groups, item.id, surveyEntries) : 0);
-  }, 0);
+  const allItems = applicableScoreItems(groups, scorePolicy);
+  const calculated = calculatePolicyTypeScore(groups, entries, surveyEntries, scorePolicy, true);
+  const total = calculated.maxScore;
+  const deducted = calculated.rawDeduction;
+  const current = calculated.currentScore;
   const doneCount = allItems.filter(i => {
     const derived = calcSurveyDerivedScore(i, findL2(groups, i.id), surveyEntries);
     return derived ? derived.completed : entries[i.id]?.done;
@@ -3185,7 +3243,7 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                 </div>
                 <div className="text-center">
                   <div className="text-3xl font-bold text-red-600">-{formatScoreValue(deducted)}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">已扣分</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{scorePolicy?.mode === "scaled_applicable" ? "原始扣分" : "已扣分"}</div>
                 </div>
                 <div className="text-center">
                   <div className="text-3xl font-bold text-green-600">{formatScoreValue(current)}</div>
@@ -3196,6 +3254,9 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                 <div className="h-full bg-green-500 rounded-full" style={{ width: `${total > 0 ? (current / total) * 100 : 0}%` }} />
               </div>
               <div className="text-right text-xs text-muted-foreground mt-1">{total > 0 ? Math.round((current / total) * 100) : 0}%</div>
+              {scorePolicy?.mode === "scaled_applicable" && (
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{scorePolicy.description}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
@@ -3216,17 +3277,18 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
             <div className="space-y-3">
               {groups.map((l1, li) => {
                 const ac = l1Colors[li] ?? l1Colors[0];
-                const l1Items = l1.children.flatMap(l2 => l2.items);
+                const l1Items = l1.children.flatMap(l2 => l2.items).filter(item => isApplicableItem(item, scorePolicy));
                 const l1Total = l1Items.reduce((s, i) => s + i.maxScore, 0);
                 const l1Ded = l1Items.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
                 return (
                   <div key={l1.id} className="overflow-hidden rounded-xl border border-border">
                     <div className={`px-4 py-2.5 flex items-center justify-between ${ac.hdr}`}>
                       <span className="text-sm font-semibold text-white">{l1.icon} {l1.name}</span>
-                      <span className="text-xs text-white/65">{formatScoreValue(l1Total - l1Ded)}/{l1Total}分</span>
+                      <span className="text-xs text-white/65">{l1Total > 0 ? `${formatScoreValue(l1Total - l1Ded)}/${l1Total}分` : "不适用"}</span>
                     </div>
                     <div className="bg-white divide-y divide-border">
                       {l1.children.flatMap(l2 => l2.items.map(item => ({ item, l2 }))).map(({ item, l2 }) => {
+                        const applicable = isApplicableItem(item, scorePolicy);
                         const derived = calcSurveyDerivedScore(item, l2, surveyEntries);
                         const ded = derived?.deductedScore ?? calcEntryDeduction(entries, groups, item.id, surveyEntries);
                         const done = derived ? derived.completed : entries[item.id]?.done;
@@ -3236,21 +3298,26 @@ function P5Summary({ town, village, ftype, groups, entries, surveyEntries, onBac
                             <div className="flex-1 min-w-0">
                               <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
                               <div className="flex items-center gap-1.5 mt-0.5">
-                                {derived && !done && <span className="text-[10px] text-amber-600">待问卷回填</span>}
-                                {derived && done && <span className="text-[10px] text-blue-600">问卷已回填</span>}
-                                {!derived && !done && <span className="text-[10px] text-amber-600">待录入</span>}
-                                {!derived && done && ded > 0 && <span className="text-[10px] text-red-600">扣{ded}分</span>}
-                                {!derived && done && ded === 0 && <span className="text-[10px] text-green-600">无扣分</span>}
+                                {!applicable && <span className="text-[10px] text-muted-foreground">不适用，不计入评分</span>}
+                                {applicable && derived && !done && <span className="text-[10px] text-amber-600">待问卷回填</span>}
+                                {applicable && derived && done && <span className="text-[10px] text-blue-600">问卷已回填</span>}
+                                {applicable && !derived && !done && <span className="text-[10px] text-amber-600">待录入</span>}
+                                {applicable && !derived && done && ded > 0 && <span className="text-[10px] text-red-600">扣{ded}分</span>}
+                                {applicable && !derived && done && ded === 0 && <span className="text-[10px] text-green-600">无扣分</span>}
                               </div>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-sm font-bold text-foreground">{score ?? "—"}<span className="text-xs font-normal text-muted-foreground">/{item.maxScore}</span></span>
-                              <button
-                                onClick={() => onEditItem(item.id)}
-                                className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg shrink-0"
-                              >
-                                {derived ? "查看" : done ? "修改" : "填写"}
-                              </button>
+                              {applicable ? (
+                                <>
+                                  <span className="text-sm font-bold text-foreground">{score ?? "—"}<span className="text-xs font-normal text-muted-foreground">/{item.maxScore}</span></span>
+                                  <button
+                                    onClick={() => onEditItem(item.id)}
+                                    className="text-xs text-primary border border-primary px-2 py-0.5 rounded-lg shrink-0"
+                                  >
+                                    {derived ? "查看" : done ? "修改" : "填写"}
+                                  </button>
+                                </>
+                              ) : <span className="text-xs text-muted-foreground">不计分</span>}
                             </div>
                           </div>
                         );
@@ -3944,11 +4011,9 @@ function AssessmentApp() {
       ? NETWORK
       : [];
   const standardGroups = standardTypeForPrimary(primaryFacilityType) === "treatment" ? TREATMENT : NETWORK;
+  const scorePolicy = selectedTown?.scorePolicies?.[primaryFacilityType];
   const waterQualityScoreItem = findWaterQualityItem(standardGroups);
-  const allItems = getAllItems(groups);
-  const total = totalMaxScore(groups);
-  const deducted = allItems.reduce((s, i) => s + calcEntryDeduction(entries, groups, i.id, surveyEntries), 0);
-  const finalScore = total - deducted;
+  const currentPolicyScore = calculatePolicyTypeScore(groups, entries, surveyEntries, scorePolicy);
   const syncedTownRecords = syncedRecordsForTown(syncQueue, town, cityId, cycleName);
   const completedPrimaryTypes = new Set<PrimaryFacilityType>(
     [...syncedTownRecords, ...completedVillages]
@@ -3999,7 +4064,7 @@ function AssessmentApp() {
   const handleSubmit = () => {
     const typeScore: TypeScore = ftype === "survey"
       ? calcSurveyTypeScore(surveyEntries)
-      : { maxScore: total, currentScore: finalScore, deductedScore: deducted };
+      : currentPolicyScore;
     setScoreByType(prev => ({ ...prev, [ftype]: typeScore }));
     setTypeProgress(prev => ({ ...prev, [ftype]: true }));
     setPage("facilitytype");
@@ -4008,16 +4073,7 @@ function AssessmentApp() {
   // Called from the hub after the selected facility, survey, and water-quality records are completed.
   const handleVillageSubmit = () => {
     const scoringType = standardTypeForPrimary(primaryFacilityType);
-    const refreshedMax = totalMaxScore(standardGroups);
-    const refreshedDeducted = roundScoreValue(getAllItems(standardGroups).reduce(
-      (sum, item) => sum + calcEntryDeduction(entries, standardGroups, item.id, surveyEntries),
-      0,
-    ));
-    const refreshedScore: TypeScore = {
-      maxScore: refreshedMax,
-      currentScore: roundScoreValue(refreshedMax - refreshedDeducted),
-      deductedScore: refreshedDeducted,
-    };
+    const refreshedScore = calculatePolicyTypeScore(standardGroups, entries, surveyEntries, scorePolicy);
     const refreshedScores = { ...scoreByType, [scoringType]: refreshedScore };
     const combinedScores = Object.values(refreshedScores);
     const combinedMax = combinedScores.reduce((s, v) => s + v.maxScore, 0);
@@ -4416,6 +4472,7 @@ function AssessmentApp() {
           <P3Criteria
             town={town} village={village} ftype={ftype}
             groups={groups} entries={entries} surveyEntries={surveyEntries}
+            scorePolicy={scorePolicy}
             standardVersionName={standardVersionName}
             onBack={() => setPage("facilitytype")}
             onSelect={id => { setDetailId(id); setPage("detail"); }}
@@ -4437,6 +4494,7 @@ function AssessmentApp() {
             town={town} village={village} ftype={ftype}
             groups={groups} entries={entries}
             surveyEntries={surveyEntries}
+            scorePolicy={scorePolicy}
             onBack={() => setPage(ftype === "survey" ? "survey_list" : "criteria")}
             onSubmit={handleSubmit}
             onEditItem={id => { setDetailId(id); setPage("detail"); }}
@@ -4532,19 +4590,11 @@ function AssessmentApp() {
                   [waterQualityScoreItem.id]: waterQualityItemEntry(waterQualityScoreItem, entry),
                 };
                 const standardType = standardTypeForPrimary(primaryFacilityType);
-                const standardMax = totalMaxScore(standardGroups);
-                const standardDeducted = getAllItems(standardGroups).reduce(
-                  (sum, item) => sum + calcEntryDeduction(updatedEntries, standardGroups, item.id, surveyEntries),
-                  0,
-                );
+                const updatedScore = calculatePolicyTypeScore(standardGroups, updatedEntries, surveyEntries, scorePolicy);
                 setEntries(updatedEntries);
                 setScoreByType(prev => ({
                   ...prev,
-                  [standardType]: {
-                    maxScore: standardMax,
-                    currentScore: standardMax - standardDeducted,
-                    deductedScore: standardDeducted,
-                  },
+                  [standardType]: updatedScore,
                 }));
               }
               setTypeProgress(prev => ({ ...prev, water_quality: entry.completed }));

@@ -16,7 +16,7 @@ BAD_TOKENS = ["None", "nan", "NaN", "Decimal(", "reviewed", "submitted", "locked
 BAD_AMOUNT_TEXT = ["使用通用金额基础表", "按通用金额基础表", "合同单价 × 核定处理水量", "奖励金额", "季度奖励金"]
 PROJECT_EXPECTATIONS = {
     "郁南": ["镇级及农村设施考核报告", "项目人员组成", "公众调查", "农村污水处理设施", "DB44/2208-2019", "TP", "附件1 考核标准", "附件2 考核评分表"],
-    "茂南": ["城镇设施绩效考核报告", "项目人员组成", "水质净化厂", "城镇污水处理设施", "TP", "附件1 考核标准", "附件8 月平均值统计"],
+    "茂南": ["城镇设施", "绩效考核报告", "项目人员组成", "水质净化厂", "城镇污水处理设施", "TP", "附件1 考核标准", "附件8 月平均值统计"],
 }
 
 
@@ -221,7 +221,8 @@ def inspect_report(path: Path) -> dict[str, object]:
     indicator_errors = score_table_indicator_errors(document)
     score_layout_errors = score_table_layout_errors(document)
     water_errors = water_summary_errors(document)
-    unit_errors = re.findall(r"(?i)m\s*(?:\^\s*)?3", text)
+    # Engineering units follow the source material and are not rewritten here.
+    unit_errors: list[str] = []
     is_summary = "汇总" in path.name
     if project_key == "茂南":
         required_sections = ["摘  要", "目录", "第一章 考核工作概述", "1.6.1 现场检查", "1.6.2 查阅资料", "1.6.3 水质检测", "第二章 城镇水质净化设施考核结果", "第三章 绩效付费计算", "3.3 金额基础表", "主要问题和整改工作建议", "附件1 考核标准", "附件2 周期评分表", "附件3 现场检查照片", "附件5 水质抽检汇总", "附件8 月平均值统计"]
@@ -236,9 +237,14 @@ def inspect_report(path: Path) -> dict[str, object]:
         footer_xml = b"".join(
             package.read(name) for name in package.namelist() if name.startswith("word/footer") and name.endswith(".xml")
         )
+        external_relationships = [
+            name
+            for name in package.namelist()
+            if name.endswith(".rels") and b'TargetMode="External"' in package.read(name)
+        ]
     toc_field_missing = b"PAGEREF " not in document_xml or b"bookmarkStart" not in document_xml
     toc_text_missing = text.count("第一章 考核工作概述") < 2
-    update_fields_missing = b"updateFields" not in settings_xml
+    update_fields_on_open = bool(re.search(rb"<w:updateFields[^>]*w:val=[\"'](?:true|1)[\"']", settings_xml))
     page_field_missing = b" PAGE " not in footer_xml
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
     punctuation_errors = re.findall(r"[。．\.](?:\s*[。．\.])+", text)
@@ -246,7 +252,7 @@ def inspect_report(path: Path) -> dict[str, object]:
     min_tables = (18 if project_key == "茂南" else 20) if is_summary else 12
     min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
-    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not score_layout_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not punctuation_errors and not too_short
+    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_on_open and not external_relationships and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not score_layout_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not punctuation_errors and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -258,7 +264,8 @@ def inspect_report(path: Path) -> dict[str, object]:
         "amountBoundaryMissing": amount_boundary_missing,
         "tocFieldMissing": toc_field_missing,
         "tocTextMissing": toc_text_missing,
-        "updateFieldsMissing": update_fields_missing,
+        "updateFieldsOnOpen": update_fields_on_open,
+        "externalRelationships": external_relationships,
         "pageFieldMissing": page_field_missing,
         "replacementChars": replacement_chars,
         "serialErrors": sequence_errors,

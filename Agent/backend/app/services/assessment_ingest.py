@@ -24,6 +24,7 @@ from app.models import (
     Village,
     WaterQualityRecord,
 )
+from app.services.scoring_policy import calculate_policy_score, record_scoring_policy
 
 KNOWN_SURVEY_RESPONDENTS = ("implementation_org", "assessment_team", "gov_rep", "villager1", "villager2")
 
@@ -299,12 +300,16 @@ def _score_option(session: Session, option_entry: dict[str, Any]) -> tuple[str |
 def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> list[AssessmentScore]:
     session.execute(delete(Attachment).where(Attachment.record_id == record.id, Attachment.score_id.is_not(None)))
     session.execute(delete(AssessmentScore).where(AssessmentScore.record_id == record.id))
+    policy = record_scoring_policy(session, record)
+    excluded_codes = set(policy.get("excludedIndicatorCodes") or [])
     created: list[AssessmentScore] = []
     for key, entry in _entry_items(entries):
         indicator_id = entry.get("indicatorId") or entry.get("indicator_id") or entry.get("itemId") or key
         indicator = session.get(Indicator, indicator_id) if indicator_id else None
         expected_type = _raw_facility_type(record.raw_payload or {})
         if indicator is None or indicator.version_id != record.indicator_version_id or indicator.facility_type != expected_type:
+            continue
+        if indicator.code in excluded_codes:
             continue
         options = entry.get("options") if isinstance(entry.get("options"), list) else []
         selected_options = [option for option in options if isinstance(option, dict) and option.get("selection") not in (None, "no_deduction")]
@@ -341,6 +346,28 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
         for option_entry, (option_id, _, _) in zip(selected_options, evaluated):
             sync_option_photos(session, record.id, score.id, option_id, option_entry)
         created.append(score)
+    created_indicator_ids = {item.indicator_id for item in created}
+    if excluded_codes:
+        excluded_indicators = list(session.scalars(
+            select(Indicator).where(
+                Indicator.version_id == record.indicator_version_id,
+                Indicator.facility_type == _raw_facility_type(record.raw_payload or {}),
+                Indicator.code.in_(excluded_codes),
+            )
+        ))
+        for indicator in excluded_indicators:
+            if indicator.id in created_indicator_ids:
+                continue
+            score = AssessmentScore(
+                record_id=record.id,
+                indicator_id=indicator.id,
+                score=0,
+                deduction=0,
+                reason="本考核对象无污水提升泵站，该评分条目不适用且不计入评分。",
+                source="not_applicable",
+            )
+            session.add(score)
+            created.append(score)
     session.flush()
     existing_surveys = list(session.scalars(select(SurveyRecord).where(SurveyRecord.record_id == record.id)))
     if existing_surveys:
@@ -351,8 +378,26 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
 
 def recalculate_record_total(session: Session, record: AssessmentRecord) -> float:
     session.flush()
-    scores = list(session.scalars(select(AssessmentScore).where(AssessmentScore.record_id == record.id)))
-    record.total_score = max(0, min(sum(_to_float(item.score) for item in scores), 100))
+    score_rows = session.execute(
+        select(AssessmentScore, Indicator.code)
+        .join(Indicator, Indicator.id == AssessmentScore.indicator_id)
+        .where(AssessmentScore.record_id == record.id)
+    ).all()
+    calculation = calculate_policy_score(
+        record_scoring_policy(session, record),
+        [
+            {
+                "indicatorCode": indicator_code,
+                "score": score.score,
+                "deduction": score.deduction,
+            }
+            for score, indicator_code in score_rows
+        ],
+    )
+    record.total_score = calculation["percentScore"]
+    raw_payload = dict(record.raw_payload or {})
+    raw_payload["scoreCalculation"] = calculation
+    record.raw_payload = raw_payload
     session.flush()
     return float(record.total_score)
 
@@ -511,8 +556,8 @@ def _parse_datetime(value: Any) -> datetime | None:
         return None
 
 
-def stamp_water_quality_audit(session: Session, payload: Any, user_id: str | None) -> dict[str, Any]:
-    data = dict(payload) if isinstance(payload, dict) else {"value": payload}
+def _stamp_water_quality_item(data: dict[str, Any], user: User | None, user_id: str | None) -> dict[str, Any]:
+    data = dict(data)
     overridden = bool(data.get("conclusionOverridden") or data.get("manualOverride"))
     audit_keys = ("conclusionUpdatedBy", "conclusionUpdatedByName", "conclusionUpdatedAt")
     if not overridden:
@@ -522,26 +567,49 @@ def stamp_water_quality_audit(session: Session, payload: Any, user_id: str | Non
     if not str(data.get("note") or data.get("remark") or "").strip():
         raise ValueError("人工修改水质判定后必须填写修改依据")
 
-    user = session.get(User, user_id) if user_id else None
     data["conclusionUpdatedBy"] = user.id if user else user_id
     data["conclusionUpdatedByName"] = (user.display_name or user.username) if user else "系统录入"
     data["conclusionUpdatedAt"] = datetime.now(timezone.utc).isoformat()
     return data
 
 
-def sync_water_quality(session: Session, record: AssessmentRecord, payload: Any) -> WaterQualityRecord:
-    session.execute(delete(WaterQualityRecord).where(WaterQualityRecord.record_id == record.id))
+def stamp_water_quality_audit(session: Session, payload: Any, user_id: str | None) -> dict[str, Any]:
+    data = dict(payload) if isinstance(payload, dict) else {"value": payload}
+    user = session.get(User, user_id) if user_id else None
+    samples = data.get("samples")
+    if isinstance(samples, list):
+        data["samples"] = [
+            _stamp_water_quality_item(item, user, user_id)
+            for item in samples
+            if isinstance(item, dict)
+        ]
+        return data
+    return _stamp_water_quality_item(data, user, user_id)
+
+
+def _water_quality_samples(payload: Any) -> list[dict[str, Any]]:
     data = payload if isinstance(payload, dict) else {"value": payload}
-    sampled_at = _parse_datetime(data.get("sampleTime") or data.get("sampledAt") or data.get("sampled_at"))
-    item = WaterQualityRecord(
-        record_id=record.id,
-        sampled_at=sampled_at,
-        conclusion=data.get("conclusion"),
-        payload=data,
-    )
-    session.add(item)
+    samples = data.get("samples")
+    if isinstance(samples, list):
+        return [dict(item) for item in samples if isinstance(item, dict)]
+    return [dict(data)]
+
+
+def sync_water_quality(session: Session, record: AssessmentRecord, payload: Any) -> WaterQualityRecord | None:
+    session.execute(delete(WaterQualityRecord).where(WaterQualityRecord.record_id == record.id))
+    items: list[WaterQualityRecord] = []
+    for data in _water_quality_samples(payload):
+        sampled_at = _parse_datetime(data.get("sampleTime") or data.get("sampledAt") or data.get("sampled_at"))
+        item = WaterQualityRecord(
+            record_id=record.id,
+            sampled_at=sampled_at,
+            conclusion=data.get("conclusion"),
+            payload=data,
+        )
+        session.add(item)
+        items.append(item)
     session.flush()
-    return item
+    return items[0] if items else None
 
 
 def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecord:

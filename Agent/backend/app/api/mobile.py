@@ -29,6 +29,7 @@ from app.services.assessment_ingest import (
 from app.services.project_catalog import PROJECT_CATALOG, project_by_name
 from app.services.standard_catalog import load_standard_groups
 from app.services.standard_names import clean_standard_name
+from app.services.scoring_policy import scoring_policy
 
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
@@ -128,15 +129,24 @@ def towns(city_id: str | None = None, session: Session = Depends(get_session), _
     statement = select(Town).where(Town.is_active.is_(True))
     if city_id:
         statement = statement.where(Town.city_id == city_id)
-    return {"items": [{
-        "id": town.id,
-        "cityId": town.city_id,
-        "name": town.name,
-        "chapterCode": town.chapter_code,
-        "assessmentTargets": town.assessment_targets or [],
-        "assessmentObject": town.assessment_object or {},
-        "reportTemplate": town.report_template or {},
-    } for town in session.scalars(statement.order_by(Town.sort_order, Town.name)).all()]}
+    items = []
+    for town in session.scalars(statement.order_by(Town.sort_order, Town.name)).all():
+        city = session.get(City, town.city_id)
+        targets = town.assessment_targets or []
+        items.append({
+            "id": town.id,
+            "cityId": town.city_id,
+            "name": town.name,
+            "chapterCode": town.chapter_code,
+            "assessmentTargets": targets,
+            "assessmentObject": town.assessment_object or {},
+            "reportTemplate": town.report_template or {},
+            "scorePolicies": {
+                facility_type: scoring_policy(city.name if city else None, town.name, facility_type)
+                for facility_type in targets
+            },
+        })
+    return {"items": items}
 
 
 @router.get("/towns/{town_id}/villages")

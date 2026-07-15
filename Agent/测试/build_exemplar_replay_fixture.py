@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
 from app.services.project_catalog import MAONAN_TOWNS, YUNAN_TOWNS
+from app.services.scoring_policy import calculate_policy_score, scoring_policy
 from app.services.standard_catalog import load_standard_groups
 
 
@@ -21,6 +22,17 @@ FACILITY_LABELS = {
     "town_network": ("污水收集管网", "管网"),
     "rural_treatment": ("农村污水",),
 }
+
+
+def _current_rule_score(project: str, town: str, facility_type: str, deduction_total: float) -> float:
+    project_name = "茂南项目" if project == "maonan" else "郁南项目"
+    policy = scoring_policy(project_name, town, facility_type)
+    applicable_max = float(policy.get("applicableMaxScore") or 100)
+    calculation = calculate_policy_score(policy, [{
+        "score": max(0.0, applicable_max - deduction_total),
+        "deduction": deduction_total,
+    }])
+    return float(calculation["percentScore"])
 
 
 def _normalize(value: Any) -> str:
@@ -230,7 +242,7 @@ def build_yunan(data: dict[str, Any]) -> list[dict[str, Any]]:
             "sourceTableIndex": table["index"],
             "sourceScore": source_score,
             "sourceDeductionTotal": deduction_total,
-            "currentRuleScore": round(max(0.0, 100.0 - deduction_total), 2),
+            "currentRuleScore": _current_rule_score("yunan", current_town, facility_type, deduction_total),
             "deductions": _map_deductions("yunan", facility_type, rows),
         })
     unique: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -275,7 +287,7 @@ def build_maonan(data: dict[str, Any]) -> list[dict[str, Any]]:
             "sourceTableIndex": index,
             "sourceScore": source_score,
             "sourceDeductionTotal": deduction_total,
-            "currentRuleScore": round(max(0.0, 100.0 - deduction_total), 2),
+            "currentRuleScore": _current_rule_score("maonan", current_town, facility_type, deduction_total),
             "deductions": _map_deductions("maonan", facility_type, rows),
         })
     return records

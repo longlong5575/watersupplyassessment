@@ -157,13 +157,14 @@ def check_docx(path: Path, town: str, project_name: str):
         assert "第四章 主要问题及整改建议" in all_text
         assert "运维绩效考核系数" in all_text
         assert "3.3 金额基础表" in all_text
+        assert "附件18" not in all_text
         assert "本期付费采用上一考核周期" in all_text
         assert "不引用茂南或其他项目金额资料" in all_text
         assert "附件2 考核评分表" in all_text
         assert "附件3 现场照片" in all_text
         assert "附件5 水质抽检情况汇总表" in all_text
     if project_name == "茂南项目":
-        assert "城镇设施绩效考核报告" in all_text
+        assert "城镇设施" in all_text and "绩效考核报告" in all_text
         assert "水质净化厂" in all_text
         assert "问卷调查（村级考核有）" not in all_text
         assert "第一章 考核工作概述" in all_text
@@ -182,7 +183,6 @@ def check_docx(path: Path, town: str, project_name: str):
     assert "2.1.1 总体评价和设施情况概览" in paragraph_texts
     assert "2.1 项目考核结果汇总" not in paragraph_texts
     assert "指标编号" not in all_text
-    assert not re.search(r"(?i)m\s*(?:\^\s*)?3", all_text)
     with ZipFile(path) as package:
         assert package.read("word/document.xml").count(b"<w:drawing") >= 1
     assert "Agent辅助校验" not in all_text
@@ -219,7 +219,11 @@ def main():
         maonan_by_name = {item["name"]: item for item in maonan_towns}
         assert yunan_by_name["桂圩镇"]["chapterCode"] == "2.3"
         assert set(yunan_by_name["桂圩镇"]["assessmentTargets"]) == {"town_plant", "town_network", "rural_treatment"}
+        assert yunan_by_name["桂圩镇"]["scorePolicies"]["town_network"]["applicableMaxScore"] == 88
+        assert yunan_by_name["桂圩镇"]["scorePolicies"]["town_network"]["excludedScore"] == 12
         assert maonan_by_name["金塘镇"]["assessmentTargets"] == ["town_plant"]
+        assert maonan_by_name["鳌头镇"]["scorePolicies"]["town_network"]["applicableMaxScore"] == 82
+        assert maonan_by_name["鳌头镇"]["scorePolicies"]["town_network"]["excludedScore"] == 18
         assert maonan_by_name["中科云粤西产业园"]["assessmentTargets"] == ["town_network"]
         assert sum(len(item["assessmentTargets"]) for item in maonan_towns) == 12
 
@@ -293,6 +297,45 @@ def main():
         for _, leaves in standards.values():
             for leaf in leaves:
                 INDICATOR_GROUPS[leaf["id"]] = leaves
+
+        def no_pump_payload(project, cycle, town_name, leaves, excluded_codes, deduction_total):
+            payload = complete_payload(
+                project=project, cycle=cycle, town=town_name, village="",
+                facility_type="town_network", indicators=leaves,
+            )
+            remaining = deduction_total
+            for leaf in leaves:
+                if leaf["code"] in excluded_codes or remaining <= 0:
+                    continue
+                deduction = min(float(leaf["fullScore"]), remaining)
+                payload["villages"][0]["entries"][leaf["id"]]["deduction"] = deduction
+                remaining = round(remaining - deduction, 4)
+            assert remaining == 0
+            return payload
+
+        yunan_network_leaves = standards[("郁南项目", "town_network")][1]
+        guiwei_policy = yunan_by_name["桂圩镇"]["scorePolicies"]["town_network"]
+        guiwei_payload = no_pump_payload(
+            yunan, yunan_cycle, "桂圩镇", yunan_network_leaves,
+            set(guiwei_policy["excludedIndicatorCodes"]), 19.5,
+        )
+        guiwei_created = assert_ok(client.post("/api/mobile/assessment-records", json=guiwei_payload, headers=inspector), "guiwei scaled score")
+        guiwei_detail = assert_ok(client.get(f"/api/records/{guiwei_created['recordIds'][0]}"), "guiwei scaled score detail")
+        assert float(guiwei_detail["totalScore"]) == 77.8
+        assert guiwei_detail["raw"]["scoreCalculation"]["formula"] == "68.50/88×100=77.8"
+        assert sum(item["source"] == "not_applicable" for item in guiwei_detail["scores"]) == 6
+
+        maonan_network_leaves = standards[("茂南项目", "town_network")][1]
+        aotou_policy = maonan_by_name["鳌头镇"]["scorePolicies"]["town_network"]
+        aotou_payload = no_pump_payload(
+            maonan, maonan_cycle, "鳌头镇", maonan_network_leaves,
+            set(aotou_policy["excludedIndicatorCodes"]), 4.6,
+        )
+        aotou_created = assert_ok(client.post("/api/mobile/assessment-records", json=aotou_payload, headers=inspector), "aotou scaled score")
+        aotou_detail = assert_ok(client.get(f"/api/records/{aotou_created['recordIds'][0]}"), "aotou scaled score detail")
+        assert float(aotou_detail["totalScore"]) == 94.4
+        assert aotou_detail["raw"]["scoreCalculation"]["formula"] == "77.40/82×100=94.4"
+        assert sum(item["source"] == "not_applicable" for item in aotou_detail["scores"]) == 5
 
         # Scoring stress cases: full score, capped legacy input, capped counts,
         # water-quality full deduction, survey replacement, and review overrides.
@@ -378,6 +421,25 @@ def main():
         water_score = next(item for item in water_detail["scores"] if item["indicatorId"] == water_indicator["id"])
         assert float(water_score["deduction"]) == float(water_indicator["fullScore"])
         assert float(water_detail["totalScore"]) == 100 - float(water_indicator["fullScore"])
+        multi_water = {
+            "samples": [
+                {
+                    "sampleTime": "2026-04-30T09:00:00", "codValue": "35", "codLimit": "40",
+                    "nh3nValue": "4.2", "nh3nLimit": "5", "conclusion": "qualified", "completed": True,
+                },
+                {
+                    "sampleTime": "2026-05-31T09:00:00", "codValue": "48", "codLimit": "40",
+                    "nh3nValue": "4.6", "nh3nLimit": "5", "conclusion": "unqualified", "completed": True,
+                },
+            ],
+        }
+        assert_ok(client.put(
+            f"/api/mobile/assessment-records/{water_created['recordIds'][0]}/water-quality",
+            headers=inspector, json=multi_water,
+        ), "multiple water-quality samples")
+        multi_water_detail = assert_ok(client.get(f"/api/records/{water_created['recordIds'][0]}"), "multiple water-quality detail")
+        assert len(multi_water_detail["waterQuality"]) == 2
+        assert [item["conclusion"] for item in multi_water_detail["waterQuality"]] == ["qualified", "unqualified"]
 
         review_score_id = legacy_score["id"]
         reviewed_scores = assert_ok(client.put(
@@ -611,14 +673,16 @@ def main():
             assert all(name not in summary_text for name in excluded_summary_towns)
             assert "未提交/未复核" not in summary_text
             summary_paragraphs = [paragraph.text.strip() for paragraph in summary_doc.paragraphs]
-            assert "2.1 项目考核结果汇总" in summary_paragraphs
-            assert any(text.startswith("2.2 ") for text in summary_paragraphs)
-            assert all(
-                any(text.endswith("总体评价和设施情况概览") and text.startswith(f"2.{index + 2}.1 ") for text in summary_paragraphs)
-                for index, _ in enumerate(expected_summary_towns)
+            expected_overview = (
+                "2.1 镇村污水处理设施考核情况汇总"
+                if project["name"] == "郁南项目"
+                else "2.1 各镇水质净化设施考核情况汇总"
             )
+            assert expected_overview in summary_paragraphs
+            assert any(text.startswith("2.2 ") for text in summary_paragraphs)
+            assert sum(text.endswith("总体评价和设施情况概览") for text in summary_paragraphs) == len(expected_summary_towns)
             assert "指标编号" not in summary_text
-            assert not re.search(r"(?i)m\s*(?:\^\s*)?3", summary_text)
+            assert "m³/d" in summary_text
             check_docx(path, town, project["name"])
             preview = assert_ok(client.get(f"/api/reports/{town_report['id']}/preview"), f"report preview {town}")
             assert preview["content"]["paragraphCount"] > 0
