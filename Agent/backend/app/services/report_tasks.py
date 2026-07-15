@@ -81,6 +81,8 @@ def _normalize_report_text(value: Any) -> str:
     text = re.sub(r"(?i)(?<=\d)\s*km\b", "公里", text)
     text = re.sub(r"(?<=\d)\s*立方米", "立方米", text)
     text = text.replace("~", "至")
+    text = re.sub(r"[。．\.](?:\s*[。．\.])+", "。", text)
+    text = re.sub(r"([。！？；，、])\s*[。．\.]", r"\1", text)
     return text
 
 
@@ -216,13 +218,13 @@ PROJECT_REPORT_PROFILES = {
 }
 
 
-def _set_cell_text(cell, value: Any, *, bold: bool = False) -> None:
+def _set_cell_text(cell, value: Any, *, bold: bool = False, size_pt: float = REPORT_TABLE_SIZE_PT) -> None:
     text = _normalize_report_text(value)
     cell.text = text
     for paragraph in cell.paragraphs:
         _apply_paragraph_format(paragraph, table=True)
         for run in paragraph.runs:
-            _apply_run_font(run, REPORT_BODY_FONT, REPORT_TABLE_SIZE_PT, bold=bold)
+            _apply_run_font(run, REPORT_BODY_FONT, size_pt, bold=bold)
 
 
 def _mark_table_header(row) -> None:
@@ -325,24 +327,84 @@ def _add_paragraph(document, text: str, *, bold_prefix: str | None = None, inden
     _apply_run_font(run, REPORT_BODY_FONT, font_size, bold=False)
 
 
-def _add_simple_table(document, headers: list[str], rows: list[list[Any]]) -> None:
+def _set_table_column_widths(table, widths_cm: list[float]) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm
+
+    if len(widths_cm) != len(table.columns):
+        raise ValueError("表格列宽数量与表格列数不一致")
+    table.autofit = False
+    table_layout = table._tbl.tblPr.find(qn("w:tblLayout"))
+    if table_layout is None:
+        table_layout = OxmlElement("w:tblLayout")
+        table._tbl.tblPr.append(table_layout)
+    table_layout.set(qn("w:type"), "fixed")
+    grid_columns = table._tbl.tblGrid.gridCol_lst
+    for column_index, width_cm in enumerate(widths_cm):
+        width = Cm(width_cm)
+        width_twips = str(int(width.twips))
+        if column_index < len(grid_columns):
+            grid_columns[column_index].set(qn("w:w"), width_twips)
+        table.columns[column_index].width = width
+        for row in table.rows:
+            cell = row.cells[column_index]
+            cell.width = width
+            cell_width = cell._tc.get_or_add_tcPr().get_or_add_tcW()
+            cell_width.set(qn("w:w"), width_twips)
+            cell_width.set(qn("w:type"), "dxa")
+
+
+def _format_table_alignment(table, center_columns: set[int]) -> None:
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    for row in table.rows:
+        for column_index, cell in enumerate(row.cells):
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            if column_index in center_columns:
+                for paragraph in cell.paragraphs:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+def _add_simple_table(
+    document,
+    headers: list[str],
+    rows: list[list[Any]],
+    *,
+    column_widths_cm: list[float] | None = None,
+    font_size_pt: float = REPORT_TABLE_SIZE_PT,
+    center_columns: set[int] | None = None,
+) -> None:
     from docx.oxml import OxmlElement
     from docx.shared import Pt
 
     def keep_row_together(row) -> None:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
+    if headers == ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"]:
+        column_widths_cm = column_widths_cm or [0.8, 1.6, 2.5, 1.1, 1.1, 8.9]
+        font_size_pt = max(font_size_pt, 9.5)
+        center_columns = (center_columns or set()) | {0, 1, 3, 4}
+    elif headers == ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"]:
+        column_widths_cm = column_widths_cm or [0.8, 1.4, 2.2, 1.1, 1.2, 1.1, 8.2]
+        font_size_pt = max(font_size_pt, 9.5)
+        center_columns = (center_columns or set()) | {0, 1, 3, 4, 5}
+
     table = document.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
     for cell, value in zip(table.rows[0].cells, headers):
-        _set_cell_text(cell, value, bold=True)
+        _set_cell_text(cell, value, bold=True, size_pt=font_size_pt)
     _mark_table_header(table.rows[0])
     for row_values in rows:
         table_row = table.add_row()
         if max((len(str(value or "")) for value in row_values), default=0) <= 420:
             keep_row_together(table_row)
         for cell, value in zip(table_row.cells, row_values):
-            _set_cell_text(cell, value)
+            _set_cell_text(cell, value, size_pt=font_size_pt)
+    if column_widths_cm:
+        _set_table_column_widths(table, column_widths_cm)
+    _format_table_alignment(table, center_columns or set())
     gap = document.add_paragraph()
     _apply_paragraph_format(gap, indent=False)
     gap.paragraph_format.line_spacing = Pt(4)
@@ -365,12 +427,28 @@ def _chunk_table_rows(rows: list[list[Any]], *, page_weight: int = 18) -> list[l
     return chunks
 
 
-def _add_paginated_table(document, headers: list[str], rows: list[list[Any]], *, page_weight: int = 18) -> None:
+def _add_paginated_table(
+    document,
+    headers: list[str],
+    rows: list[list[Any]],
+    *,
+    page_weight: int = 18,
+    column_widths_cm: list[float] | None = None,
+    font_size_pt: float = REPORT_TABLE_SIZE_PT,
+    center_columns: set[int] | None = None,
+) -> None:
     chunks = _chunk_table_rows(rows, page_weight=page_weight)
     for index, chunk in enumerate(chunks):
         if index:
             document.add_page_break()
-        _add_simple_table(document, headers, chunk)
+        _add_simple_table(
+            document,
+            headers,
+            chunk,
+            column_widths_cm=column_widths_cm,
+            font_size_pt=font_size_pt,
+            center_columns=center_columns,
+        )
 
 
 def _facility_types(records: list[dict[str, Any]]) -> list[str]:
@@ -423,8 +501,8 @@ def _deduction_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
                 len(rows) + 1,
                 record.get("village") or record.get("town") or "-",
                 score.get("indicatorName") or "-",
-                score.get("indicatorFullScore") or "-",
-                score.get("deduction") or "0",
+                _fmt_score_value(score.get("indicatorFullScore")),
+                _fmt_score_value(score.get("deduction")),
                 score.get("reason") or score.get("deductionOptionName") or "-",
             ])
     return rows
@@ -448,7 +526,12 @@ def _add_deduction_narrative(document, records: list[dict[str, Any]], *, limit: 
             if not item[5] or str(item[5]) == "-":
                 continue
             reason_parts.extend(part.strip() for part in str(item[5]).replace(";", "；").split("；") if part.strip())
-        reasons = "；".join(dict.fromkeys(reason_parts))
+        cleaned_reasons: list[str] = []
+        for part in reason_parts:
+            cleaned = re.sub(r"[。．\.；;，,、]+$", "", part).strip()
+            if cleaned and cleaned not in cleaned_reasons:
+                cleaned_reasons.append(cleaned)
+        reasons = "；".join(cleaned_reasons)
         if total >= 5:
             degree = "对本项得分影响较明显"
         elif len(items) > 1:
@@ -472,9 +555,9 @@ def _all_score_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
                 len(rows) + 1,
                 point_name,
                 score.get("indicatorName") or "-",
-                f"{full_score:.2f}",
-                f"{max(full_score - deduction, 0):.2f}",
-                f"{deduction:.2f}",
+                _fmt_score_value(full_score),
+                _fmt_score_value(max(full_score - deduction, 0)),
+                _fmt_score_value(deduction),
                 score.get("reason") or score.get("deductionOptionName") or ("无扣分" if deduction == 0 else "-"),
             ])
     return rows
@@ -842,39 +925,20 @@ def _add_project_personnel_page(document, project_name: str, cycle_name: str) ->
     if "茂南" in project_name:
         rows = [
             ["项目名称", f"茂南区水质净化处理设施全区捆绑PPP项目城镇水质净化设施运营期绩效考核服务项目（城镇设施{cycle_name}绩效考核报告）"],
-            ["编制单位", "广东省建筑设计研究院集团股份有限公司"],
-            ["工程咨询单位甲级资信证书编号", "甲232024011004（市政公用工程）"],
-            ["法定代表人", "李巍"],
-            ["审定人", "黄志聪"],
-            ["审核人", "刘钰坤"],
-            ["项目负责人", "曹雅娟"],
-            ["校对", "陶艺婷"],
-            ["现场考核", "陶艺婷、郭庆鑫"],
-            ["报告编制", "陶艺婷、郭庆鑫、黄灿栩"],
-            ["委托单位考核组", "组长：李庆龙；组员：梁忠智"],
-            ["检测单位", "广东华蓝检测技术有限公司"],
-            ["检测报告人员", "编制：罗桂珠；复核：潘浩贤；签发：孔令峰"],
+            ["委托单位", "茂名市茂南区住房和城乡建设局"],
+            ["考核编制单位", "以本期委托文件和签字确认资料为准"],
+            ["检测单位", "以本期检测委托书和检测报告为准"],
         ]
     else:
         rows = [
             ["项目名称", f"郁南县整县生活污水处理设施捆绑PPP项目绩效考核（{cycle_name}镇级及农村设施考核报告）"],
-            ["编制单位", "广东省建筑设计研究院集团股份有限公司"],
-            ["工程咨询单位甲级资信证书编号", "甲232024011004（市政公用工程）"],
-            ["法定代表人", "李巍"],
-            ["技术总负责人", "罗赤宇"],
-            ["审定人", "黄志聪"],
-            ["审核人", "刘钰坤"],
-            ["项目负责人", "陶艺婷"],
-            ["校对", "曹雅娟、吴浩"],
-            ["现场考核负责人", "陶艺婷、林敏仪"],
-            ["报告编制", "陶艺婷、林敏仪"],
-            ["实施机构考核组", "组长：彭树标；组员：伍界宇"],
-            ["检测单位", "广东华蓝检测技术有限公司"],
-            ["检测报告人员", "编制：罗桂珠；复核：潘浩贤；签发：孔令峰"],
+            ["实施机构", "郁南县住房和城乡建设局"],
+            ["考核编制单位", "以本期委托文件和签字确认资料为准"],
+            ["检测单位", "以本期检测委托书和检测报告为准"],
         ]
     for label, value in rows:
         _add_paragraph(document, f"{label}：{value}", bold_prefix=f"{label}：", indent=False, size_pt=14)
-    _add_paragraph(document, "本期项目人员组成以委托单位和编制单位最终确认的信息为准。", indent=False, size_pt=14)
+    _add_paragraph(document, "项目负责人、审核审定、现场考核和报告编制人员应在正式签发前根据本期签字确认资料补充。", indent=False, size_pt=14)
     document.add_page_break()
 
 
@@ -927,18 +991,18 @@ def _add_assessment_summary_text(document, *, project_name: str, cycle_name: str
     is_maonan = "茂南" in project_name
     document.add_heading("摘  要" if is_maonan else "摘要", level=1)
     if is_maonan:
-        _add_paragraph(document, "根据《茂南区水质净化处理设施全区捆绑PPP项目城镇水质净化设施运营期绩效考核服务项目》约定，茂名市茂南区住房和城乡建设局委托广东省建筑设计研究院集团股份有限公司开展茂南区水质净化处理设施全区捆绑PPP项目绩效考核工作，绩效考核结果将作为支付项目服务费的依据。")
+        _add_paragraph(document, f"本报告汇集{cycle_name}已完成提交并进入复核流程的现场考核数据，评价范围为茂南项目城镇水质净化厂及配套污水收集管网。评分、系数和付费测算均以平台留存记录及本期支撑资料为依据。")
         document.add_heading("一、考核工作开展情况", level=2)
-        _add_paragraph(document, f"根据《PPP项目合同》等文件规定的考核标准和原则，以及各城镇水质净化厂和污水收集管网批复转运营时间，本报告对{cycle_name}纳入考核范围的城镇水质净化厂、配套管网及相关运维资料开展绩效考核。现场考核完成后，考核组结合现场检查情况、水质检测结果和资料复核意见，对本期绩效情况作出客观、公正、全面的评价。")
+        _add_paragraph(document, f"考核组围绕{town_count}个镇街或项目片区开展现场核查，并同步复核运行台账、维护记录、水质资料和问题整改证据。系统仅汇总状态为已提交、已复核或已锁定的记录，未提交对象不参与本期统计。")
         document.add_heading("二、考核评分情况", level=2)
         _add_paragraph(document, f"本期覆盖{town_count}个镇街、{len(records)}个已提交、已复核或已锁定考核对象，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。")
         document.add_heading("三、主要改进点", level=2)
         _add_paragraph(document, "本期重点评价设施运行、现场管理、在线监测、管网巡查和问题整改等工作，并结合现场检查记录、运维资料和复核意见，分别说明各镇街考核对象的得分情况。")
         document.add_heading("四、发现的主要问题", level=2)
     else:
-        _add_paragraph(document, f"我方受郁南县住房和城乡建设局委托，依据《郁南县整县生活污水处理捆绑PPP项目合同》及补充协议约定，以及有关法律、法规、标准和规范要求，在审阅项目公司提交资料、开展现场检查并核实有关情况的基础上，对郁南县整县生活污水处理设施捆绑PPP项目所含镇级污水处理子项目开展{cycle_name}绩效考核工作。")
+        _add_paragraph(document, f"本报告依据郁南项目合同、补充协议及现行绩效考核标准，对{cycle_name}已完成现场填报和平台复核的镇街污水处理设施进行归集评价。报告中的事实、分值、水质结论和附件均由本期数据生成，不沿用既往报告结论。")
         document.add_heading("一、考核工作开展情况", level=2)
-        _add_paragraph(document, f"根据镇级污水处理厂及污水收集管网建设完成情况，以及郁南县住房和城乡建设局工作安排及合同相关约定，考核组对{town_count}个镇街纳入本期考核范围的镇级污水处理厂、镇区污水收集管网和农村污水处理设施开展现场考核、资料核查、问卷调查、水质检测和评分复核。")
+        _add_paragraph(document, f"本期涉及{town_count}个镇街。考核过程包含现场检查、资料核对、必要的公众调查、水质检测和评分复核；每项扣分均关联具体评分条目及留存证据。")
         document.add_heading("二、考核评分情况", level=2)
         _add_paragraph(document, f"本期纳入报告的已提交、已复核或已锁定考核对象共{len(records)}个，平均得分为{stats['average']:.2f}分，最高得分为{stats['max']:.2f}分，最低得分为{stats['min']:.2f}分，累计扣分{stats['deduction']:.2f}分。各镇级设施、镇区管网和农村设施的具体评分情况见正文及附件评分表。")
         document.add_heading("三、发现的主要问题", level=2)
@@ -996,9 +1060,11 @@ def _add_town_basic_intro(document, *, town_name: str, town_data: dict[str, Any]
     descriptions = _town_basic_descriptions(town_data, records)
     if descriptions:
         for description in descriptions:
+            description = str(description).replace("报告记载", "项目基础资料记载").replace("本节记载", "项目基础资料记载")
             _add_paragraph(document, description)
+        _add_paragraph(document, "上述内容属于项目基础信息；本期运行状态、考核结论和扣分情况以现场记录、平台数据及检测资料为准。")
     else:
-        _add_paragraph(document, f"{town_name}本期考核对象及其基本情况以项目资料、现场检查记录和经核实的支撑材料为准。")
+        _add_paragraph(document, f"{town_name}的设施规模、处理工艺、服务范围和运行状态由项目台账、现场记录及检测资料共同确认。")
     if records:
         type_labels = [REPORT_TYPE_LABELS.get(item, item) for item in _facility_types(records)]
         _add_paragraph(document, f"本期共对{town_name}{len(records)}个考核对象完成资料复核，涉及{'、'.join(type_labels) or '污水处理设施'}。各考核对象的基本资料如下。")
@@ -1239,15 +1305,21 @@ def _add_record_results(document, records: list[dict[str, Any]]) -> None:
     if not deductions:
         _add_paragraph(document, "经核查，本期未发现需扣分的问题。")
         return
-    table = document.add_table(rows=1, cols=6)
-    table.style = "Table Grid"
-    for cell, value in zip(table.rows[0].cells, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"]):
-        _set_cell_text(cell, value, bold=True)
-    _mark_table_header(table.rows[0])
-    for index, (record, score) in enumerate(deductions, 1):
-        row = table.add_row().cells
-        for cell, value in zip(row, [index, record.get("village") or record.get("town"), score.get("indicatorName"), score.get("indicatorFullScore"), score.get("deduction"), score.get("reason") or score.get("deductionOptionName")]):
-            _set_cell_text(cell, value)
+    _add_simple_table(
+        document,
+        ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"],
+        [
+            [
+                index,
+                record.get("village") or record.get("town"),
+                score.get("indicatorName"),
+                score.get("indicatorFullScore"),
+                score.get("deduction"),
+                score.get("reason") or score.get("deductionOptionName"),
+            ]
+            for index, (record, score) in enumerate(deductions, 1)
+        ],
+    )
 
 
 def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Path:
@@ -1586,7 +1658,14 @@ def _add_facility_result_table(document, records: list[dict[str, Any]]) -> None:
     _add_simple_table(document, ["序号", "项目点", "状态", "得分"], _record_type_rows(records))
     deductions = _deduction_rows(records)
     if deductions:
-        _add_simple_table(document, ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"], deductions)
+        _add_simple_table(
+            document,
+            ["序号", "设施点", "评分条目", "满分", "扣分", "依据或说明"],
+            deductions,
+            column_widths_cm=[0.8, 1.5, 2.3, 1.2, 1.2, 8.8],
+            font_size_pt=9.5,
+            center_columns={0, 1, 3, 4},
+        )
     else:
         _add_paragraph(document, "本类考核对象未形成扣分记录。")
 
@@ -1721,7 +1800,15 @@ def _add_source_appendices(document, *, project_name: str, records: list[dict[st
         elif "评分表" in title:
             score_rows = _all_score_rows(records)
             if score_rows:
-                _add_paginated_table(document, ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"], score_rows, page_weight=16)
+                _add_paginated_table(
+                    document,
+                    ["序号", "项目点", "评分条目", "满分", "实得分", "扣分", "核查情况"],
+                    score_rows,
+                    page_weight=16,
+                    column_widths_cm=[0.8, 1.3, 2.0, 1.2, 1.2, 1.2, 8.3],
+                    font_size_pt=9.5,
+                    center_columns={0, 1, 3, 4, 5},
+                )
             else:
                 _add_paragraph(document, "本期暂无可列示的评分明细。")
         elif "照片" in title:

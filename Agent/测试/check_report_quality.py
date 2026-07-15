@@ -132,6 +132,44 @@ def score_table_indicator_errors(document: Document) -> list[dict[str, object]]:
     return errors
 
 
+def score_table_layout_errors(document: Document) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    for index, table in enumerate(document.tables, 1):
+        if not table.rows:
+            continue
+        headers = [cell.text.strip() for cell in table.rows[0].cells]
+        if not headers or headers[-1] not in {"依据或说明", "核查情况"}:
+            continue
+        grid = table._tbl.tblGrid
+        widths = [int(column.get(qn("w:w")) or 0) for column in grid.gridCol_lst] if grid is not None else []
+        total_width = sum(widths)
+        if len(widths) != len(headers) or total_width <= 0 or widths[-1] / total_width < 0.5:
+            errors.append({"table": index, "headers": headers, "widths": widths, "reason": "说明列宽度不足"})
+        for numeric_header in ("满分", "实得分", "扣分"):
+            if numeric_header in headers and len(widths) == len(headers):
+                column_index = headers.index(numeric_header)
+                if widths[column_index] < 600:
+                    errors.append({"table": index, "headers": headers, "widths": widths, "reason": f"{numeric_header}列过窄，数值可能被拆行"})
+        undersized = []
+        for row_index, row in enumerate(table.rows, 1):
+            for column_index, cell in enumerate(row.cells, 1):
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        if run.text.strip() and (run.font.size is None or run.font.size.pt < 9.49):
+                            undersized.append({"row": row_index, "column": column_index, "text": run.text[:24]})
+                            if len(undersized) >= 5:
+                                break
+                    if len(undersized) >= 5:
+                        break
+                if len(undersized) >= 5:
+                    break
+            if len(undersized) >= 5:
+                break
+        if undersized:
+            errors.append({"table": index, "headers": headers, "cells": undersized, "reason": "评分明细字号小于9.5磅"})
+    return errors
+
+
 def water_summary_errors(document: Document) -> list[dict[str, object]]:
     for index, table in enumerate(document.tables, 1):
         if not table.rows:
@@ -181,6 +219,7 @@ def inspect_report(path: Path) -> dict[str, object]:
     header_errors = table_header_errors(document)
     table_separation_errors = adjacent_table_errors(document)
     indicator_errors = score_table_indicator_errors(document)
+    score_layout_errors = score_table_layout_errors(document)
     water_errors = water_summary_errors(document)
     unit_errors = re.findall(r"(?i)m\s*(?:\^\s*)?3", text)
     is_summary = "汇总" in path.name
@@ -202,11 +241,12 @@ def inspect_report(path: Path) -> dict[str, object]:
     update_fields_missing = b"updateFields" not in settings_xml
     page_field_missing = b" PAGE " not in footer_xml
     weird_numbers = re.findall(r"\d+\.\d{5,}", text)
+    punctuation_errors = re.findall(r"[。．\.](?:\s*[。．\.])+", text)
     summary_scope_missing = is_summary and ("已提交、已复核或已锁定" not in text or "草稿、退回和未提交" not in text)
     min_tables = (18 if project_key == "茂南" else 20) if is_summary else 12
     min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
-    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not too_short
+    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_missing and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not score_layout_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not punctuation_errors and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -227,10 +267,12 @@ def inspect_report(path: Path) -> dict[str, object]:
         "tableHeaderErrors": header_errors,
         "tableSeparationErrors": table_separation_errors,
         "indicatorCodeErrors": indicator_errors,
+        "scoreTableLayoutErrors": score_layout_errors,
         "waterSummaryErrors": water_errors,
         "unitErrors": unit_errors,
         "summaryScopeMissing": summary_scope_missing,
         "overlongDecimals": weird_numbers[:20],
+        "punctuationErrors": punctuation_errors[:20],
         "tooShort": too_short,
         "tableCount": len(document.tables),
         "paragraphCount": len(document.paragraphs),
