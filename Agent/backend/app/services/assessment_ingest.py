@@ -352,6 +352,8 @@ def sync_scores(session: Session, record: AssessmentRecord, entries: Any) -> lis
             select(Indicator).where(
                 Indicator.version_id == record.indicator_version_id,
                 Indicator.facility_type == _raw_facility_type(record.raw_payload or {}),
+                Indicator.level == 3,
+                Indicator.enabled.is_(True),
                 Indicator.code.in_(excluded_codes),
             )
         ))
@@ -639,8 +641,15 @@ def submit_record(session: Session, record: AssessmentRecord) -> AssessmentRecor
     missing_ids = expected_ids - completed_ids
     if missing_ids:
         raise ValueError(f"还有 {len(missing_ids)} 个评分项未完成检查")
-    if expected_ids and {score.indicator_id for score in record.scores} != expected_ids:
-        raise ValueError("考核评分明细不完整")
+    actual_ids = {score.indicator_id for score in record.scores}
+    if expected_ids and actual_ids != expected_ids:
+        missing_score_count = len(expected_ids - actual_ids)
+        unexpected_score_count = len(actual_ids - expected_ids)
+        raise ValueError(
+            "考核评分明细不完整："
+            f"缺少{missing_score_count}项，异常{unexpected_score_count}项；"
+            "请返回评分页面重新保存后再提交"
+        )
     record.status = "submitted"
     record.submitted_at = datetime.now(timezone.utc)
     session.flush()

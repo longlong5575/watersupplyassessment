@@ -19,6 +19,7 @@ from sqlalchemy import delete, func, select
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT.parent.parent
 RUNTIME = WORKSPACE / "运行脚本" / "watersupply-agent-runtime"
 SOURCE_DIR = RUNTIME / "test-results" / "exemplar-replay" / "source-extract"
@@ -30,8 +31,10 @@ STATUS_PATH = RUNTIME / "logs" / "startup-status.json"
 
 os.environ["DATABASE_URL"] = f"sqlite:///{DB_PATH.as_posix()}"
 os.environ["STORAGE_DIR"] = str((RUNTIME / "storage").resolve())
+sys.path.insert(0, str(TEST_ROOT))
 sys.path.insert(0, str(ROOT / "backend"))
 
+from build_exemplar_replay_fixture import build_fixture
 from app.core.database import SessionLocal
 from app.models import AssessmentCycle, AssessmentRecord, City, Report, ReportTask
 
@@ -562,7 +565,7 @@ def score_variances(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def main() -> None:
-    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    fixture = build_fixture(SOURCE_DIR, FIXTURE_PATH)
     metadata = source_metadata()
     images = source_images()
     if RESULTS.exists():
@@ -621,7 +624,11 @@ def main() -> None:
                         f"/api/mobile/assessment-records/{record_id}/attachments", headers=inspector,
                         files={"file": (f"{record['point']}水质检测页{detection.suffix.lower()}", detection.read_bytes(), detection_type)}, timeout=180,
                     ), "上传检测资料")
-                require(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector), "提交考核")
+                submit_label = (
+                    f"提交考核（{record['project']}，{record['period']}，{record['town']}，"
+                    f"{record['point']}，{record['facilityType']}）"
+                )
+                require(client.post(f"/api/mobile/assessment-records/{record_id}/submit", headers=inspector), submit_label)
                 detail = require(client.get(f"/api/records/{record_id}", headers=admin), "读取考核结果")
                 actual = round(float(detail["totalScore"]), 2)
                 expected = round(float(record["currentRuleScore"]), 2)

@@ -2213,7 +2213,26 @@ type ReviewRecordRow = {
     reason?: string;
     source: string;
   }>;
-  raw?: { village?: string; villageName?: string; waterQuality?: unknown; primaryFacilityType?: string; standardFacilityType?: string; facilityType?: string };
+  raw?: {
+    village?: string;
+    villageName?: string;
+    waterQuality?: unknown;
+    primaryFacilityType?: string;
+    standardFacilityType?: string;
+    facilityType?: string;
+    scoreCalculation?: {
+      mode?: "direct_100" | "scaled_applicable";
+      originalMaxScore?: number;
+      excludedScore?: number;
+      applicableMaxScore?: number;
+      rawApplicableScore?: number;
+      rawDeduction?: number;
+      percentScore?: number;
+      formula?: string;
+      displayText?: string;
+      description?: string;
+    };
+  };
 };
 
 type ScoreDraft = {
@@ -3105,6 +3124,35 @@ function RecordsPage({ townFilter, onClearTownFilter }: { townFilter?: string | 
             <p>标准：<span className="text-foreground">{selected.indicatorVersionName ? cleanStandardName(selected.indicatorVersionName) : "-"}</span></p>
               <p>提交：<span className="text-foreground">{formatPlatformTime(selected.submittedAt)}</span></p>
             </div>
+            {selected.raw?.scoreCalculation && (() => {
+              const calculation = selected.raw.scoreCalculation;
+              const scaled = calculation.mode === "scaled_applicable";
+              return (
+                <div className="border-b border-border bg-muted/20 px-5 py-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-semibold text-foreground">评分计算复核</h4>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {calculation.displayText || calculation.description || "按满分100分直接计分。"}
+                      </p>
+                    </div>
+                    <span className={`inline-flex h-6 items-center rounded-full border px-2 text-xs ${scaled ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                      {scaled ? "适用分值换算" : "100分直接计分"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-3 text-xs">
+                    <div className="border-l-2 border-border pl-3"><p className="text-muted-foreground">标准满分</p><p className="mt-1 font-semibold text-foreground">{calculation.originalMaxScore ?? 100}分</p></div>
+                    <div className="border-l-2 border-amber-400 pl-3"><p className="text-muted-foreground">不适用分值</p><p className="mt-1 font-semibold text-foreground">{calculation.excludedScore ?? 0}分</p></div>
+                    <div className="border-l-2 border-blue-400 pl-3"><p className="text-muted-foreground">适用满分</p><p className="mt-1 font-semibold text-foreground">{calculation.applicableMaxScore ?? 100}分</p></div>
+                    <div className="border-l-2 border-red-400 pl-3"><p className="text-muted-foreground">原始扣分</p><p className="mt-1 font-semibold text-foreground">{calculation.rawDeduction ?? 0}分</p></div>
+                    <div className="border-l-2 border-emerald-500 pl-3"><p className="text-muted-foreground">百分制得分</p><p className="mt-1 font-semibold text-foreground">{calculation.percentScore ?? selected.totalScore ?? "-"}分</p></div>
+                  </div>
+                  <div className="mt-3 rounded border border-border bg-background px-3 py-2 font-mono text-xs text-foreground">
+                    计算式：{calculation.formula || `100-${calculation.rawDeduction ?? 0}=${calculation.percentScore ?? selected.totalScore ?? "-"}`}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="border-b border-border px-5 py-4">
               <div className="mb-3 flex items-start justify-between gap-4">
                 <div>

@@ -15,6 +15,7 @@ dependencies = [
   "celery[redis]>=5.4.0",
   "pydantic-settings>=2.3.4",
   "httpx>=0.28.0",
+  "comtypes>=1.4.0; sys_platform == 'win32'",
 ]
 
 [tool.uvicorn]

@@ -7,6 +7,14 @@ def _target(section: str, title: str, description: str) -> dict[str, str]:
     return {"sectionCode": section, "title": title, "description": description}
 
 
+def _scaled_network_policy() -> dict[str, Any]:
+    return {
+        "mode": "scaled_applicable",
+        "excludedGroupNames": ["泵站运行维护质量"],
+        "reason": "无污水提升泵站",
+    }
+
+
 def _yunan_town(
     name: str,
     chapter: str,
@@ -14,6 +22,7 @@ def _yunan_town(
     network: str,
     rural: str | None,
     villages: list[tuple[str, str]],
+    no_pump_network: bool = False,
 ) -> dict[str, Any]:
     targets: list[str] = []
     objects: dict[str, dict[str, str]] = {}
@@ -30,6 +39,7 @@ def _yunan_town(
         "chapterCode": chapter,
         "assessmentTargets": targets,
         "assessmentObject": objects,
+        "scoringPolicies": {"town_network": _scaled_network_policy()} if no_pump_network else {},
         "reportTemplate": {"assessmentObjectSection": f"{chapter}.1", "heading": "考核对象"},
         "villages": [
             {
@@ -71,12 +81,13 @@ YUNAN_TOWNS = [
         "主管长约3.491km、支管长约6.329km，无污水提升泵站。",
         f"报告记载已建35座农村污水处理设施，总规模790m3/d。{_RURAL_PROCESS}",
         [("新塘村", "山禾地村"), ("䓣口村", "赤坭村"), ("䓣口村", "高寨村"), ("䓣口村", "平山村"), ("䓣口村", "道枝村")],
+        no_pump_network=True,
     ),
     _yunan_town(
         "罗顺片区", "2.4",
         "设计规模350m3/d，服务人口约3000人，采用MBR工艺，2024年2月29日起商业运营。",
         "主管长约2.156km、支管长约3.433km，无污水提升泵站。",
-        None, [],
+        None, [], no_pump_network=True,
     ),
     _yunan_town(
         "宝珠镇", "2.5",
@@ -91,6 +102,7 @@ YUNAN_TOWNS = [
         "主管长约2.41km、支管长约5.904km，无污水提升泵站。",
         f"报告记载已建22座农村污水处理设施，总规模470m3/d。{_RURAL_PROCESS}",
         [("街坊村", "邓屋村"), ("街坊村", "水竹根村"), ("街坊村", "荷木坳村"), ("街坊村", "通门中学（冲北村）"), ("街坊村", "白花村")],
+        no_pump_network=True,
     ),
     _yunan_town(
         "千官镇", "2.7",
@@ -111,6 +123,7 @@ YUNAN_TOWNS = [
         "主管长约3.507km、支管长约3.571km，无污水提升泵站。",
         f"报告记载已建30座农村污水处理设施，总规模420m3/d。{_RURAL_PROCESS}",
         [("上福村", "办朗村"), ("上福村", "塱顶村"), ("上福村", "大克村"), ("上福村", "合作村"), ("上福村", "赖屋村"), ("上福村", "增西一村"), ("上福村", "增西二村")],
+        no_pump_network=True,
     ),
     _yunan_town(
         "河口镇", "2.10",
@@ -118,6 +131,7 @@ YUNAN_TOWNS = [
         "主管长约4.845km、支管长约5.298km，无污水提升泵站。",
         f"报告记载已建34座农村污水处理设施，总规模1070m3/d。{_RURAL_PROCESS}",
         [("河口寨村", "河口寨村"), ("河口寨村", "新屋坝村"), ("河口寨村", "大木口村"), ("河口寨村", "乌石村"), ("河口寨村", "白银前村"), ("河口寨村", "应咀村")],
+        no_pump_network=True,
     ),
     _yunan_town(
         "宋桂镇", "2.11",
@@ -132,6 +146,7 @@ YUNAN_TOWNS = [
         "主管长约7.472km、支管长约18.143km，无污水提升泵站。",
         f"本节记载已建9座农村污水处理设施，本目录按项目归属纳入东坝镇范围。{_RURAL_PROCESS}",
         [("石咀村", "石圳村"), ("粗石村", "平湾村"), ("粗石村", "玉兰村")],
+        no_pump_network=True,
     ),
     _yunan_town(
         "历洞镇", "2.13",
@@ -168,7 +183,13 @@ YUNAN_TOWNS = [
 ]
 
 
-def _maonan_town(name: str, chapter: str, description: str, targets: list[str]) -> dict[str, Any]:
+def _maonan_town(
+    name: str,
+    chapter: str,
+    description: str,
+    targets: list[str],
+    no_pump_network: bool = False,
+) -> dict[str, Any]:
     objects = {
         target: _target(
             f"{chapter}.1",
@@ -182,17 +203,18 @@ def _maonan_town(name: str, chapter: str, description: str, targets: list[str]) 
         "chapterCode": chapter,
         "assessmentTargets": targets,
         "assessmentObject": objects,
+        "scoringPolicies": {"town_network": _scaled_network_policy()} if no_pump_network else {},
         "reportTemplate": {"assessmentObjectSection": f"{chapter}.1", "heading": "基本情况（考核对象）"},
         "villages": [],
     }
 
 
 MAONAN_TOWNS = [
-    _maonan_town("金塘镇", "2.2", "水质净化厂设计规模1000m3/d，采用改良A2O工艺；实际建设管网21.25km，服务人口约1.21万人，2021年7月16日起商业运营。报告说明配套管网尚未正式移交，本期仅考核水质净化厂。", ["town_plant"]),
+    _maonan_town("金塘镇", "2.2", "水质净化厂设计规模1000m3/d，采用改良A2O工艺；实际建设管网21.25km，服务人口约1.21万人，2021年7月16日起商业运营。报告说明配套管网尚未正式移交，本期仅考核水质净化厂。", ["town_plant"], no_pump_network=True),
     _maonan_town("山阁镇", "2.3", "水质净化厂设计规模800m3/d，采用改良A2O工艺；运维管网9.951km，设2座提升泵站，服务人口约0.64万人，2020年11月21日起商业运营。", ["town_plant", "town_network"]),
     _maonan_town("镇盛镇", "2.4", "水质净化厂设计规模1200m3/d，采用改良A2O工艺；管网约9.19km，设1座提升泵站，服务人口约1.27万人，2020年11月21日起商业运营。", ["town_plant", "town_network"]),
     _maonan_town("袂花镇", "2.5", "水质净化厂设计规模600m3/d，采用改良A2O工艺；自2024年1月起运维管网1.304km，服务人口约0.46万人，2021年2月2日起商业运营。", ["town_plant", "town_network"]),
-    _maonan_town("鳌头镇", "2.6", "水质净化厂设计规模800m3/d，采用改良A2O工艺；实际建设（维修）管网4.884km，服务人口约0.75万人，2021年1月13日起商业运营。", ["town_plant", "town_network"]),
+    _maonan_town("鳌头镇", "2.6", "水质净化厂设计规模800m3/d，采用改良A2O工艺；实际建设（维修）管网4.884km，服务人口约0.75万人，2021年1月13日起商业运营。", ["town_plant", "town_network"], no_pump_network=True),
     _maonan_town("茂南区", "2.7", "水质净化厂首期设计规模25000m3/d，采用改良A2O工艺；污水收集管网22.194km，设龙江村、石车、石车仔3座提升泵站，2021年6月25日起商业运营。", ["town_plant", "town_network"]),
     _maonan_town("中科云粤西产业园", "2.8", "污水收集管网接入茂南区水质净化厂；自2024年1月起运维管网16.707km，设逢地屋、那梭、农林学院3座提升泵站，2021年6月25日起商业运营。", ["town_network"]),
 ]
@@ -221,4 +243,26 @@ PROJECT_CATALOG: list[dict[str, Any]] = [
 
 
 def project_by_name(name: str) -> dict[str, Any] | None:
-    return next((item for item in PROJECT_CATALOG if item["name"] == name), None)
+    return next(
+        (
+            item
+            for item in PROJECT_CATALOG
+            if name in {item["key"], item["name"], item["fullName"]}
+        ),
+        None,
+    )
+
+
+def town_scoring_policy(
+    project_name: str | None,
+    town_name: str | None,
+    facility_type: str | None,
+) -> dict[str, Any] | None:
+    project = project_by_name(str(project_name or ""))
+    if not project or not town_name or not facility_type:
+        return None
+    town = next((item for item in project.get("towns", []) if item.get("name") == town_name), None)
+    if not town:
+        return None
+    policy = (town.get("scoringPolicies") or {}).get(facility_type)
+    return dict(policy) if isinstance(policy, dict) else None

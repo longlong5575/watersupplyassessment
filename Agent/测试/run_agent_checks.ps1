@@ -119,6 +119,7 @@ Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_project_pipeline.py
 $summary.projectPipeline = $true
 
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_calculation_rules.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_word_field_materialization.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_option_generation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_integrity.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_save_validation.py") }

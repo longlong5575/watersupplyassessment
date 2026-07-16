@@ -5,41 +5,32 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from app.models import AssessmentRecord, City
+from app.services.project_catalog import town_scoring_policy
 from app.services.standard_catalog import load_standard_groups
-
-
-YUNAN_NO_PUMP_NETWORK_TOWNS = {
-    "桂圩镇",
-    "罗顺片区",
-    "通门镇",
-    "大方镇",
-    "河口镇",
-    "东坝镇",
-}
-
-# 金塘镇例文同样按无泵站管网口径换算，但其管网尚未移交，当前不纳入考核。
-MAONAN_NO_PUMP_NETWORK_TOWNS = {"金塘镇", "鳌头镇"}
 
 
 def project_key(project_name: str | None) -> str:
     return "maonan" if "茂南" in str(project_name or "") else "yunan"
 
 
-def _pump_station_items(project_name: str | None) -> list[dict[str, Any]]:
-    groups = load_standard_groups(project_key(project_name)).get("town_network", [])
+def _excluded_items(
+    project_name: str | None,
+    facility_type: str,
+    excluded_group_names: set[str],
+) -> list[dict[str, Any]]:
+    groups = load_standard_groups(project_key(project_name)).get(facility_type, [])
     return [
         item
         for level1 in groups
         for level2 in level1.get("children", [])
-        if level2.get("name") == "泵站运行维护质量"
+        if level2.get("name") in excluded_group_names
         for item in level2.get("items", [])
     ]
 
 
 def scoring_policy(project_name: str | None, town_name: str | None, facility_type: str | None) -> dict[str, Any]:
-    key = project_key(project_name)
-    no_pump_towns = MAONAN_NO_PUMP_NETWORK_TOWNS if key == "maonan" else YUNAN_NO_PUMP_NETWORK_TOWNS
-    if facility_type != "town_network" or town_name not in no_pump_towns:
+    configured = town_scoring_policy(project_name, town_name, facility_type)
+    if not configured or configured.get("mode") != "scaled_applicable" or not facility_type:
         return {
             "mode": "direct_100",
             "originalMaxScore": 100.0,
@@ -49,17 +40,25 @@ def scoring_policy(project_name: str | None, town_name: str | None, facility_typ
             "description": "按满分100分直接计分。",
         }
 
-    excluded_items = _pump_station_items(project_name)
+    excluded_group_names = {
+        str(name)
+        for name in configured.get("excludedGroupNames", [])
+        if str(name).strip()
+    }
+    excluded_items = _excluded_items(project_name, facility_type, excluded_group_names)
     excluded_score = round(sum(float(item.get("maxScore") or 0) for item in excluded_items), 4)
     applicable_max = round(100.0 - excluded_score, 4)
+    reason = str(configured.get("reason") or "存在不适用评分项")
     return {
+        **configured,
         "mode": "scaled_applicable",
         "originalMaxScore": 100.0,
         "excludedScore": excluded_score,
         "applicableMaxScore": applicable_max,
         "excludedIndicatorCodes": [str(item.get("id")) for item in excluded_items if item.get("id")],
         "description": (
-            f"本考核对象无污水提升泵站，泵站运行维护质量{excluded_score:g}分不适用；"
+            f"本考核对象{reason}，{('、'.join(sorted(excluded_group_names)) or '相关评分项')}"
+            f"{excluded_score:g}分不适用；"
             f"按适用满分{applicable_max:g}分折算为百分制。"
         ),
     }

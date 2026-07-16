@@ -323,17 +323,22 @@ def _summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def build_fixture(source_dir: Path, output: Path) -> dict[str, Any]:
+    yunan = json.loads((source_dir / "yunan-full.json").read_text(encoding="utf-8"))
+    maonan = json.loads((source_dir / "maonan-full.json").read_text(encoding="utf-8"))
+    records = [*build_yunan(yunan), *build_maonan(maonan)]
+    payload = {"records": records, "summary": _summary(records)}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    yunan = json.loads((args.source_dir / "yunan-full.json").read_text(encoding="utf-8"))
-    maonan = json.loads((args.source_dir / "maonan-full.json").read_text(encoding="utf-8"))
-    records = [*build_yunan(yunan), *build_maonan(maonan)]
-    payload = {"records": records, "summary": _summary(records)}
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = build_fixture(args.source_dir, args.output)
     print(json.dumps({key: value for key, value in payload["summary"].items() if key != "mappingReview"}, ensure_ascii=False))
 
 

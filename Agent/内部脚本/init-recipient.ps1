@@ -60,18 +60,6 @@ function Install-PythonRequirements {
   if (Test-Path -LiteralPath (Join-Path $TargetDir "fastapi")) {
     $cachedHash = if (Test-Path -LiteralPath $marker) { (Get-Content -LiteralPath $marker -Raw).Trim() } else { "" }
     if ($cachedHash -eq $requirementsHash) { return }
-    $previousPythonPath = $env:PYTHONPATH
-    $env:PYTHONPATH = (($TargetDir, $previousPythonPath) | Where-Object { $_ }) -join ";"
-    try {
-      & $PythonExe -c "import fastapi, uvicorn, multipart, docx, fitz, sqlalchemy, alembic, psycopg, celery, pydantic_settings, httpx, jwt"
-    }
-    finally {
-      $env:PYTHONPATH = $previousPythonPath
-    }
-    if ($LASTEXITCODE -eq 0) {
-      Set-Content -LiteralPath $marker -Value $requirementsHash -Encoding ASCII
-      return
-    }
   }
   & $PythonExe -m pip --version | Out-Null
   if ($LASTEXITCODE -ne 0) {

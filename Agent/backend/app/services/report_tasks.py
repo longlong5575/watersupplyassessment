@@ -2,6 +2,8 @@ import shutil
 import traceback
 import json
 import re
+import sys
+import threading
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -71,6 +73,7 @@ REPORT_LATIN_FONT = "宋体"
 REPORT_BODY_SIZE_PT = 10.5
 REPORT_TABLE_SIZE_PT = 9
 REPORT_BODY_LINE_SPACING_PT = 24
+_WORD_FIELD_LOCK = threading.Lock()
 
 
 def _normalize_report_text(value: Any) -> str:
@@ -1371,6 +1374,81 @@ def _add_record_results(document, records: list[dict[str, Any]]) -> None:
     )
 
 
+def _materialize_word_pagerefs(paths: list[Path]) -> bool:
+    if sys.platform != "win32" or not paths:
+        return False
+    try:
+        from comtypes import CoInitialize, CoUninitialize
+        from comtypes.client import CreateObject
+    except ImportError:
+        return False
+
+    with _WORD_FIELD_LOCK:
+        CoInitialize()
+        application = None
+        try:
+            for program_id in ("Word.Application", "Kwps.Application"):
+                try:
+                    application = CreateObject(program_id, dynamic=True)
+                    break
+                except Exception:
+                    application = None
+            if application is None:
+                return False
+            application.Visible = False
+            application.DisplayAlerts = 0
+            materialized = False
+            for path in paths:
+                document = None
+                updated = False
+                try:
+                    document = application.Documents.Open(str(path.resolve()), False, False, False)
+                    document.Repaginate()
+                    document.ComputeStatistics(2, True)
+                    for index in range(document.Fields.Count, 0, -1):
+                        field = document.Fields.Item(index)
+                        code_text = str(field.Code.Text or "")
+                        if "PAGEREF" not in code_text.upper():
+                            continue
+                        bookmark_match = re.search(r"PAGEREF\s+([^\s\\]+)", code_text, re.IGNORECASE)
+                        bookmark_name = bookmark_match.group(1).strip('"') if bookmark_match else ""
+                        if bookmark_name and document.Bookmarks.Exists(bookmark_name):
+                            page_number = int(document.Bookmarks.Item(bookmark_name).Range.Information(1))
+                            field.Result.Text = str(page_number)
+                        else:
+                            field.Update()
+                        updated = True
+                        try:
+                            field.Unlink()
+                        except Exception:
+                            pass
+                    if updated:
+                        document.Save()
+                except Exception:
+                    updated = False
+                finally:
+                    if document is not None:
+                        try:
+                            document.Close(0)
+                        except Exception:
+                            pass
+                if updated:
+                    from docx import Document
+
+                    normalized = Document(path)
+                    _enforce_document_fonts(normalized)
+                    normalized.save(path)
+                    materialized = True
+            return materialized
+        finally:
+            if application is not None:
+                try:
+                    application.Quit(0)
+                except Exception:
+                    pass
+            CoUninitialize()
+
+
 def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Path:
     output_dir = _storage_root() / "generated_reports" / "working" / task.id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1378,6 +1456,7 @@ def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Pat
     cycle_name = snapshot.get("cycleName") or task.payload.get("period") or "本期"
     outputs = set(task.payload.get("outputs", []))
     requested_towns = set(task.payload.get("townNames", []) or [])
+    generated_paths: list[Path] = []
     if "separate" in outputs:
         for town_data in snapshot.get("towns") or []:
             town_name = town_data["town"]
@@ -1388,12 +1467,17 @@ def _generate_project_reports(task: ReportTask, snapshot: dict[str, Any]) -> Pat
                 continue
             profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["\u90c1\u5357\u9879\u76ee"]
             document = _generate_town_document(project_name, cycle_name, town_data, records)
-            document.save(output_dir / f"{town_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}\uff08\u6b63\u6587\uff09.docx")
+            output_path = output_dir / f"{town_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}\uff08\u6b63\u6587\uff09.docx"
+            document.save(output_path)
+            generated_paths.append(output_path)
 
     if "summary" in task.payload.get("outputs", []):
         profile = PROJECT_REPORT_PROFILES.get(project_name) or PROJECT_REPORT_PROFILES["郁南项目"]
         document = _generate_summary_document(project_name, cycle_name, snapshot)
-        document.save(output_dir / f"{project_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}汇总报告.docx")
+        output_path = output_dir / f"{project_name}-{cycle_name}-{profile['shortName']}{profile['titleSuffix']}汇总报告.docx"
+        document.save(output_path)
+        generated_paths.append(output_path)
+    _materialize_word_pagerefs(generated_paths)
     return output_dir
 
 
@@ -1583,6 +1667,7 @@ def _finalize_static_toc(document) -> None:
     if marker_index is None:
         return
     marker = paragraphs[marker_index]
+
     heading_rows: list[tuple[int, Any]] = []
     for paragraph in paragraphs[marker_index + 1:]:
         style_name = str(getattr(paragraph.style, "name", "") or "")
@@ -1590,6 +1675,50 @@ def _finalize_static_toc(document) -> None:
         if paragraph.text.strip() and match:
             level = int(match.group(1) or match.group(2))
             heading_rows.append((level, paragraph))
+
+    def element_text(element: Any) -> str:
+        return "".join(node.text or "" for node in element.xpath(".//w:t"))
+
+    def page_break_count(element: Any) -> int:
+        xml = element.xml
+        return xml.count('w:type="page"') + xml.count("w:type='page'")
+
+    def add_units(current_page: int, current_units: float, units: float) -> tuple[int, float]:
+        page_capacity = 28.0
+        current_units += units
+        while current_units >= page_capacity:
+            current_page += 1
+            current_units -= page_capacity
+        return current_page, current_units
+
+    heading_ids = {id(heading._p) for _, heading in heading_rows}
+    heading_pages: dict[int, int] = {}
+    current_page = 1
+    current_units = 0.0
+    for element in document._body._element:
+        tag = element.tag
+        if tag == qn("w:p"):
+            if id(element) in heading_ids and id(element) not in heading_pages:
+                heading_pages[id(element)] = current_page
+            text_length = len(element_text(element))
+            image_count = element.xml.count("<wp:inline") + element.xml.count("<wp:anchor")
+            current_page, current_units = add_units(
+                current_page,
+                current_units,
+                max(0.15, text_length / 150.0) + image_count * 8.0,
+            )
+            breaks = page_break_count(element)
+            if breaks:
+                current_page += breaks
+                current_units = 0.0
+        elif tag == qn("w:tbl"):
+            row_count = len(element.xpath(".//w:tr"))
+            text_length = len(element_text(element))
+            current_page, current_units = add_units(
+                current_page,
+                current_units,
+                max(1.0, row_count * 0.75 + text_length / 260.0),
+            )
 
     right_position = document.sections[0].page_width - document.sections[0].left_margin - document.sections[0].right_margin
     for index, (level, heading) in enumerate(heading_rows, 1):
@@ -1612,20 +1741,8 @@ def _finalize_static_toc(document) -> None:
         _apply_run_font(text_run, REPORT_BODY_FONT, 11, bold=level == 1)
         tab_run = paragraph.add_run("\t")
         _apply_run_font(tab_run, REPORT_BODY_FONT, 11)
-        field_run = paragraph.add_run()
-        begin = OxmlElement("w:fldChar")
-        begin.set(qn("w:fldCharType"), "begin")
-        instruction = OxmlElement("w:instrText")
-        instruction.set(qn("xml:space"), "preserve")
-        instruction.text = f" PAGEREF {bookmark_name} \\h "
-        separate = OxmlElement("w:fldChar")
-        separate.set(qn("w:fldCharType"), "separate")
-        cached_page = OxmlElement("w:t")
-        cached_page.text = "—"
-        end = OxmlElement("w:fldChar")
-        end.set(qn("w:fldCharType"), "end")
-        field_run._r.extend([begin, instruction, separate, cached_page, end])
-        _apply_run_font(field_run, REPORT_BODY_FONT, 11)
+        page_run = paragraph.add_run(str(heading_pages.get(id(heading._p), 1)))
+        _apply_run_font(page_run, REPORT_BODY_FONT, 11)
         marker._p.addprevious(paragraph._p)
 
     marker._element.getparent().remove(marker._element)

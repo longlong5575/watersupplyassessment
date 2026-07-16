@@ -242,7 +242,36 @@ def inspect_report(path: Path) -> dict[str, object]:
             for name in package.namelist()
             if name.endswith(".rels") and b'TargetMode="External"' in package.read(name)
         ]
-    toc_field_missing = b"PAGEREF " not in document_xml or b"bookmarkStart" not in document_xml
+    toc_entry_lines = [
+        paragraph.text.strip()
+        for paragraph in document.paragraphs
+        if "第一章 考核工作概述" in paragraph.text
+    ]
+    all_paragraph_lines = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    toc_block_lines: list[str] = []
+    if "目录" in all_paragraph_lines:
+        toc_start = all_paragraph_lines.index("目录")
+        first_chapter_seen = 0
+        for line in all_paragraph_lines[toc_start + 1:]:
+            if line.startswith("第一章 考核工作概述"):
+                first_chapter_seen += 1
+                if first_chapter_seen >= 2:
+                    break
+            toc_block_lines.append(line)
+    has_dynamic_toc_page = b"PAGEREF " in document_xml and b"bookmarkStart" in document_xml
+    static_toc_pages = [
+        int(match.group(1))
+        for line in (toc_block_lines or toc_entry_lines)
+        if (match := re.search(r"(\d+)\s*$", line))
+    ]
+    has_static_toc_page = bool(static_toc_pages)
+    toc_page_number_errors: list[str] = []
+    if has_static_toc_page and not has_dynamic_toc_page:
+        if max(static_toc_pages) <= 1:
+            toc_page_number_errors.append("目录页码全部为1，未按实际分页写入")
+        if len(static_toc_pages) >= 8 and len(set(static_toc_pages)) < 2 and (len(document.tables) >= 20 or len(document.paragraphs) >= 90):
+            toc_page_number_errors.append("目录页码没有随章节位置变化")
+    toc_field_missing = not (has_dynamic_toc_page or has_static_toc_page)
     toc_text_missing = text.count("第一章 考核工作概述") < 2
     update_fields_on_open = bool(re.search(rb"<w:updateFields[^>]*w:val=[\"'](?:true|1)[\"']", settings_xml))
     page_field_missing = b" PAGE " not in footer_xml
@@ -252,7 +281,7 @@ def inspect_report(path: Path) -> dict[str, object]:
     min_tables = (18 if project_key == "茂南" else 20) if is_summary else 12
     min_paragraphs = (95 if project_key == "茂南" else 105) if is_summary else 70
     too_short = len(document.paragraphs) < min_paragraphs or len(document.tables) < min_tables
-    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not update_fields_on_open and not external_relationships and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not score_layout_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not punctuation_errors and not too_short
+    passed = not missing and not bad_tokens and not bad_amount_text and not amount_boundary_missing and not toc_field_missing and not toc_text_missing and not toc_page_number_errors and not update_fields_on_open and not external_relationships and not page_field_missing and replacement_chars == 0 and not sequence_errors and not chapter_errors and not report_font_errors and not header_errors and not table_separation_errors and not indicator_errors and not score_layout_errors and not water_errors and not unit_errors and not summary_scope_missing and not missing_sections and not weird_numbers and not punctuation_errors and not too_short
     return {
         "report": str(path),
         "project": project_key,
@@ -264,6 +293,7 @@ def inspect_report(path: Path) -> dict[str, object]:
         "amountBoundaryMissing": amount_boundary_missing,
         "tocFieldMissing": toc_field_missing,
         "tocTextMissing": toc_text_missing,
+        "tocPageNumberErrors": toc_page_number_errors,
         "updateFieldsOnOpen": update_fields_on_open,
         "externalRelationships": external_relationships,
         "pageFieldMissing": page_field_missing,
