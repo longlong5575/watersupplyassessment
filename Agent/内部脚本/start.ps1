@@ -5,6 +5,20 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $agentRoot = Split-Path -Parent $scriptRoot
 $agentParent = Split-Path -Parent $agentRoot
+$env:APP_ENV = "delivery"
+$env:LOCAL_AUTO_LOGIN = "false"
+$localModePath = Join-Path $agentRoot ".env.local"
+if (Test-Path -LiteralPath $localModePath) {
+  foreach ($rawLine in Get-Content -LiteralPath $localModePath -Encoding utf8) {
+    $line = $rawLine.Trim()
+    if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { continue }
+    $parts = $line.Split("=", 2)
+    $key = $parts[0].Trim().ToUpperInvariant()
+    $value = $parts[1].Trim()
+    if ($key -eq "APP_ENV") { $env:APP_ENV = $value }
+    if ($key -eq "LOCAL_AUTO_LOGIN") { $env:LOCAL_AUTO_LOGIN = $value }
+  }
+}
 $workspaceRoot = if ((Split-Path -Leaf $agentParent) -eq "watersupplyassessment") { Split-Path -Parent $agentParent } else { $agentParent }
 $runScriptsName = -join ([char[]](0x8fd0, 0x884c, 0x811a, 0x672c))
 $runtimeRoot = if ($env:WATERSUPPLY_RUNTIME_DIR) { $env:WATERSUPPLY_RUNTIME_DIR } else { Join-Path (Join-Path $workspaceRoot $runScriptsName) "watersupply-agent-runtime" }

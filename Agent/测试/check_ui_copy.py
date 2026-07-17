@@ -72,6 +72,14 @@ def main() -> None:
             if pattern.search(text):
                 rel = path.relative_to(ROOT)
                 failures.append(f"{rel}: contains forbidden visible English pattern {pattern.pattern!r}")
+    for relative in (
+        Path("frontend/front/src/app/App.tsx"),
+        Path("frontend/front-mobile/src/app/App.tsx"),
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        for required in ("自动登录", "下次打开时直接进入当前账号", "useState(true)", "sessionStorage", "clearStoredAuth"):
+            if required not in text:
+                failures.append(f"{relative}: missing login persistence behavior {required!r}")
     if failures:
         raise SystemExit("\n".join(failures))
     print("PASS: frontend UI copy guard")

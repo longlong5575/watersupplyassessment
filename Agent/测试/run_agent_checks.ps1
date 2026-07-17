@@ -124,6 +124,7 @@ Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_option_gen
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_integrity.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_standard_save_validation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_auth_security.py") }
+Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_delivery_login_mode.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_account_data_isolation.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_api_access_control.py") }
 Invoke-Checked { & $pythonExe (Join-Path $PSScriptRoot "test_upload_safety.py") }

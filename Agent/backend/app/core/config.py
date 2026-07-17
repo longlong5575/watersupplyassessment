@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_env: Literal["local", "production"] = "local"
+    app_env: Literal["local", "delivery", "production"] = "delivery"
     database_url: str = "sqlite:///./storage/assessment.db"
     redis_url: str = "redis://127.0.0.1:6379/0"
     storage_dir: Path = Path("storage")
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 43200
     login_max_failures: int = 5
     login_lock_minutes: int = 15
-    local_auto_login: bool = True
+    local_auto_login: bool = False
     max_upload_size_mb: int = 200
     admin_initial_password: str = "Admin@123456"
     inspector_initial_password: str = "Inspector@123456"

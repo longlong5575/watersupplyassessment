@@ -33,12 +33,28 @@ FRONT_RUNTIME = RUNTIME_ROOT / "frontend" / "front"
 MOBILE_RUNTIME = RUNTIME_ROOT / "frontend" / "front-mobile"
 STARTUP_LOG = LOG_DIR / "startup.log"
 COPY_IGNORE = shutil.ignore_patterns("node_modules", "dist", ".vite", ".env.local", "*.log", "*.pid", "__pycache__")
+LOCAL_MODE_FILE = AGENT_ROOT / ".env.local"
 
 
 def log(message: str) -> None:
     LOG_DIR.mkdir(exist_ok=True)
     with STARTUP_LOG.open("a", encoding="utf-8") as handle:
         handle.write(message + "\n")
+
+
+def local_mode_overrides() -> dict[str, str]:
+    values = {"APP_ENV": "delivery", "LOCAL_AUTO_LOGIN": "false"}
+    if not LOCAL_MODE_FILE.exists():
+        return values
+    for raw_line in LOCAL_MODE_FILE.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        normalized = key.strip().upper()
+        if normalized in values:
+            values[normalized] = value.strip()
+    return values
 
 
 def runtime_env(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -49,6 +65,7 @@ def runtime_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         "DATABASE_URL": f"sqlite:///{(storage_dir / 'assessment.db').as_posix()}",
         "STORAGE_DIR": str(storage_dir),
         "CELERY_TASK_ALWAYS_EAGER": "true",
+        **local_mode_overrides(),
     })
     package_paths = [str(BACKEND_PACKAGES)]
     if env.get("PYTHONPATH"):

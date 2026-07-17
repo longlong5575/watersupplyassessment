@@ -4608,7 +4608,7 @@
     {
       "type": "paragraph",
       "style": "",
-      "text": "当月平均进水COD浓度CB＜140mg/L时，，CB =COD进水浓度（CB）-COD出水浓度（CD），CD最低值为30 mg/L，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
+      "text": "当月平均进水COD浓度CB＜140mg/L时，Kq=（CB-CD）/90，其中CB为COD进水浓度，CD为COD出水浓度；CD最低按30 mg/L计，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
     },
     {
       "type": "paragraph",
@@ -4678,7 +4678,7 @@
     {
       "type": "paragraph",
       "style": "",
-      "text": "当月平均进水COD浓度CB＜140mg/L时，，，CD最低值为30 mg/L ，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
+      "text": "当月平均进水COD浓度CB＜140mg/L时，Kq=（CB-CD）/90，其中CB为COD进水浓度，CD为COD出水浓度；CD最低按30 mg/L计，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
     },
     {
       "type": "paragraph",
@@ -4892,7 +4892,7 @@
     {
       "type": "paragraph",
       "style": "",
-      "text": "注：当月平均进水COD浓度CB＜140mg/L时，，，CD最低值为30 mg/L ，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
+      "text": "注：当月平均进水COD浓度CB＜140mg/L时，Kq=（CB-CD）/90，其中CB为COD进水浓度，CD为COD出水浓度；CD最低按30 mg/L计，Kq最大取值1.0；140mg/L≤CB＜200mg/L时，Kq=1.0；200mg/L≤CB＜250mg/L时，Kq=1.05；CB在250mg/L以上，Kq=1.1。"
     },
     {
       "type": "paragraph",

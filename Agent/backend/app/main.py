@@ -31,7 +31,7 @@ app.include_router(uploads.router)
 
 @app.on_event("startup")
 def startup() -> None:
-    if settings.app_env == "local":
+    if settings.app_env != "production":
         Base.metadata.create_all(bind=engine)
         ensure_local_schema()
     with SessionLocal() as session:

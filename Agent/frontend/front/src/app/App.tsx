@@ -69,6 +69,29 @@ async function discoverApiBaseUrl(): Promise<string> {
 }
 const AUTH_STORAGE_KEY = "assessment-auth-v1";
 
+function readStoredAuth<T>(): T | null {
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      const value = JSON.parse(storage.getItem(AUTH_STORAGE_KEY) || "null") as T | null;
+      if (value) return value;
+    } catch {
+      storage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }
+  return null;
+}
+
+function saveStoredAuth(auth: unknown, remember: boolean): void {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  (remember ? localStorage : sessionStorage).setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+}
+
+function clearStoredAuth(): void {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type Page =
@@ -201,12 +224,8 @@ type AuthState = {
 };
 
 function authHeaders(): HeadersInit {
-  try {
-    const auth = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null") as AuthState | null;
-    return auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
-  } catch {
-    return {};
-  }
+  const auth = readStoredAuth<AuthState>();
+  return auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -898,6 +917,7 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(true);
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -917,7 +937,7 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
         throw new Error(typeof detail?.detail === "string" ? detail.detail : "登录失败，请稍后重试");
       }
       const auth = await response.json();
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+      saveStoredAuth(auth, rememberLogin);
       onLogin(auth);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
@@ -954,6 +974,18 @@ function LoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
           style={{ background: "var(--input-background)" }}
           autoComplete="current-password"
         />
+        <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={rememberLogin}
+            onChange={event => setRememberLogin(event.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-primary"
+          />
+          <span>
+            <span className="block font-medium">自动登录</span>
+            <span className="block text-xs text-muted-foreground">下次打开时直接进入当前账号</span>
+          </span>
+        </label>
         {error && <p className="mt-2 text-xs text-[var(--status-error)]">{error}</p>}
         <button
           onClick={submit}
@@ -4500,11 +4532,7 @@ function MobileDataPage({ onNav, cities, projectId, setProjectId, setSelectedTow
 
 function AssessmentApp() {
   const [auth, setAuth] = useState<AuthState | null>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
-    } catch {
-      return null;
-    }
+    return readStoredAuth<AuthState>();
   });
   const [page, setPage] = useState<Page>("home");
   const [detailTown, setDetailTown] = useState<TownSurvey | null>(null);
@@ -4545,7 +4573,7 @@ function AssessmentApp() {
       })
       .then(nextAuth => {
         if (cancelled || !nextAuth?.token) return;
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+        saveStoredAuth(nextAuth, false);
         setAuth(nextAuth);
       })
       .catch(() => undefined)
@@ -4561,7 +4589,7 @@ function AssessmentApp() {
     fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
       .then(response => {
         if (!cancelled && response.status === 401) {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+          clearStoredAuth();
           setAuth(null);
         }
       })
@@ -4756,7 +4784,7 @@ function AssessmentApp() {
         />
       );
       case "history": return <HistoryPage onNav={setPage} reports={historyReports} onPreviewReport={setPreviewReport} />;
-      case "account": return <AccountSecurityPage auth={auth!} onLogout={() => { localStorage.removeItem(AUTH_STORAGE_KEY); setAuth(null); setPage("home"); }} />;
+      case "account": return <AccountSecurityPage auth={auth!} onLogout={() => { clearStoredAuth(); setAuth(null); setPage("home"); }} />;
     }
   }
 
@@ -4773,7 +4801,7 @@ function AssessmentApp() {
         onNav={navigate}
         user={auth.user}
         onLogout={() => {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+          clearStoredAuth();
           setAuth(null);
           setPage("home");
         }}

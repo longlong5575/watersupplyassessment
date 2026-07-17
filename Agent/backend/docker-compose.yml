@@ -2,7 +2,8 @@ services:
   api:
     build: .
     environment: &backend_environment
-      APP_ENV: ${APP_ENV:-local}
+      APP_ENV: ${APP_ENV:-production}
+      LOCAL_AUTO_LOGIN: "false"
       DATABASE_URL: postgresql+psycopg://assessment:${POSTGRES_PASSWORD:-assessment-local-password}@postgres:5432/assessment
       REDIS_URL: redis://redis:6379/0
       STORAGE_DIR: /data/storage

@@ -47,13 +47,33 @@ async function discoverApiBaseUrl(): Promise<string> {
 const DRAFT_STORAGE_KEY = "assessment-mobile-draft-v1";
 const SUBMITTED_STORAGE_KEY = "assessment-mobile-submitted-v1";
 const AUTH_STORAGE_KEY = "assessment-mobile-auth-v1";
-function authHeaders(): HeadersInit {
-  try {
-    const auth = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null") as { token?: string } | null;
-    return auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
-  } catch {
-    return {};
+
+function readStoredAuth<T>(): T | null {
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      const value = JSON.parse(storage.getItem(AUTH_STORAGE_KEY) || "null") as T | null;
+      if (value) return value;
+    } catch {
+      storage.removeItem(AUTH_STORAGE_KEY);
+    }
   }
+  return null;
+}
+
+function saveStoredAuth(auth: unknown, remember: boolean): void {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  (remember ? localStorage : sessionStorage).setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+}
+
+function clearStoredAuth(): void {
+  localStorage.removeItem(AUTH_STORAGE_KEY);
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+}
+
+function authHeaders(): HeadersInit {
+  const auth = readStoredAuth<{ token?: string }>();
+  return auth?.token ? { Authorization: `Bearer ${auth.token}` } : {};
 }
 const SYNC_QUEUE_STORAGE_KEY = "assessment-mobile-sync-queue-v1";
 
@@ -813,6 +833,7 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(true);
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -832,7 +853,7 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
         throw new Error(typeof detail?.detail === "string" ? detail.detail : "登录失败，请稍后重试");
       }
       const auth = await response.json();
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+      saveStoredAuth(auth, rememberLogin);
       onLogin(auth);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "登录失败，请稍后重试");
@@ -869,6 +890,18 @@ function MobileLoginPage({ onLogin }: { onLogin: (auth: AuthState) => void }) {
           className="w-full px-3 py-3 bg-white border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
           autoComplete="current-password"
         />
+        <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={rememberLogin}
+            onChange={event => setRememberLogin(event.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-primary"
+          />
+          <span>
+            <span className="block font-medium">自动登录</span>
+            <span className="block text-xs text-muted-foreground">下次打开时直接进入当前账号</span>
+          </span>
+        </label>
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
       <div className="px-4 pb-10 pt-3 border-t border-border bg-white shrink-0">
@@ -3812,11 +3845,7 @@ type Page = "portal" | "knowledge" | "city" | "cycle" | "town" | "village" | "fa
 
 function AssessmentApp() {
   const [auth, setAuth] = useState<AuthState | null>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
-    } catch {
-      return null;
-    }
+    return readStoredAuth<AuthState>();
   });
   const [page, setPage] = useState<Page>("portal");
   const [city, setCity] = useState("");
@@ -3872,7 +3901,7 @@ function AssessmentApp() {
       })
       .then(nextAuth => {
         if (cancelled || !nextAuth?.token) return;
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+        saveStoredAuth(nextAuth, false);
         setAuth(nextAuth);
       })
       .catch(() => undefined)
@@ -3888,7 +3917,7 @@ function AssessmentApp() {
     fetch(`${API_BASE_URL}/auth/me`, { headers: { Authorization: `Bearer ${auth.token}` } })
       .then(response => {
         if (!cancelled && response.status === 401) {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+          clearStoredAuth();
           setAuth(null);
         }
       })
@@ -4178,7 +4207,7 @@ function AssessmentApp() {
         markPackageSynced(syncedPackage);
       } catch (error) {
         if (error instanceof Error && error.message.includes("401")) {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+          clearStoredAuth();
           setAuth(null);
           setSubmitError("登录状态已失效，请重新登录后继续同步。");
           break;
